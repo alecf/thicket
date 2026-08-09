@@ -89,6 +89,16 @@ describe("golden report", () => {
     expect(warm.markdown).toBe(golden);
   });
 
+  it("is the report the README claims it is", async () => {
+    // The README prints this report and says "prints exactly this". That claim
+    // rots the first time the format changes, and a tool whose entire thesis
+    // is deterministic output cannot afford documentation that lies about it.
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    const example = readme.match(/```\n(# thicket report\n[\s\S]*?)```/);
+    expect(example).not.toBeNull();
+    expect(example![1]).toBe(readFileSync(GOLDEN, "utf8"));
+  });
+
   it("holds the golden file to the invariants the report claims", async () => {
     // Guards against a regenerated golden pinning output that is merely
     // stable. Each of these is a property the report is supposed to have, so
