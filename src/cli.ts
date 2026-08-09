@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
@@ -62,7 +63,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
-  const configs = (values.config ?? ["./tsconfig.json"]).map((c) => resolve(c));
+  const raw = values.config ?? ["./tsconfig.json"];
+  // `resolve("")` is the cwd, which exists, so an empty --config would slip
+  // past the existence check and analyze a directory as if it were a config.
+  if (raw.some((c) => c.trim() === "")) {
+    process.stderr.write(`thicket: --config must name a tsconfig, got an empty string\n`);
+    return 1;
+  }
+  const configs = raw.map((c) => resolve(c));
   const missing = configs.filter((c) => !existsSync(c));
   if (missing.length > 0) {
     process.stderr.write(`thicket: no such tsconfig: ${missing.join(", ")}\n`);
@@ -135,5 +143,9 @@ function parseGranularity(raw: string | undefined): "auto" | "file" | number | u
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
-const code = await main(process.argv.slice(2));
-process.exitCode = code;
+// Only run when invoked as the program. Without the guard, importing this
+// module -- which a test of `main` must do -- executes a full analysis of the
+// cwd as a side effect of the import.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = await main(process.argv.slice(2));
+}

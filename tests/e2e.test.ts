@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
-import { fixtureConfig } from "./helpers.js";
+import { emptyConfig, fixtureConfig } from "./helpers.js";
 
 describe("runReport", () => {
   it("produces a report naming the fixture's known duplication", async () => {
@@ -64,6 +64,26 @@ describe("runReport", () => {
         expect(cycle.modules).toContain(cut.to);
       }
     }
+  });
+
+  it("throws rather than reporting an empty codebase as clean", async () => {
+    // "0 files / 0 LOC ... 0 findings" is indistinguishable, to a harness,
+    // from a codebase with nothing wrong with it. It must be an error.
+    await expect(runReport({ config: emptyConfig(), minNodes: 15 })).rejects.toThrow(
+      /no source files/i,
+    );
+  });
+
+  it("names the config it tried in the empty-project error", async () => {
+    await expect(runReport({ config: emptyConfig(), minNodes: 15 })).rejects.toThrow(
+      /fixtures\/empty\/tsconfig\.json/,
+    );
+  });
+
+  it("suggests the likely causes of an empty project", async () => {
+    await expect(runReport({ config: emptyConfig(), minNodes: 15 })).rejects.toThrow(
+      /references|include/i,
+    );
   });
 
   it("caps findings per section without changing the stated total", async () => {

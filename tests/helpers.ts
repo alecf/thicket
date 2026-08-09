@@ -46,6 +46,16 @@ export function solutionLeafConfigs(): string[] {
   ];
 }
 
+/**
+ * A config whose `include` matches nothing — there is no `src/` beside it.
+ * Stands in for every way a run can end up with no input (wrong path, empty
+ * include, unresolvable references), all of which must fail loudly rather
+ * than emit a clean-looking report over nothing.
+ */
+export function emptyConfig(): string {
+  return resolve(here, "fixtures/empty/tsconfig.json");
+}
+
 export function monorepoRoot(): string {
   return resolve(here, "fixtures/monorepo");
 }

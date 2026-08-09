@@ -47,6 +47,28 @@ export interface ReportJson {
   shownInMarkdown: number;
 }
 
+/**
+ * Raised instead of emitting a report over nothing.
+ *
+ * "0 files / 0 LOC ... 0 findings" is a well-formed report, and a harness
+ * reading it concludes the codebase is clean. There is no way for the reader
+ * to tell that apart from a genuinely clean tree, which makes the empty
+ * report the worst output this tool can produce -- worse than a crash. The
+ * message names the configs and the three ways a run actually ends up here,
+ * because the caller is usually automated and gets one line to act on.
+ */
+export class EmptyProjectError extends Error {
+  constructor(readonly configs: string | readonly string[]) {
+    const list = (Array.isArray(configs) ? configs : [configs]).join(", ");
+    super(
+      `no source files to analyze from: ${list} — ` +
+        `a solution-style config whose "references" do not resolve, a wrong ` +
+        `--config path, or an "include" that matches nothing.`,
+    );
+    this.name = "EmptyProjectError";
+  }
+}
+
 const DEFAULT_MIN_NODES = 15;
 const DEFAULT_MAX_FINDINGS = 40;
 
@@ -76,6 +98,7 @@ export async function runReport(
   const project = await openProject(opts.config);
   try {
     const files = project.files();
+    if (files.length === 0) throw new EmptyProjectError(opts.config);
     let lineCount = 0;
     let totalNodes = 0;
     for (const file of files) {
