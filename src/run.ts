@@ -1,10 +1,10 @@
-import { walk } from "./extract/traverse.js";
 import { openProject } from "./extract/ts-adapter.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
 import { hash, initHash } from "./hash.js";
 import { compareStrings } from "./order.js";
+import { redundantByteFraction } from "./report/coverage.js";
 import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
@@ -110,12 +110,12 @@ export async function runReport(
     const files = project.files();
     if (files.length === 0) throw new EmptyProjectError(opts.config);
     let lineCount = 0;
-    let totalNodes = 0;
+    let totalBytes = 0;
     for (const file of files) {
       lineCount += file.sourceFile.text.split("\n").length;
-      walk(file.sourceFile, () => {
-        totalNodes++;
-      });
+      // The denominator of the coverage metric. Measured in the same UTF-16
+      // code units as the occurrence offsets it will be divided into.
+      totalBytes += file.sourceFile.text.length;
     }
 
     const graph = buildModuleGraph(project, { granularity });
@@ -152,7 +152,10 @@ export async function runReport(
       moduleCount: graph.modules.length,
       metrics: {
         duplicatedMass,
-        duplicatedPct: totalNodes === 0 ? 0 : (duplicatedMass / totalNodes) * 100,
+        redundantByteFraction: redundantByteFraction(
+          ranked.map((r) => r.cluster),
+          totalBytes,
+        ),
         propagationCost: propagationCost(graph.modules, graph.adjacency),
         cycleCount: cycles.length,
         largestScc: components.reduce((max, c) => Math.max(max, c.length), 0),

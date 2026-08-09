@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
-import { emptyConfig, fixtureConfig } from "./helpers.js";
+import { emptyConfig, fixtureConfig, importsFixtureConfig } from "./helpers.js";
 
 describe("runReport", () => {
   it("produces a report naming the fixture's known duplication", async () => {
@@ -64,6 +64,29 @@ describe("runReport", () => {
         expect(cycle.modules).toContain(cut.to);
       }
     }
+  });
+
+  it("reports duplicated coverage as a fraction in [0, 1]", async () => {
+    // The old node-mass percentage double counted nested clusters and could
+    // print above 100%, which made the headline metric meaningless.
+    for (const config of [fixtureConfig(), importsFixtureConfig()]) {
+      for (const minNodes of [5, 15]) {
+        const { json } = await runReport({ config, minNodes });
+        const fraction = json.metrics.redundantByteFraction;
+        expect(fraction).toBeGreaterThanOrEqual(0);
+        expect(fraction).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("keeps the node mass and the byte coverage labelled apart", async () => {
+    const { markdown, json } = await runReport({ config: fixtureConfig(), minNodes: 5 });
+    expect(markdown).toContain("duplicated mass");
+    expect(markdown).toContain("duplicated coverage");
+    // The two must not be confusable: mass is a node count, coverage a percent.
+    expect(markdown).toMatch(/duplicated mass\s+\d+ redundant nodes/);
+    expect(markdown).toMatch(/duplicated coverage\s+\d+\.\d% of source bytes/);
+    expect(json.metrics.duplicatedMass).toBeGreaterThan(1);
   });
 
   it("throws rather than reporting an empty codebase as clean", async () => {

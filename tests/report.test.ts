@@ -63,7 +63,7 @@ const base: ReportInput = {
   moduleCount: 2,
   metrics: {
     duplicatedMass: 100,
-    duplicatedPct: 5,
+    redundantByteFraction: 0.05,
     propagationCost: 0.5,
     cycleCount: 1,
     largestScc: 2,

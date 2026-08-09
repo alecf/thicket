@@ -16,8 +16,15 @@ export interface ReportInput {
   granularity: string;
   moduleCount: number;
   metrics: {
+    /**
+     * Σ nodeCount × (copies − 1) over the reported clusters. Clusters overlap,
+     * so this double counts and is NOT a fraction of anything — it is a trend
+     * number. The coverage figure below is the one that means "how much of the
+     * codebase is redundant".
+     */
     duplicatedMass: number;
-    duplicatedPct: number;
+    /** Fraction in [0, 1] of source bytes covered by a redundant occurrence. */
+    redundantByteFraction: number;
     propagationCost: number;
     cycleCount: number;
     largestScc: number;
@@ -121,7 +128,8 @@ function headerLines(input: ReportInput, shown: number): string[] {
       `granularity: ${input.granularity} (${input.moduleCount} modules)`,
     "",
     "## Summary",
-    `  duplicated mass      ${input.metrics.duplicatedMass} nodes (${input.metrics.duplicatedPct.toFixed(1)}%)`,
+    `  duplicated mass      ${input.metrics.duplicatedMass} redundant nodes (overlapping; trend only)`,
+    `  duplicated coverage  ${(input.metrics.redundantByteFraction * 100).toFixed(1)}% of source bytes`,
     `  propagation cost     ${input.metrics.propagationCost.toFixed(2)}`,
     `  dependency cycles    ${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules)`,
     `  findings             ${shown} of ${input.totalFindings} shown`,
