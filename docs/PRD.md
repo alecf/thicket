@@ -78,7 +78,7 @@ Pipeline stages remain separable, so a hot stage can be relocated later if profi
 
 ### 2.4 API hazards discovered by running the code
 
-Each of these silently produced *plausible but wrong* output rather than an error. They must be sealed inside the adapter (§4.1).
+Each of these silently produced *plausible but wrong* output rather than an error. They must be sealed inside the adapter (§4.1). The last two were found during implementation rather than prototyping.
 
 | Hazard | Symptom | Correct handling |
 |---|---|---|
@@ -86,6 +86,8 @@ Each of these silently produced *plausible but wrong* output rather than an erro
 | **`Path` is case-canonicalized** (lowercased); `getSourceFileNames()` preserves original casing | Comparing them yields **zero** resolved import edges | Compare through a normalized key |
 | **Monorepo files belong to N projects** | `packages/shared` analyzed 3×, appearing as phantom triplicate clones | Unit of analysis is the file's **content hash**, not `(project, file)` |
 | **Directory depth collapses in monorepos** | Every path starts `packages/`, so depth-1 grouping yields one module | Strip the longest common directory prefix first |
+| **`SyntaxKind` reverse lookup returns range-marker aliases** | `SyntaxKind[SyntaxKind.NumericLiteral]` is `"FirstLiteralToken"`, not `"NumericLiteral"`; `VariableStatement` → `"FirstStatement"` | Match kinds by **enum value**, never by reverse-mapped name |
+| **A foreign project's checker throws on an unowned node** | It does not return `undefined`; a blanket `catch` turns the bug into "this repo has no imports" | Query each file through the checker of the project that owns it |
 
 **Module resolution** works cleanly once the casing hazard is handled: `checker.getSymbolAtLocation(moduleSpecifier)` returns the module symbol, whose `declarations[0].path` is the resolved absolute path — correctly handling path aliases, package boundaries, and extensionless specifiers.
 
@@ -104,7 +106,11 @@ Measured on Sample A, fragments ≥15 nodes:
 
 Two normalization requirements, both found by getting them wrong first:
 
-- **α-renaming must be fragment-local.** Indexing bindings per *file* made L1 report *fewer* clusters than L0 (116 vs 121) — impossible for a proper generalization — because identical fragments received different indices depending on preceding code.
+- **α-renaming must be fragment-local.** Indexing bindings per *file* gives two identical fragments different indices depending on what preceded them in their file, so L1 *splits* clusters that L0 united.
+
+  The correct invariant is **L0-equal ⟹ L1-equal**: identical L0 token streams must yield identical L1 token streams, so no L0 cluster may straddle two L1 clusters. Splitting is impossible for any true coarsening, and the per-file bug violates it on every cluster.
+
+  A cluster *count* comparison does **not** detect this, and an earlier draft of this document had it backwards. Coarsening merges equivalence classes, and merging two classes of size ≥ 2 into one *lowers* the cluster count while strictly generalizing — `const dx = p.x - ORIGIN.x` and `const dy = p.y - ORIGIN.y` are two L0 clusters and one L1 cluster. Measured on the fixture at `minNodes 10`: correct code gives L0=17, L1=15, 0 splits; the buggy version gives L0=17, L1=18, 17 splits. "L1 never reports fewer clusters than L0" therefore *fails on correct code and passes on the bug*.
 - **Fuzzy matching must exclude ancestor–descendant pairs.** L3's top "clones" were a 2,463-node block against its own 2,469-node parent at ~0.99 similarity. Filtering nesting removed **9,926 of 12,891 candidate pairs (77%)**. Exact hashing is immune; fuzzy matching is not.
 
 ### 2.6 Coarse module granularity has no signal

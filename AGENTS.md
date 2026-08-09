@@ -61,6 +61,8 @@ These produced plausible-but-wrong output rather than errors, which is what make
 | `Path` is case-canonicalized; `getSourceFileNames()` is not | **Zero** import edges resolve, which reads as "this repo has no imports" |
 | A file in N tsconfig projects is visited N times | Shared packages appear as phantom identical clones |
 | Directory depth collapses in monorepos | Every path starts `packages/`, so depth-1 grouping yields one module |
+| `SyntaxKind[k]` returns range-marker aliases | `NumericLiteral` reverse-maps to `"FirstLiteralToken"`, `VariableStatement` to `"FirstStatement"` — so matching on kind *names* silently misses cases. Match by enum value. |
+| A foreign project's checker throws on an unowned node | Not `undefined` — a blanket `catch` turns it into "this repo has no imports" |
 
 A fifth, in fuzzy matching: a fragment and its own ancestor overlap at ~0.99 similarity and are **not** duplication. Exact hashing is immune; MinHash is not.
 
