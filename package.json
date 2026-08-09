@@ -1,0 +1,21 @@
+{
+  "name": "thicket",
+  "version": "0.1.0",
+  "description": "Deterministic complexity reports for TypeScript codebases",
+  "type": "module",
+  "bin": { "thicket": "./dist/cli.js" },
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "typescript": "7.1.0-dev.20260808.1",
+    "xxhash-wasm": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "vitest": "^3.0.0"
+  }
+}
