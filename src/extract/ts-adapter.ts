@@ -1,14 +1,28 @@
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/sync";
 import { hash, initHash } from "../hash.js";
 import { compareStrings } from "../order.js";
-import type { FileHandle, SourceFileNode } from "./types.js";
+import { forEachChildSafe, walk } from "./traverse.js";
+import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 
 /** The subset of the checker we depend on. Kept structural on purpose. */
 interface Checker {
   getSymbolAtLocation(node: unknown): { declarations?: readonly { path?: string }[] } | undefined;
+}
+
+/** One resolved import target and how many distinct names it binds. */
+export interface ImportDetail {
+  /** Repo-relative POSIX path of the imported file. */
+  target: string;
+  /**
+   * Distinct bindings introduced from `target`, summed over every import of
+   * it in the importing file. Zero for a side-effect (`import "./x.js"`) or
+   * dynamic import, which bind no names but are still real dependencies.
+   */
+  symbols: number;
 }
 
 export interface Project {
@@ -18,7 +32,75 @@ export interface Project {
   getSourceFile(relPath: string): SourceFileNode | undefined;
   resolveImport(from: FileHandle, specifier: unknown): string | undefined;
   importsOf(file: FileHandle): string[];
+  importDetailsOf(file: FileHandle): ImportDetail[];
   close(): void;
+}
+
+/**
+ * Distinct names an import/export declaration binds from its module.
+ *
+ * This is the edge weight of the module graph (PRD §7.2): pulling one constant
+ * out of a module is not the same dependency as pulling thirty, and counting
+ * *declarations* instead would make almost every weight 1.
+ *
+ * Kinds are matched by enum VALUE. `SyntaxKind[k]` reverse-maps to range-marker
+ * aliases for several kinds, so name matching silently misses cases.
+ */
+function bindingCount(decl: Node): number {
+  let count = 0;
+  let named = false;
+  forEachChildSafe(decl, (child) => {
+    if (child.kind === SyntaxKind.ImportClause) {
+      named = true;
+      // `import d, * as ns from` / `import d, { a, b } from`. The `type` of a
+      // type-only clause is a flag, not a child, so type-only imports count
+      // exactly like value imports — they are still coupling.
+      forEachChildSafe(child, (binding) => {
+        if (binding.kind === SyntaxKind.Identifier) count += 1; // default import
+        else if (binding.kind === SyntaxKind.NamespaceImport) count += 1; // * as ns
+        else if (binding.kind === SyntaxKind.NamedImports) {
+          forEachChildSafe(binding, (spec) => {
+            if (spec.kind === SyntaxKind.ImportSpecifier) count += 1;
+          });
+        }
+      });
+    } else if (child.kind === SyntaxKind.NamedExports) {
+      // `export { a, b } from "./x.js"` — a re-export is an import too.
+      named = true;
+      forEachChildSafe(child, (spec) => {
+        if (spec.kind === SyntaxKind.ExportSpecifier) count += 1;
+      });
+    } else if (child.kind === SyntaxKind.NamespaceExport) {
+      named = true;
+      count += 1; // `export * as ns from "./x.js"`
+    }
+  });
+  // `export * from "./x.js"` names nothing, yet pulls in the whole module
+  // surface; count it like a namespace import. A side-effect `import "./x.js"`
+  // is the other clause-less form and correctly stays at 0.
+  if (!named && decl.kind === SyntaxKind.ExportDeclaration) count = 1;
+  return count;
+}
+
+/**
+ * Module specifier node -> binding count, for every import/export declaration
+ * in the file. Keyed by node identity: the specifier nodes reachable by
+ * traversal are the same objects `sourceFile.imports` holds, so the map can be
+ * consulted while iterating that array — which stays the single source of
+ * truth for which specifiers exist.
+ */
+function bindingCountsBySpecifier(sourceFile: SourceFileNode): Map<Node, number> {
+  const out = new Map<Node, number>();
+  walk(sourceFile, (node) => {
+    if (node.kind !== SyntaxKind.ImportDeclaration && node.kind !== SyntaxKind.ExportDeclaration) {
+      return;
+    }
+    const count = bindingCount(node);
+    forEachChildSafe(node, (child) => {
+      if (child.kind === SyntaxKind.StringLiteral) out.set(child, count);
+    });
+  });
+  return out;
 }
 
 /**
@@ -110,19 +192,30 @@ export async function openProject(configs: string | string[]): Promise<Project> 
     return byCanon.get(path.toLowerCase())?.path;
   }
 
+  function importDetailsOf(file: FileHandle): ImportDetail[] {
+    const counts = bindingCountsBySpecifier(file.sourceFile);
+    const symbolsByTarget = new Map<string, number>();
+    for (const specifier of file.sourceFile.imports ?? []) {
+      const target = resolveImport(file, specifier);
+      if (!target || target === file.path) continue;
+      // A specifier with no entry is a dynamic `import()` or a `require()`:
+      // a real dependency that binds no names statically.
+      const symbols = counts.get(specifier as Node) ?? 0;
+      symbolsByTarget.set(target, (symbolsByTarget.get(target) ?? 0) + symbols);
+    }
+    return [...symbolsByTarget.entries()]
+      .map(([target, symbols]) => ({ target, symbols }))
+      .sort((a, b) => compareStrings(a.target, b.target));
+  }
+
   return {
     root,
     files: () => files,
     getSourceFile: (relPath) => byRel.get(relPath)?.sourceFile,
     resolveImport,
-    importsOf(file: FileHandle): string[] {
-      const out = new Set<string>();
-      for (const specifier of file.sourceFile.imports ?? []) {
-        const target = resolveImport(file, specifier);
-        if (target && target !== file.path) out.add(target);
-      }
-      return [...out].sort(compareStrings);
-    },
+    importDetailsOf,
+    /** Resolved import targets, deduped and sorted. Weights live in `importDetailsOf`. */
+    importsOf: (file: FileHandle) => importDetailsOf(file).map((d) => d.target),
     close: () => api.close(),
   };
 }

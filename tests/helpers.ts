@@ -16,6 +16,16 @@ export function fixtureConfig(): string {
  * multi-project code paths — the API dedupes `openProjects` by path and hands
  * back a single project. Only genuinely distinct configs do.
  */
+/**
+ * A third fixture holding one of every import form that carries a distinct
+ * binding count — default, named, namespace, type-only, side-effect,
+ * re-export, dynamic. Edge weight is a count of distinct imported symbols, so
+ * each of those forms is a separate way to get the weight silently wrong.
+ */
+export function importsFixtureConfig(): string {
+  return resolve(here, "fixtures/imports/tsconfig.json");
+}
+
 export function monorepoRoot(): string {
   return resolve(here, "fixtures/monorepo");
 }
