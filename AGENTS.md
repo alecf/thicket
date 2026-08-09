@@ -93,6 +93,8 @@ Analysis and benchmarking happen against real private repositories. **Do not nam
 
 ## Working style
 
+- **A test that passes when you delete the feature is worse than no test** — it reports safety that isn't there. This bit us repeatedly: a dedup test whose input the API silently deduped for us, an edge-weight test asserting only `weight > 0`, a loop over a set that was always empty, and a casing guard protected only because this checkout lives under `/Users`. Prefer asserting a **specific expected value** over a property that holds trivially (`> 0`, `length > 0`, a loop over a possibly-empty collection). When you add a guard, delete it once and watch the test fail.
+- **Assert on the data structure, not the rendered report.** The report is truncated to the top findings and will happily hide a bug that drops 6% of fragments. Cache and clustering changes must be verified against cluster lists.
 - **TDD.** Write the failing test, run it and watch it fail for the right reason, then implement. Several bugs in the prototypes were caught only because an invariant was asserted (e.g. "L1 never produces fewer clusters than L0" — a property that held mathematically and failed in practice, which is how the α-renaming scope bug surfaced).
 - **Commit at each completed task**, and push. Progress should be visible from the commit log alone.
 - Conventional commit prefixes: `feat:`, `fix:`, `test:`, `chore:`, `docs:`, `refactor:`.
