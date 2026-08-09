@@ -41,6 +41,7 @@ Node ≥24 is required — the cache uses the built-in `node:sqlite`.
 The report must be a pure function of `(source content, config, thicket version)`. Two runs over the same tree must produce byte-identical output, because the whole point is diffing reports across loop iterations.
 
 - Sort every collection before emitting; break ties explicitly (`score desc, id asc`).
+- **Never use `localeCompare`.** Sort strings with `compareStrings` from `src/order.ts`. `localeCompare` depends on the host's ICU data and `LANG`/`LC_ALL`, and it disagrees with code-unit order on inputs we handle constantly — under `en-US`, `"src/Util.ts"` sorts *after* `"src/alpha.ts"` because collation folds case. Any repo with a capitalized filename hits this on the first sort, and two machines then emit differently-ordered reports from identical source.
 - Never rely on `Map`/`Set` iteration order reflecting anything meaningful.
 - Fixed hash seeds. No `Math.random()`, no timestamps, no absolute paths, no wall-clock durations anywhere in the diffable body.
 - Paths are POSIX-normalized and repo-relative.

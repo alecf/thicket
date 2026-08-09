@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { API } from "typescript/unstable/sync";
 import { hash, initHash } from "../hash.js";
+import { compareStrings } from "../order.js";
 import type { FileHandle, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
@@ -90,7 +91,7 @@ export async function openProject(configs: string | string[]): Promise<Project> 
     }
   }
 
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  files.sort((a, b) => compareStrings(a.path, b.path));
 
   function resolveImport(from: FileHandle, specifier: unknown): string | undefined {
     const checker = checkerOf.get(from.absPath);
@@ -120,7 +121,7 @@ export async function openProject(configs: string | string[]): Promise<Project> 
         const target = resolveImport(file, specifier);
         if (target && target !== file.path) out.add(target);
       }
-      return [...out].sort();
+      return [...out].sort(compareStrings);
     },
     close: () => api.close(),
   };
