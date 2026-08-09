@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { openProject } from "../src/extract/ts-adapter.js";
-import { fixtureConfig, importsFixtureConfig, monorepoConfigs } from "./helpers.js";
+import { fixtureConfig, fixtureRoot, importsFixtureConfig, monorepoConfigs } from "./helpers.js";
 
 describe("import resolution", () => {
   it("resolves relative specifiers to repo-relative paths", async () => {
@@ -38,6 +41,58 @@ describe("import resolution", () => {
       expect(project.importsOf(f)).toEqual(["shared/src/util.ts"]);
     }
   });
+
+  it("resolves imports under a path containing uppercase characters", async () => {
+    // The case-canonicalization guard is INERT when the whole absolute path is
+    // already lowercase: the checker lowercases its Path, getSourceFileNames()
+    // does not, and if the two strings are equal anyway the missing
+    // .toLowerCase() changes nothing.
+    //
+    // Every other test here therefore protects the guard only by accident of
+    // where the repository happens to live. Verified: with the guard removed,
+    // this suite fails 13 tests from a checkout under `/Users/...` and passes
+    // completely from an all-lowercase path -- which is exactly what a Linux CI
+    // runner (`/home/runner/work/...`) provides.
+    //
+    // Copying into a deliberately mixed-case directory makes the casing a
+    // property of the fixture instead of the host, so the guard is load-bearing
+    // on every platform.
+    const project = await openProject(join(mixedCaseRoot, "tsconfig.json"));
+    const alpha = project.files().find((f) => f.path === "src/alpha.ts")!;
+    expect(project.importsOf(alpha)).toEqual(["src/gamma.ts", "src/util/shared.ts"]);
+  });
+
+  it("throws rather than reporting zero imports for a file no project owns", async () => {
+    // Loudness IS the guard. Returning undefined here would make an unowned
+    // file look like a file with no imports -- indistinguishable from a clean
+    // result, which is the failure mode this adapter exists to prevent.
+    const project = await openProject(fixtureConfig());
+    const real = project.files().find((f) => f.path === "src/alpha.ts")!;
+    const ghost = { ...real, absPath: "/nowhere/ghost.ts" };
+    const specifier = real.sourceFile.imports[0]!;
+    expect(() => project.resolveImport(ghost, specifier)).toThrow(
+      /belongs to no opened project/,
+    );
+  });
+});
+
+/**
+ * The sample fixture copied under a directory whose name contains uppercase
+ * letters, so path-casing behaviour is exercised independently of where the
+ * repository is checked out.
+ */
+const mixedCaseRoot = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "thicket-Case-"));
+  const dest = join(dir, "Sample-Project");
+  cpSync(fixtureRoot(), dest, {
+    recursive: true,
+    filter: (src) => !src.includes(".thicket"),
+  });
+  return resolve(dest);
+})();
+
+afterAll(() => {
+  rmSync(resolve(mixedCaseRoot, ".."), { recursive: true, force: true });
 });
 
 describe("importDetailsOf", () => {
