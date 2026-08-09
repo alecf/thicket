@@ -1,6 +1,8 @@
 import xxhash from "xxhash-wasm";
 
-let h64: ((input: string, seed?: bigint) => string) | undefined;
+// Declared without a seed parameter: the closure below ignores one, so a
+// wider type would let a caller pass a seed and have it silently dropped.
+let h64: ((input: string) => string) | undefined;
 
 /** Must be awaited once at startup before any hash() call. */
 export async function initHash(): Promise<void> {

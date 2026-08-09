@@ -1,0 +1,14 @@
+{
+  // Nothing else typechecks tests/: the root config compiles src only, and
+  // vitest transpiles without checking, so a type error in a test would
+  // surface as a runtime failure or not at all. `npm run typecheck` closes it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // tests/fixtures/** is analysis input, not project code — one fixture is a
+  // deliberate import cycle and another is a two-project monorepo.
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["tests/fixtures/**"]
+}
