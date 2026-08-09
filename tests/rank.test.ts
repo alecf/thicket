@@ -19,6 +19,68 @@ const cluster = (over: Partial<Cluster>): Cluster => ({
   ...over,
 });
 
+describe("rankClusters: intra-file repetition", () => {
+  // Reproduces the real-repository case that motivated the copy cap. A config
+  // data table is not extractable; a function duplicated across route files is.
+  const dataTable = cluster({
+    id: "table",
+    level: "L1",
+    kind: "PropertyAssignment",
+    nodeCount: 21,
+    occurrences: Array.from({ length: 99 }, (_, i) => occ("src/config.ts", i * 100, i * 100 + 90, i + 1)),
+    mass: 21 * 98,
+  });
+  const sharedFn = cluster({
+    id: "fn",
+    level: "L1",
+    kind: "FunctionDeclaration",
+    nodeCount: 109,
+    occurrences: Array.from({ length: 8 }, (_, i) => occ(`src/routes/r${i}.tsx`, 0, 500, 10)),
+    mass: 109 * 7,
+  });
+
+  it("ranks a cross-file duplicated function above a large intra-file data table", () => {
+    // Raw mass endorses the table (2058 deletable nodes vs 763), so this only
+    // holds because repetition within one file is capped.
+    const ranked = rankClusters([dataTable, sharedFn]);
+    expect(ranked[0]!.cluster.id).toBe("fn");
+  });
+
+  it("still scores intra-file duplication above zero rather than excluding it", () => {
+    // Intra-file is 70-84% of all candidates; suppressing it entirely would
+    // empty the report of repeated handlers and markup. PRD §5.4 ranks it
+    // lowest, not out.
+    expect(rankClusters([dataTable])[0]!.score).toBeGreaterThan(0);
+  });
+
+  it("does not cap repetition that is spread across many files", () => {
+    // 20 copies over 20 files is under the 10-per-file ceiling, so raising the
+    // count must still raise the score.
+    const twenty = cluster({
+      id: "wide20",
+      occurrences: Array.from({ length: 20 }, (_, i) => occ(`src/f${i}.ts`, 0, 5)),
+    });
+    const ten = cluster({
+      id: "wide10",
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/f${i}.ts`, 0, 5)),
+    });
+    expect(rankClusters([ten, twenty])[0]!.cluster.id).toBe("wide20");
+  });
+
+  it("ignores copies beyond the per-file ceiling", () => {
+    const at = cluster({
+      id: "at",
+      occurrences: Array.from({ length: 10 }, (_, i) => occ("src/one.ts", i * 10, i * 10 + 5)),
+    });
+    const over = cluster({
+      id: "over",
+      occurrences: Array.from({ length: 60 }, (_, i) => occ("src/one.ts", i * 10, i * 10 + 5)),
+    });
+    // Same shape, same file, 6x the copies -- identical score once capped.
+    expect(rankClusters([at])[0]!.score).toBe(rankClusters([over])[0]!.score);
+  });
+});
+
 describe("isTestPath", () => {
   it("recognizes common test conventions", () => {
     expect(isTestPath("src/a.test.ts")).toBe(true);

@@ -239,13 +239,19 @@ L0 and L1 are exact hash-and-group: linear, trivially cacheable, no tuning.
 Report slots are scarce by two orders of magnitude (§1.1), so ranking *is* the product:
 
 ```
-mass   = fragment_size × (copies − 1)      # nodes deletable by extracting
-score  = mass
-       × log2(1 + copies)                   # widespread > paired
-       × cross_module_bonus                 # cross-module ≫ cross-file ≫ intra-file
-       × level_weight                       # L0 > L1 > L3
-       × test_weight                        # [test] down-weighted, [mixed] not
+copies = min(occurrences, 10 × distinct_files)   # cap intra-file repetition
+score  = fragment_size × (copies − 1)            # nodes deletable by extracting
+       × log2(1 + copies)                        # widespread > paired
+       × spread                                  # 2.5 cross-module · 1.4 cross-file · 0.8 intra-file
+       × level_weight                            # L0 > L1 > L3
+       × test_weight                             # [test] down-weighted, [mixed] not
 ```
+
+**The copy cap is the one non-obvious term**, and it was added only after measuring against real repositories. A shape repeated 99 times inside a single file is a data table, not a missing abstraction — but raw mass endorses it: on one repo a 99-copy, 21-node `PropertyAssignment` from one config literal outscored an 8-copy, 109-node function duplicated across eight route files by **12306 to 2612** (2058 deletable nodes against 763). No spread multiplier small enough to be honest overcomes a 12× count difference, so the count itself is capped. The cap binds on **under 3% of candidates** on every repository measured — it removes the pathology without reordering everything else.
+
+**Intra-file duplication is down-weighted, not excluded.** It is **70–84% of all candidates** on every repo measured, so suppressing it would empty the report of repeated handlers and repeated markup. A more aggressive variant scored better on a hand-rubric precisely because it removed that whole category — pushing a genuinely extractable repeated `onChange` handler from rank 4 to rank 53 — and was rejected for that reason.
+
+**A known limit of the current feature set:** a 40-node object literal repeated 15 times and a 40-node code block repeated 15 times are identical in *every* feature the ranker has. Separating them needs a new signal — occurrences being consecutive siblings under one `ObjectLiteralExpression` — not a new weight. Until then a few data tables survive in the lower half of the report.
 
 **Subsumption:** where a parent cluster and child cluster cover the same occurrence multiset, keep only the parent. A budget optimization, not a correctness fix.
 

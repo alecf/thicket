@@ -30,6 +30,22 @@ function tagOf(cluster: Cluster): Tag {
 const LEVEL_WEIGHT: Record<string, number> = { L0: 1.0, L1: 0.9 };
 
 /**
+ * Repetitions of one shape within a single file that still count toward score.
+ *
+ * A shape repeated 99 times inside one file is a data table, not a missing
+ * abstraction: on a real codebase a 99-copy, 21-node `PropertyAssignment` from
+ * one config literal outscored an 8-copy, 109-node duplicated function spread
+ * across eight route files by 12306 to 2612. Raw mass endorses the table
+ * (2058 deletable nodes against 763), and no spread multiplier small enough to
+ * be honest can overcome a 12x count difference -- so the count itself is
+ * capped rather than the category being penalized.
+ *
+ * The cap binds on under 3% of candidates on every repository measured, which
+ * is the point: it removes the pathology without reordering everything else.
+ */
+const MAX_COPIES_PER_FILE = 10;
+
+/**
  * Ranking is the product. We surface perhaps 40 of ~500 candidates, so the
  * ordering matters far more than detection breadth. See PRD §1.1 / §5.4.
  */
@@ -50,14 +66,24 @@ export function rankClusters(
         ),
       );
 
-      const spread = groups.size > 1 ? 1.5 : files.size > 1 ? 1.2 : 1.0;
+      // Intra-file repetition is down-weighted rather than excluded: it is
+      // 70-84% of all candidates on every repository measured, so blanket
+      // suppression would empty the report of a whole legitimate category
+      // (repeated handlers, repeated markup). PRD §5.4 ranks it lowest, not out.
+      const spread = groups.size > 1 ? 2.5 : files.size > 1 ? 1.4 : 0.8;
       // All-test duplication is often legitimate; mixed is NOT penalized because
       // it signals production logic reimplemented in a test (PRD §2.7).
       const testWeight = tag === "test" ? 0.4 : 1.0;
 
+      const copies = Math.min(
+        cluster.occurrences.length,
+        MAX_COPIES_PER_FILE * files.size,
+      );
+
       const score =
-        cluster.mass *
-        Math.log2(1 + cluster.occurrences.length) *
+        cluster.nodeCount *
+        (copies - 1) *
+        Math.log2(1 + copies) *
         spread *
         (LEVEL_WEIGHT[cluster.level] ?? 0.8) *
         testWeight;
