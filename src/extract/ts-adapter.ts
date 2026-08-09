@@ -4,6 +4,7 @@ import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/sync";
 import { hash, initHash } from "../hash.js";
 import { compareStrings } from "../order.js";
+import { isGeneratedPath } from "./exclude.js";
 import { forEachChildSafe, walk } from "./traverse.js";
 import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
@@ -192,7 +193,19 @@ function referencedConfigPath(raw: string): string | undefined {
   return undefined;
 }
 
-export async function openProject(configs: string | string[]): Promise<Project> {
+export interface OpenProjectOptions {
+  /**
+   * Analyze generated/vendored directories too. Off by default: emitted code
+   * is duplication by construction and crowds out real findings. See
+   * `GENERATED_DIR_SEGMENTS`.
+   */
+  includeGenerated?: boolean;
+}
+
+export async function openProject(
+  configs: string | string[],
+  opts: OpenProjectOptions = {},
+): Promise<Project> {
   await initHash();
   const list = (Array.isArray(configs) ? configs : [configs]).map((c) =>
     isAbsolute(c) ? c : resolve(c),
@@ -226,10 +239,14 @@ export async function openProject(configs: string | string[]): Promise<Project> 
       if (name.includes("node_modules") || name.endsWith(".d.ts")) continue;
       if (seen.has(name)) continue;
       seen.add(name);
+      // Segment-matched against the REPO-RELATIVE path: a checkout that lives
+      // under a directory called `build` would otherwise exclude itself.
+      const relPath = toPosix(relative(root, name));
+      if (!opts.includeGenerated && isGeneratedPath(relPath)) continue;
       const sf = project.program.getSourceFile(name) as unknown as SourceFileNode | undefined;
       if (!sf) continue;
       const handle: FileHandle = {
-        path: toPosix(relative(root, name)),
+        path: relPath,
         absPath: name,
         contentHash: hash(sf.text),
         sourceFile: sf,

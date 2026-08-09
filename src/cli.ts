@@ -32,6 +32,7 @@ Usage: thicket [options]
   --min-nodes <n>        override the depth preset's minimum fragment size
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
   --granularity <g>      auto | file | <directory depth> (default auto)
+  --include-generated    also analyze dist/, build/, .next/ and friends
   --json <path>          also write the JSON sidecar here
   --help                 show this message
 `;
@@ -47,6 +48,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         "min-nodes": { type: "string" },
         "budget-tokens": { type: "string" },
         granularity: { type: "string" },
+        "include-generated": { type: "boolean" },
         json: { type: "string" },
         help: { type: "boolean" },
       },
@@ -113,6 +115,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       minNodes,
       maxFindings: preset.maxFindings,
       granularity,
+      includeGenerated: values["include-generated"] ?? false,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
     }));
   } catch (err) {

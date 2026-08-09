@@ -56,6 +56,17 @@ export function emptyConfig(): string {
   return resolve(here, "fixtures/empty/tsconfig.json");
 }
 
+/**
+ * A fixture holding one generated directory of each shape (`dist/`, a nested
+ * `.next/`) beside two source paths that contain those names as substrings
+ * (`src/distance/`, `src/outbound.ts`). The pair is the whole point: the
+ * exclusion must be by path segment, and a substring match passes the first
+ * half of this fixture while silently deleting the second.
+ */
+export function generatedConfig(): string {
+  return resolve(here, "fixtures/generated/tsconfig.json");
+}
+
 export function monorepoRoot(): string {
   return resolve(here, "fixtures/monorepo");
 }

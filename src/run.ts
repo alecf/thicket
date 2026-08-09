@@ -18,6 +18,8 @@ export interface RunOptions {
   budgetTokens?: number;
   /** Cap on findings emitted per section, before the token budget applies. */
   maxFindings?: number;
+  /** Analyze generated/vendored directories too (see `GENERATED_DIR_SEGMENTS`). */
+  includeGenerated?: boolean;
 }
 
 export interface ReportJson {
@@ -91,11 +93,19 @@ export async function runReport(
   const minNodes = opts.minNodes ?? DEFAULT_MIN_NODES;
   const granularity = opts.granularity ?? "auto";
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
+  const includeGenerated = opts.includeGenerated ?? false;
+  // Every knob that can change the finding set belongs in the hash: two
+  // reports with the same configHash must have been produced the same way.
   const configHash = hash(
-    JSON.stringify({ version: VERSION, minNodes, granularity: String(granularity) }),
+    JSON.stringify({
+      version: VERSION,
+      minNodes,
+      granularity: String(granularity),
+      includeGenerated,
+    }),
   ).slice(0, 8);
 
-  const project = await openProject(opts.config);
+  const project = await openProject(opts.config, { includeGenerated });
   try {
     const files = project.files();
     if (files.length === 0) throw new EmptyProjectError(opts.config);

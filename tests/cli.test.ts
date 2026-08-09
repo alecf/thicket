@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { emptyConfig, fixtureConfig, solutionConfig } from "./helpers.js";
+import { emptyConfig, fixtureConfig, generatedConfig, solutionConfig } from "./helpers.js";
 
 /**
  * The CLI's contract with a harness is its exit code, so every case here
@@ -58,6 +58,17 @@ describe("main", () => {
     expect(await main(["--config", "/definitely/not/here/tsconfig.json"])).not.toBe(0);
     expect(io.stderr()).toContain("/definitely/not/here/tsconfig.json");
     expect(io.stdout()).toBe("");
+  });
+
+  it("--include-generated puts the excluded directories back", async () => {
+    const off = capture();
+    await main(["--config", generatedConfig()]);
+    const offFiles = off.stdout();
+    vi.restoreAllMocks();
+    const on = capture();
+    await main(["--config", generatedConfig(), "--include-generated"]);
+    expect(offFiles).toMatch(/2 files/);
+    expect(on.stdout()).toMatch(/4 files/);
   });
 
   it("analyzes a solution-style config rather than reporting it empty", async () => {

@@ -1,5 +1,9 @@
 node_modules/
-dist/
+/dist/
+# ...but not tests/fixtures/**/dist, which exists precisely to be a directory
+# named `dist` that the analyzer must skip. An unanchored `dist/` deletes that
+# fixture from the repo and the exclusion test then passes vacuously.
+!tests/fixtures/**/dist/
 *.tsbuildinfo
 .thicket/
 .DS_Store
