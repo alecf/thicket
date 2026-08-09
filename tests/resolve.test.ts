@@ -49,14 +49,14 @@ describe("import resolution", () => {
     // .toLowerCase() changes nothing.
     //
     // Every other test here therefore protects the guard only by accident of
-    // where the repository happens to live. Verified: with the guard removed,
-    // this suite fails 13 tests from a checkout under `/Users/...` and passes
-    // completely from an all-lowercase path -- which is exactly what a Linux CI
-    // runner (`/home/runner/work/...`) provides.
+    // where the repository happens to live. Measured with the guard removed:
+    // an all-lowercase checkout resolved all 5 edges and noticed nothing, while
+    // a mixed-case one resolved 0. CI runs from `/home/runner/work/...`, which
+    // is entirely lowercase, so without this test the guard could be deleted
+    // and the whole suite would still pass.
     //
     // Copying into a deliberately mixed-case directory makes the casing a
-    // property of the fixture instead of the host, so the guard is load-bearing
-    // on every platform.
+    // property of the fixture rather than of the host.
     const project = await openProject(join(mixedCaseRoot, "tsconfig.json"));
     const alpha = project.files().find((f) => f.path === "src/alpha.ts")!;
     expect(project.importsOf(alpha)).toEqual(["src/gamma.ts", "src/util/shared.ts"]);

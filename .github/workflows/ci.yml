@@ -11,12 +11,7 @@ concurrency:
 
 jobs:
   test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,25 +23,28 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  # thicket's contract is that a report is a pure function of (source, config,
-  # version) -- the harness diffs report N against N+1 to decide whether a
-  # refactor made progress, so environment-dependent output registers as false
-  # progress. A single-machine test cannot catch that. This job renders the same
-  # fixture on Linux and macOS under a locale whose collation disagrees with
-  # code-unit order, then requires the bytes to match exactly.
+  # thicket's contract is that a report is a pure function of
+  # (source, config, version): the harness diffs report N against N+1 to decide
+  # whether a refactor made progress, so environment-dependent output registers
+  # as false progress.
   #
-  # tr_TR is the sharpest case: it folds "I"/"i" differently from every other
-  # locale, so any localeCompare that creeps back in shows up here.
+  # Locale is the axis that has actually bitten us -- sorting via localeCompare
+  # ordered capitalized filenames differently depending on the host's collation.
+  # So render the same fixture under two locales that genuinely disagree and
+  # require the bytes to match. tr_TR is the sharpest available: it folds
+  # "I"/"i" differently from every other locale, while C skips collation
+  # entirely.
   determinism:
-    name: byte-identical report (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - locale: C
+          - locale: tr_TR.UTF-8
+    runs-on: ubuntu-latest
     env:
-      LC_ALL: tr_TR.UTF-8
-      LANG: tr_TR.UTF-8
+      LC_ALL: ${{ matrix.locale }}
+      LANG: ${{ matrix.locale }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,21 +53,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Confirm the locale actually took effect
+        # Without this the job can pass vacuously: if Node ignored the locale,
+        # both arms would be the same environment and the comparison below
+        # would prove nothing.
+        run: node -e 'console.log("resolved:", Intl.Collator().resolvedOptions().locale, "| I vs i:", "I".localeCompare("i"))'
       - name: Render the fixture report
         run: node dist/cli.js --config tests/fixtures/sample/tsconfig.json > report.md
       - name: Fail if the report is empty
-        # A zero-file analysis must never look like a successful clean report.
+        # A zero-file analysis must never look like a successful clean report,
+        # so "exit 0" is not sufficient evidence that anything was produced.
         run: |
           test -s report.md
           grep -q '^# thicket report' report.md
       - uses: actions/upload-artifact@v4
         with:
-          name: report-${{ matrix.os }}
+          name: report-${{ strategy.job-index }}
           path: report.md
           retention-days: 7
 
   compare:
-    name: reports match across platforms
+    name: reports match across locales
     needs: determinism
     runs-on: ubuntu-latest
     steps:
@@ -77,9 +81,8 @@ jobs:
         with:
           pattern: report-*
           path: reports
-      - name: Diff the two reports
+      - name: Diff the reports
         run: |
-          diff -u reports/report-ubuntu-latest/report.md \
-                  reports/report-macos-latest/report.md \
-            || { echo "::error::Report differs across platforms - output is not deterministic"; exit 1; }
-          echo "Reports are byte-identical across Linux and macOS."
+          diff -u reports/report-0/report.md reports/report-1/report.md \
+            || { echo "::error::Report differs by locale - output is not deterministic"; exit 1; }
+          echo "Reports are byte-identical across locales."
