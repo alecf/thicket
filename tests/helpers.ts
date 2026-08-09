@@ -26,6 +26,26 @@ export function importsFixtureConfig(): string {
   return resolve(here, "fixtures/imports/tsconfig.json");
 }
 
+/**
+ * A fourth fixture in the "solution style" the Vite/React template emits: a
+ * root config that declares `"files": []` and delegates entirely to
+ * `references`. It legitimately owns no source files, so a loader that stops
+ * there analyzes nothing. `tsconfig.tools.json` is itself reference-only and
+ * points back at the root, so expansion must recurse AND survive a cycle.
+ */
+export function solutionRoot(): string {
+  return resolve(here, "fixtures/solution");
+}
+export function solutionConfig(): string {
+  return resolve(solutionRoot(), "tsconfig.json");
+}
+export function solutionLeafConfigs(): string[] {
+  return [
+    resolve(solutionRoot(), "tsconfig.app.json"),
+    resolve(solutionRoot(), "tsconfig.node.json"),
+  ];
+}
+
 export function monorepoRoot(): string {
   return resolve(here, "fixtures/monorepo");
 }

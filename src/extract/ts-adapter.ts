@@ -1,4 +1,5 @@
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/sync";
 import { hash, initHash } from "../hash.js";
@@ -127,15 +128,82 @@ export function commonRootDir(configs: readonly string[]): string {
   return common.join("/") || "/";
 }
 
+/**
+ * How many rounds of reference expansion to attempt. A solution config that
+ * points at solution configs is already unusual; ten levels is far past any
+ * real layout and bounds the loop even if the visited set is somehow defeated.
+ */
+const MAX_REFERENCE_DEPTH = 10;
+
+/**
+ * Add the `references` of every opened project that owns no source files, and
+ * re-snapshot, until nothing new appears.
+ *
+ * `{"files": [], "references": [...]}` — the stock Vite/React template — is a
+ * *solution* config: it legitimately contains no files and exists only to
+ * delegate. Loading it and stopping yields zero files, which downstream reads
+ * as "this codebase is clean" rather than "nothing was loaded".
+ *
+ * Only zero-file projects are expanded. A config that already contributes
+ * files is the unit the caller asked for; pulling in its references too would
+ * silently widen the analysis beyond what was requested.
+ *
+ * Returns the full open list. Reference cycles are real (a leaf that points
+ * back at its solution root) and are cut by the visited set, keyed on the
+ * case-folded path because tsconfig paths reach us with host casing.
+ */
+function expandReferences(
+  api: InstanceType<typeof API>,
+  initial: readonly string[],
+): { snapshot: ReturnType<InstanceType<typeof API>["updateSnapshot"]>; configs: string[] } {
+  const open = [...initial];
+  const visited = new Set(open.map((c) => c.toLowerCase()));
+  let snapshot = api.updateSnapshot({ openProjects: open });
+
+  for (let depth = 0; depth < MAX_REFERENCE_DEPTH; depth++) {
+    const added: string[] = [];
+    for (const project of snapshot.getProjects()) {
+      if (project.program.getSourceFileNames().length > 0) continue;
+      for (const ref of project.parsedCommandLine.projectReferences ?? []) {
+        const path = referencedConfigPath(ref.path);
+        if (path === undefined || visited.has(path.toLowerCase())) continue;
+        visited.add(path.toLowerCase());
+        added.push(path);
+      }
+    }
+    if (added.length === 0) break;
+    added.sort(compareStrings); // deterministic open order
+    open.push(...added);
+    snapshot = api.updateSnapshot({ openProjects: open });
+  }
+  return { snapshot, configs: open };
+}
+
+/**
+ * A `references` entry may name either a tsconfig file or the directory that
+ * holds one. Returns undefined for an entry that resolves to neither, because
+ * a dangling reference is a real configuration state and must not abort the
+ * expansion of its siblings.
+ */
+function referencedConfigPath(raw: string): string | undefined {
+  if (existsSync(raw)) {
+    return statSync(raw).isDirectory() ? referencedConfigPath(join(raw, "tsconfig.json")) : raw;
+  }
+  return undefined;
+}
+
 export async function openProject(configs: string | string[]): Promise<Project> {
   await initHash();
   const list = (Array.isArray(configs) ? configs : [configs]).map((c) =>
     isAbsolute(c) ? c : resolve(c),
   );
-  const root = commonRootDir(list);
 
-  const api = new API({ cwd: root });
-  const snapshot = api.updateSnapshot({ openProjects: list });
+  const api = new API({ cwd: commonRootDir(list) });
+  const { snapshot, configs: opened } = expandReferences(api, list);
+  // Rooted at the ancestor of everything actually opened: a reference may sit
+  // outside the requested config's directory, and a file above the root would
+  // get a `../`-prefixed path, breaking the repo-relative-path contract.
+  const root = commonRootDir(opened);
 
   // A file present in several tsconfig projects is returned once per project.
   // Dedupe on absolute path; the unit of analysis is the FILE, not (project,file).

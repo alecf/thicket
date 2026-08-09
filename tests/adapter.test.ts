@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { commonRootDir, openProject } from "../src/extract/ts-adapter.js";
-import { fixtureConfig, monorepoConfigs, monorepoRoot } from "./helpers.js";
+import {
+  fixtureConfig,
+  monorepoConfigs,
+  monorepoRoot,
+  solutionConfig,
+  solutionLeafConfigs,
+} from "./helpers.js";
 
 describe("openProject", () => {
   it("returns local source files with repo-relative posix paths", async () => {
@@ -54,6 +60,39 @@ describe("openProject across genuinely distinct projects", () => {
     const project = await openProject(monorepoConfigs());
     expect(project.root).toBe(`${monorepoRoot()}/packages`);
     // No path escapes the root: the first-config-wins bug shows up as `../`.
+    for (const f of project.files()) expect(f.path.startsWith("..")).toBe(false);
+  });
+});
+
+describe("openProject on a solution-style config", () => {
+  // `{"files": [], "references": [...]}` is the stock template. It owns no
+  // source files by design, so "0 files" is not an empty repo -- it is an
+  // unexpanded reference list, and reporting it as clean is the silent-wrong
+  // answer this tool exists to avoid.
+  it("expands references and yields the union of the referenced projects", async () => {
+    const project = await openProject(solutionConfig());
+    expect(project.files().map((f) => f.path)).toEqual([
+      "src/app.ts",
+      "src/helper.ts",
+      "tools/build.ts",
+    ]);
+  });
+
+  it("matches the file set of opening every leaf config directly", async () => {
+    const viaRoot = await openProject(solutionConfig());
+    const viaLeaves = await openProject(solutionLeafConfigs());
+    expect(viaRoot.files().map((f) => f.path)).toEqual(viaLeaves.files().map((f) => f.path));
+  });
+
+  it("terminates when references form a cycle", async () => {
+    // tsconfig.tools.json -> tsconfig.json -> tsconfig.tools.json. Without a
+    // visited guard this expands forever rather than failing.
+    const project = await openProject(solutionConfig());
+    expect(project.files().length).toBe(3);
+  });
+
+  it("roots at the config directory, not at a referenced project's directory", async () => {
+    const project = await openProject(solutionConfig());
     for (const f of project.files()) expect(f.path.startsWith("..")).toBe(false);
   });
 });
