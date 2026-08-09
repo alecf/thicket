@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -140,5 +140,74 @@ describe("main", () => {
     expect(await main(["cache", "burn", "--config", fixtureConfig()])).not.toBe(0);
     expect(io.stdout()).toBe("");
     expect(io.stderr()).toMatch(/unknown command/);
+  });
+});
+
+describe("main diff", () => {
+  /** Writes a sidecar by actually running a report, so the shape is the real one. */
+  async function sidecar(config: string, name: string, into: string): Promise<string> {
+    const path = join(into, name);
+    const io = capture();
+    expect(await main(["--config", config, "--json", path, "--no-cache"])).toBe(0);
+    io.stdout();
+    vi.restoreAllMocks();
+    return path;
+  }
+
+  it("compares two sidecars and names what was resolved", async () => {
+    const { root, config } = scratchProject();
+    const before = await sidecar(config, "before.json", root);
+    // Delete one copy of the duplicated function.
+    const beta = join(root, "src/beta.ts");
+    const bodies = readFileSync(beta, "utf8").split(/\n\n(?=export function )/);
+    writeFileSync(beta, bodies.slice(0, -1).join("\n\n").trimEnd() + "\n");
+    const after = await sidecar(config, "after.json", root);
+
+    const io = capture();
+    expect(await main(["diff", before, after])).toBe(0);
+    expect(io.stdout()).toMatch(/[1-9]\d* findings? resolved/);
+    expect(io.stdout()).toMatch(/THK-DUP-[0-9a-f]{8}/);
+    expect(io.stdout()).toContain("propagation cost");
+  });
+
+  it("needs no tsconfig in the working directory", async () => {
+    // `--config` defaults to ./tsconfig.json. A diff analyzes nothing, so
+    // requiring one would break the command everywhere but a project root.
+    const { root, config } = scratchProject();
+    const before = await sidecar(config, "before.json", root);
+    const io = capture();
+    const cwd = process.cwd();
+    process.chdir(tmpdir());
+    try {
+      expect(await main(["diff", before, before])).toBe(0);
+    } finally {
+      process.chdir(cwd);
+    }
+    expect(io.stdout()).toContain("0 findings resolved");
+    expect(io.stderr()).toBe("");
+  });
+
+  it("rejects a wrong number of arguments", async () => {
+    const io = capture();
+    expect(await main(["diff", "only-one.json"])).not.toBe(0);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/two report paths/);
+  });
+
+  it("names the file it could not read", async () => {
+    const io = capture();
+    expect(await main(["diff", "/no/such/before.json", "/no/such/after.json"])).not.toBe(0);
+    expect(io.stderr()).toContain("/no/such/before.json");
+  });
+
+  it("names the file that is not a report", async () => {
+    const { root, config } = scratchProject();
+    const good = await sidecar(config, "good.json", root);
+    const junk = join(root, "junk.json");
+    writeFileSync(junk, `{"hello":"world"}\n`);
+    const io = capture();
+    expect(await main(["diff", good, junk])).not.toBe(0);
+    expect(io.stderr()).toContain("junk.json");
+    expect(io.stderr()).toMatch(/not a thicket report/);
   });
 });

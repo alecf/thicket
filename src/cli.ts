@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { clearCache } from "./cache/db.js";
 import { commonRootDir } from "./extract/ts-adapter.js";
+import { diffReports, formatDiff, parseReport } from "./report/diff.js";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
 
@@ -41,6 +42,8 @@ Usage: thicket [options]
 
 Commands:
   cache clear            delete .thicket/cache.db for the analyzed project
+  diff <a.json> <b.json> compare two --json sidecars: what was resolved, added,
+                         and how the metrics moved
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -75,17 +78,17 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
-  const raw = values.config ?? ["./tsconfig.json"];
-  // `resolve("")` is the cwd, which exists, so an empty --config would slip
-  // past the existence check and analyze a directory as if it were a config.
-  if (raw.some((c) => c.trim() === "")) {
-    process.stderr.write(`thicket: --config must name a tsconfig, got an empty string\n`);
-    return 1;
+  // `diff` reads two sidecars and analyzes nothing, so it is answered before
+  // any tsconfig is resolved. Resolving one first would make `thicket diff`
+  // fail with "no such tsconfig: ./tsconfig.json" whenever it is run from a
+  // directory that has no TypeScript project in it — which is most of them.
+  if (positionals[0] === "diff") {
+    return diffCommand(positionals.slice(1));
   }
-  const configs = raw.map((c) => resolve(c));
-  const missing = configs.filter((c) => !existsSync(c));
-  if (missing.length > 0) {
-    process.stderr.write(`thicket: no such tsconfig: ${missing.join(", ")}\n`);
+
+  const configs = resolveConfigs(values.config);
+  if (typeof configs === "string") {
+    process.stderr.write(configs);
     return 1;
   }
 
@@ -158,6 +161,75 @@ export async function main(argv: readonly string[]): Promise<number> {
     await writeFile(resolve(values.json), JSON.stringify(json, null, 2) + "\n");
   }
   return 0;
+}
+
+/** The resolved config paths, or the error message to print. */
+function resolveConfigs(raw: readonly string[] | undefined): string[] | string {
+  const given = raw ?? ["./tsconfig.json"];
+  // `resolve("")` is the cwd, which exists, so an empty --config would slip
+  // past the existence check and analyze a directory as if it were a config.
+  if (given.some((c) => c.trim() === "")) {
+    return `thicket: --config must name a tsconfig, got an empty string\n`;
+  }
+  const configs = given.map((c) => resolve(c));
+  const missing = configs.filter((c) => !existsSync(c));
+  if (missing.length > 0) return `thicket: no such tsconfig: ${missing.join(", ")}\n`;
+  return configs;
+}
+
+/**
+ * `thicket diff before.json after.json` (PRD §9.1).
+ *
+ * The summary goes to stdout because it is the answer; anything that went
+ * wrong goes to stderr with the offending path in it. The exit code is 0 for
+ * "the comparison ran", not "nothing regressed" — deciding whether a delta is
+ * acceptable is the harness's job, and an exit code that editorialized would
+ * make the tool a judge (PRD §1).
+ */
+function diffCommand(args: readonly string[]): number {
+  if (args.length !== 2) {
+    process.stderr.write(
+      `thicket: diff takes exactly two report paths, got ${args.length}\n\n${USAGE}`,
+    );
+    return 1;
+  }
+  let diff;
+  try {
+    const [before, after] = args.map((path) => readReport(path));
+    diff = diffReports(before!, after!);
+  } catch (err) {
+    process.stderr.write(`thicket: ${(err as Error).message}\n`);
+    return 1;
+  }
+
+  const lines = [formatDiff(diff)];
+  for (const [label, ids] of [
+    ["resolved", diff.resolved],
+    ["new", diff.added],
+  ] as const) {
+    // Ids, not just counts: "3 resolved" tells a harness it made progress,
+    // but only the ids tell it which finding to stop trying to fix.
+    for (const id of ids) lines.push(`  ${label === "resolved" ? "-" : "+"} ${id}`);
+  }
+  process.stdout.write(lines.join("\n") + "\n");
+  return 0;
+}
+
+function readReport(path: string) {
+  const resolved = resolve(path);
+  let text: string;
+  try {
+    text = readFileSync(resolved, "utf8");
+  } catch {
+    throw new Error(`cannot read ${path}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${path} is not valid JSON: ${(err as Error).message}`);
+  }
+  return parseReport(parsed, path);
 }
 
 function parseNumber(raw: string | undefined, flag: string): number | undefined {
