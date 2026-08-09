@@ -7,7 +7,7 @@ because each one already implements an algorithm the real code needs.
 Run them from the root of a TypeScript repo, passing tsconfig paths:
 
 ```bash
-cd ~/projects/sample-a
+cd /path/to/some-typescript-repo
 node ~/projects/thicket/prototypes/ladder.mjs \
   "$PWD/packages/client/tsconfig.json" \
   "$PWD/packages/server/tsconfig.json" \

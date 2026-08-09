@@ -36,7 +36,7 @@ This single conclusion cut embeddings from v1 (§11.4), collapsed the normalizat
 
 ## 2. Findings from prototyping
 
-Everything below was measured against real repositories (`sample-a`, a 3-package monorepo; `sample-b`, a 140-file Next.js app). Several overturned starting premises.
+Everything below was measured against two real private codebases, referred to here as **Sample A** (a 3-package monorepo, 971 files including declarations, 48 first-party source files) and **Sample B** (a 140-file Next.js app). Several results overturned starting premises.
 
 ### 2.1 TypeScript 7.1 ships a real programmatic API — today
 
@@ -53,7 +53,7 @@ The AST is lazily materialized from a binary buffer over JSON-RPC to the `tsgo` 
 
 **Risk:** the path is named `unstable` and 7.1 is a dev build. Mitigated by pinning the nightly and confining all API contact to one adapter module (§4.1). 7.1 is expected to stabilize around October 2026.
 
-### 2.2 Measured performance (sample-a, 971 files / 14 MB)
+### 2.2 Measured performance (Sample A, 971 files / 14 MB)
 
 | Operation | Result |
 |---|---|
@@ -91,7 +91,7 @@ Each of these silently produced *plausible but wrong* output rather than an erro
 
 ### 2.5 The normalization ladder: L1 is the win, L2 is redundant
 
-Measured on sample-a, fragments ≥15 nodes:
+Measured on Sample A, fragments ≥15 nodes:
 
 | Level | Clusters | Mass | Marginal gain |
 |---|---|---|---|
@@ -111,7 +111,7 @@ Two normalization requirements, both found by getting them wrong first:
 
 Inter-module edges vs. edges buried as intra-module:
 
-| Granularity | sample-a (48 files) | sample-b (140 files) |
+| Granularity | Sample A (48 files) | Sample B (140 files) |
 |---|---|---|
 | tsconfig project | 2 mods, **1 edge**, 80 intra, 0 cycles | 1 mod, **0 edges**, 296 intra, 0 cycles |
 | package.json | 3 mods, 2 edges, 66 intra, 0 cycles | 3 mods, 2 edges, 264 intra, 0 cycles |
@@ -125,7 +125,7 @@ The intuitive boundaries are the useless ones: **tsconfig-project and package.js
 Two consequences:
 
 - **Cycles exist only at module level.** File granularity finds zero cycles in both repos; the cycles are *grouping-induced* (file A in X imports into Y while file C in Y imports back into X, with no file-level cycle). Grouping-induced cycles **are** the tangle signal.
-- **√(file count) predicts the useful granularity.** sample-a √48 ≈ 7 → depth 3 yields 8 modules; sample-b √140 ≈ 12 → depth 2 yields exactly 12. In both, that is the first granularity where cycles appear.
+- **√(file count) predicts the useful granularity.** Sample A √48 ≈ 7 → depth 3 yields 8 modules; Sample B √140 ≈ 12 → depth 2 yields exactly 12. In both, that is the first granularity where cycles appear.
 
 ### 2.7 Test files do not swamp the report
 
