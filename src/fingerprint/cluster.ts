@@ -9,6 +9,8 @@ export interface Occurrence {
   filePath: string;
   start: number;
   end: number;
+  /** 1-based line of `start`. Display only; ranges stay byte-based. */
+  line: number;
 }
 
 export interface Cluster {
@@ -70,7 +72,7 @@ function collect(map: Map<string, Fragment[]>, level: Level, out: Cluster[]): vo
 
 function toCluster(id: string, level: Level, frags: Fragment[]): Cluster {
   const occurrences = frags
-    .map((f) => ({ filePath: f.filePath, start: f.start, end: f.end }))
+    .map((f) => ({ filePath: f.filePath, start: f.start, end: f.end, line: f.line }))
     .sort((a, b) => compareStrings(a.filePath, b.filePath) || a.start - b.start);
   const nodeCount = Math.min(...frags.map((f) => f.nodeCount));
   return {

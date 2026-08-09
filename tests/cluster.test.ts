@@ -51,6 +51,18 @@ describe("findDuplication", () => {
     );
   });
 
+  it("carries a 1-based line number on every occurrence", async () => {
+    const project = await openProject(fixtureConfig());
+    const clusters = await findDuplication(project, { minNodes: 15 });
+    expect(clusters.length).toBeGreaterThan(0); // guard against vacuous pass
+    for (const c of clusters) {
+      for (const o of c.occurrences) {
+        const text = project.getSourceFile(o.filePath)!.text;
+        expect(o.line).toBe(text.slice(0, o.start).split("\n").length);
+      }
+    }
+  });
+
   it("never reports a cluster with fewer than two occurrences", async () => {
     const project = await openProject(fixtureConfig());
     for (const c of await findDuplication(project, { minNodes: 15 })) {

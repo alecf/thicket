@@ -43,6 +43,12 @@ export interface Fragment {
   nodeCount: number;
   start: number;
   end: number;
+  /**
+   * 1-based line of `start`. Display only — the cache and the ancestor and
+   * subsumption checks all need the byte range, but a byte offset is useless
+   * to the human or LLM reading the report (PRD §9.2).
+   */
+  line: number;
   /** Token stream with identifier text preserved (L0 input). */
   tokensL0: string[];
   /** Token stream with identifier text preserved, renumbered later (L1 input). */
@@ -89,12 +95,14 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     }
 
     if (nodeCount >= opts.minNodes && !IGNORED_KINDS.has(kind)) {
+      const start = node.getStart();
       out.push({
         filePath: file.path,
         kind,
         nodeCount,
-        start: node.getStart(),
+        start,
         end: node.getEnd(),
+        line: file.sourceFile.getLineAndCharacterOfPosition(start).line + 1,
         tokensL0: l0,
         tokensL1: l1,
       });

@@ -39,6 +39,21 @@ describe("extractFragments", () => {
     expect(frag.end).toBeGreaterThan(frag.start);
   });
 
+  it("records 1-based line numbers that match the source", async () => {
+    // A byte offset is close to useless in a report a human or an LLM reads;
+    // every reference needs a line (PRD §9.2). `normalizeAlpha` is declared on
+    // line 4 of the fixture.
+    const project = await openProject(fixtureConfig());
+    const file = project.files().find((f) => f.path === "src/alpha.ts")!;
+    const frags = extractFragments(file, { minNodes: 8 });
+    const fn = frags.find((f) => f.kind === "FunctionDeclaration")!;
+    expect(fn.line).toBe(4);
+    for (const f of frags) {
+      const before = file.sourceFile.text.slice(0, f.start);
+      expect(f.line).toBe(before.split("\n").length);
+    }
+  });
+
   it("emits nested fragments: a Block fragment lies inside a FunctionDeclaration fragment", async () => {
     const project = await openProject(fixtureConfig());
     const file = project.files().find((f) => f.path === "src/alpha.ts")!;
