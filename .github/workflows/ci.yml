@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+  # thicket's contract is that a report is a pure function of (source, config,
+  # version) -- the harness diffs report N against N+1 to decide whether a
+  # refactor made progress, so environment-dependent output registers as false
+  # progress. A single-machine test cannot catch that. This job renders the same
+  # fixture on Linux and macOS under a locale whose collation disagrees with
+  # code-unit order, then requires the bytes to match exactly.
+  #
+  # tr_TR is the sharpest case: it folds "I"/"i" differently from every other
+  # locale, so any localeCompare that creeps back in shows up here.
+  determinism:
+    name: byte-identical report (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      LC_ALL: tr_TR.UTF-8
+      LANG: tr_TR.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Render the fixture report
+        run: node dist/cli.js --config tests/fixtures/sample/tsconfig.json > report.md
+      - name: Fail if the report is empty
+        # A zero-file analysis must never look like a successful clean report.
+        run: |
+          test -s report.md
+          grep -q '^# thicket report' report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.os }}
+          path: report.md
+          retention-days: 7
+
+  compare:
+    name: reports match across platforms
+    needs: determinism
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+          path: reports
+      - name: Diff the two reports
+        run: |
+          diff -u reports/report-ubuntu-latest/report.md \
+                  reports/report-macos-latest/report.md \
+            || { echo "::error::Report differs across platforms - output is not deterministic"; exit 1; }
+          echo "Reports are byte-identical across Linux and macOS."
