@@ -125,6 +125,7 @@ describe("main", () => {
     const io = capture();
     expect(await main(["cache", "clear", "--config", config])).toBe(0);
     expect(existsSync(cachePathFor(root))).toBe(false);
+    expect(existsSync(join(root, ".thicket"))).toBe(false);
     expect(io.stdout()).toBe("");
     expect(io.stderr()).toMatch(/cleared/);
 

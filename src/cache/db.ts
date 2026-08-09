@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ShapedFragment } from "../fingerprint/shape.js";
@@ -222,6 +222,13 @@ export function clearCache(root: string): boolean {
     } catch {
       // Absent, or not ours to delete. Either way there is nothing to report.
     }
+  }
+  try {
+    // Leave nothing behind if the cache was all `.thicket/` held. Non-empty is
+    // the expected outcome once anything else lives there, and rmdir says so.
+    rmdirSync(dirname(path));
+  } catch {
+    // Not empty, or never existed.
   }
   return existed;
 }
