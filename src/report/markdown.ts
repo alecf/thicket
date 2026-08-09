@@ -48,6 +48,16 @@ interface Block {
 }
 
 export function renderMarkdown(input: ReportInput): string {
+  return renderReport(input).markdown;
+}
+
+/**
+ * The rendered report plus how many findings actually survived the budget.
+ * The count is not derivable from the input — a JSON sidecar that claimed the
+ * Markdown showed everything it was handed would be the same silent-truncation
+ * lie the omitted-count line exists to prevent.
+ */
+export function renderReport(input: ReportInput): { markdown: string; shown: number } {
   const blocks: Block[] = [
     ...input.duplication.map((r) => ({ section: "## Duplication", lines: duplicationBlock(r) })),
     ...input.cycles.map((c) => ({ section: "## Module tangle", lines: cycleBlock(c) })),
@@ -68,7 +78,7 @@ export function renderMarkdown(input: ReportInput): string {
   }
   if (omitted > 0) lines.push(omittedLine(omitted));
 
-  return lines.join("\n") + "\n";
+  return { markdown: lines.join("\n") + "\n", shown };
 }
 
 /**
@@ -156,7 +166,11 @@ function formatOccurrences(r: Ranked): string {
 function cycleBlock(cycle: CycleFinding): string[] {
   const lines = [
     `### ${cycle.id} · SCC of ${cycle.modules.length} modules`,
-    `  cycle: ${cycle.modules.join(" → ")}`,
+    // `members:`, not `cycle:` — these are the mutually reachable modules in
+    // sorted order, which is not in general an edge path. Labelling the join
+    // as a cycle would assert edges we never checked; the verified claim is
+    // the cut below it.
+    `  members: ${cycle.modules.join(" → ")}`,
   ];
   if (cycle.cuts.length > 0) {
     lines.push(

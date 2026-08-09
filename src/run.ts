@@ -1,0 +1,202 @@
+import { walk } from "./extract/traverse.js";
+import { openProject } from "./extract/ts-adapter.js";
+import { findDuplication } from "./fingerprint/cluster.js";
+import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
+import { propagationCost, stronglyConnected } from "./graph/metrics.js";
+import { hash, initHash } from "./hash.js";
+import { compareStrings } from "./order.js";
+import { findingId } from "./report/findings.js";
+import { canonicalKind } from "./report/kinds.js";
+import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
+import { rankClusters, subsume, type Ranked } from "./report/rank.js";
+import { VERSION } from "./version.js";
+
+export interface RunOptions {
+  config: string | string[];
+  minNodes?: number;
+  granularity?: "auto" | "file" | number;
+  budgetTokens?: number;
+  /** Cap on findings emitted per section, before the token budget applies. */
+  maxFindings?: number;
+}
+
+export interface ReportJson {
+  version: string;
+  configHash: string;
+  fileCount: number;
+  lineCount: number;
+  granularity: string;
+  moduleCount: number;
+  metrics: ReportInput["metrics"];
+  duplication: {
+    /** THK-DUP finding id; identical to the one the Markdown prints. */
+    id: string;
+    /** The normalized shape hash the id is derived from. */
+    shapeHash: string;
+    score: number;
+    tag: Ranked["tag"];
+    level: string;
+    kind: string;
+    nodeCount: number;
+    occurrences: { filePath: string; line: number; start: number; end: number }[];
+  }[];
+  cycles: CycleFinding[];
+  /** Candidates found, before the per-section cap or the token budget. */
+  totalFindings: number;
+  /** How many of them the Markdown actually printed. */
+  shownInMarkdown: number;
+}
+
+const DEFAULT_MIN_NODES = 15;
+const DEFAULT_MAX_FINDINGS = 40;
+
+/**
+ * Above this an exhaustive single-edge cut search stops being cheap, and a
+ * tangle that large is not fixed by one cut anyway. We report no cuts rather
+ * than a guess.
+ */
+const MAX_CUT_SEARCH_MODULES = 32;
+
+/**
+ * Orchestration only. Every algorithm lives in its own module; this wires
+ * extract -> duplication -> rank -> graph -> render and computes the summary
+ * numbers, which is the one place they can be assembled coherently.
+ */
+export async function runReport(
+  opts: RunOptions,
+): Promise<{ markdown: string; json: ReportJson }> {
+  await initHash();
+  const minNodes = opts.minNodes ?? DEFAULT_MIN_NODES;
+  const granularity = opts.granularity ?? "auto";
+  const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
+  const configHash = hash(
+    JSON.stringify({ version: VERSION, minNodes, granularity: String(granularity) }),
+  ).slice(0, 8);
+
+  const project = await openProject(opts.config);
+  try {
+    const files = project.files();
+    let lineCount = 0;
+    let totalNodes = 0;
+    for (const file of files) {
+      lineCount += file.sourceFile.text.split("\n").length;
+      walk(file.sourceFile, () => {
+        totalNodes++;
+      });
+    }
+
+    const graph = buildModuleGraph(project, { granularity });
+    const clusters = subsume(await findDuplication(project, { minNodes }));
+    // `Cluster.id` is the normalized shape hash — the right key for grouping,
+    // but not what the report speaks. Swap in the THK-DUP finding id for the
+    // emitted copy so Markdown and the JSON sidecar name findings identically
+    // (PRD §9.1); the shape hash survives as `shapeHash` in the JSON.
+    const ranked = rankClusters(clusters, graph.moduleOf).map((r) => ({
+      ...r,
+      cluster: { ...r.cluster, id: findingId("DUP", r.cluster.id) },
+      shapeHash: r.cluster.id,
+    }));
+
+    const components = stronglyConnected(graph.modules, graph.adjacency).filter(
+      (c) => c.length > 1,
+    );
+    const cycles: CycleFinding[] = components.map((modules) => ({
+      id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
+      modules,
+      cuts: suggestCuts(modules, graph.edges),
+    }));
+
+    const emitted = ranked.slice(0, maxFindings);
+    const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
+    const totalFindings = ranked.length + cycles.length;
+
+    const input: ReportInput = {
+      version: VERSION,
+      configHash,
+      fileCount: files.length,
+      lineCount,
+      granularity: graph.granularity,
+      moduleCount: graph.modules.length,
+      metrics: {
+        duplicatedMass,
+        duplicatedPct: totalNodes === 0 ? 0 : (duplicatedMass / totalNodes) * 100,
+        propagationCost: propagationCost(graph.modules, graph.adjacency),
+        cycleCount: cycles.length,
+        largestScc: components.reduce((max, c) => Math.max(max, c.length), 0),
+      },
+      duplication: emitted,
+      cycles: cycles.slice(0, maxFindings),
+      totalFindings,
+      ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
+    };
+
+    const { markdown, shown } = renderReport(input);
+
+    return {
+      markdown,
+      json: {
+        version: input.version,
+        configHash,
+        fileCount: input.fileCount,
+        lineCount,
+        granularity: input.granularity,
+        moduleCount: input.moduleCount,
+        metrics: input.metrics,
+        duplication: emitted.map((r) => ({
+          id: r.cluster.id,
+          shapeHash: r.shapeHash,
+          score: r.score,
+          tag: r.tag,
+          level: r.cluster.level,
+          kind: canonicalKind(r.cluster.kind),
+          nodeCount: r.cluster.nodeCount,
+          occurrences: r.cluster.occurrences.map((o) => ({
+            filePath: o.filePath,
+            line: o.line,
+            start: o.start,
+            end: o.end,
+          })),
+        })),
+        cycles: input.cycles,
+        totalFindings,
+        shownInMarkdown: shown,
+      },
+    };
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * The lowest-weight single edge inside the SCC whose removal provably breaks
+ * it, verified by re-running Tarjan on the induced subgraph. Returns nothing
+ * when no single edge suffices: a suggested cut that does not break the cycle
+ * costs the reader a refactor and buys nothing, so an empty list is the
+ * honest answer.
+ */
+function suggestCuts(
+  component: readonly string[],
+  edges: readonly ModuleEdge[],
+): { from: string; to: string }[] {
+  if (component.length > MAX_CUT_SEARCH_MODULES) return [];
+  const members = new Set(component);
+  const inner = edges
+    .filter((e) => members.has(e.from) && members.has(e.to))
+    .sort(
+      (a, b) =>
+        a.weight - b.weight || compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
+    );
+
+  for (const candidate of inner) {
+    const adjacency = new Map<string, string[]>(component.map((m) => [m, []]));
+    for (const e of inner) {
+      if (e === candidate) continue;
+      adjacency.get(e.from)!.push(e.to);
+    }
+    const broken = stronglyConnected(component, adjacency).every(
+      (c) => c.length < component.length,
+    );
+    if (broken) return [{ from: candidate.from, to: candidate.to }];
+  }
+  return [];
+}
