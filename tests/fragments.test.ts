@@ -53,6 +53,22 @@ describe("extractFragments", () => {
     expect(inner).toBeDefined();
   });
 
+  it("captures literal values at L0 and drops them at L1, despite aliased enum names", async () => {
+    // SyntaxKind is a reverse-mapped enum in which an ALIAS can win the reverse
+    // map: SyntaxKind[SyntaxKind.NumericLiteral] is "FirstLiteralToken", and
+    // SyntaxKind[SyntaxKind.NoSubstitutionTemplateLiteral] is
+    // "FirstTemplateToken". Neither ends with "Literal", so classifying leaves
+    // by their reverse-mapped NAME silently skips both -- and L0, the level
+    // that is supposed to be exact, stops distinguishing `scale(p, 2)` from
+    // `scale(p, 3)`. Literal kinds must be matched by enum VALUE.
+    const project = await openProject(fixtureConfig());
+    const file = project.files().find((f) => f.path === "src/alpha.ts")!;
+    const arrow = extractFragments(file, { minNodes: 2 }).find((f) => f.kind === "ArrowFunction")!;
+    expect(file.sourceFile.text.slice(arrow.start, arrow.end)).toContain("scale(p, 2)");
+    expect(arrow.tokensL0.some((t) => t.endsWith(":2"))).toBe(true);
+    expect(arrow.tokensL1.some((t) => t.endsWith(":2"))).toBe(false);
+  });
+
   it("is deterministic across runs", async () => {
     const project = await openProject(fixtureConfig());
     const file = project.files().find((f) => f.path === "src/alpha.ts")!;

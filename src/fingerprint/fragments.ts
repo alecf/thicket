@@ -18,6 +18,25 @@ const IGNORED_KINDS = new Set([
   "ExportAssignment",
 ]);
 
+/**
+ * Literal kinds, matched by enum VALUE rather than by reverse-mapped name.
+ *
+ * SyntaxKind is a reverse-mapped enum containing range-marker aliases, and the
+ * alias can win the reverse map: `SyntaxKind[SyntaxKind.NumericLiteral]` is
+ * `"FirstLiteralToken"` and `SyntaxKind[SyntaxKind.NoSubstitutionTemplateLiteral]`
+ * is `"FirstTemplateToken"`. A `name.endsWith("Literal")` test therefore misses
+ * both, which drops their values from the L0 token stream and leaves L0 -- the
+ * level whose whole job is exactness -- unable to tell `scale(p, 2)` from
+ * `scale(p, 3)`. That is a false-positive generator, not a cosmetic slip.
+ */
+const LITERAL_KINDS: ReadonlySet<number> = new Set<number>([
+  SyntaxKind.NumericLiteral,
+  SyntaxKind.BigIntLiteral,
+  SyntaxKind.StringLiteral,
+  SyntaxKind.NoSubstitutionTemplateLiteral,
+  SyntaxKind.RegularExpressionLiteral,
+]);
+
 export interface Fragment {
   filePath: string;
   kind: string;
@@ -59,12 +78,12 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     });
 
     if (childCount === 0) {
-      const text = safeText(node);
-      if (kind === "Identifier") {
+      if (node.kind === SyntaxKind.Identifier) {
+        const text = safeText(node);
         l0[0] = `Id:${text}`;
         l1[0] = `Id:${text}`; // renumbered fragment-locally in normalize()
-      } else if (kind.endsWith("Literal")) {
-        l0[0] = `${kind}:${text}`;
+      } else if (LITERAL_KINDS.has(node.kind)) {
+        l0[0] = `${kind}:${safeText(node)}`;
         l1[0] = kind; // L1 keeps literal KIND, drops the value
       }
     }
