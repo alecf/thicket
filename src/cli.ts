@@ -4,6 +4,8 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { clearCache } from "./cache/db.js";
+import { commonRootDir } from "./extract/ts-adapter.js";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
 
@@ -34,7 +36,11 @@ Usage: thicket [options]
   --granularity <g>      auto | file | <directory depth> (default auto)
   --include-generated    also analyze dist/, build/, .next/ and friends
   --json <path>          also write the JSON sidecar here
+  --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
+
+Commands:
+  cache clear            delete .thicket/cache.db for the analyzed project
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -50,16 +56,20 @@ export async function main(argv: readonly string[]): Promise<number> {
         granularity: { type: "string" },
         "include-generated": { type: "boolean" },
         json: { type: "string" },
+        cache: { type: "boolean", default: true },
         help: { type: "boolean" },
       },
-      allowPositionals: false,
+      // `cache clear` is the only positional form. Anything else is rejected
+      // below rather than silently ignored.
+      allowPositionals: true,
+      allowNegative: true,
     });
   } catch (err) {
     process.stderr.write(`thicket: ${(err as Error).message}\n\n${USAGE}`);
     return 2;
   }
 
-  const { values } = parsed;
+  const { values, positionals } = parsed;
   if (values.help) {
     process.stdout.write(USAGE);
     return 0;
@@ -77,6 +87,23 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (missing.length > 0) {
     process.stderr.write(`thicket: no such tsconfig: ${missing.join(", ")}\n`);
     return 1;
+  }
+
+  if (positionals.length > 0) {
+    if (positionals[0] !== "cache" || positionals[1] !== "clear" || positionals.length !== 2) {
+      process.stderr.write(`thicket: unknown command: ${positionals.join(" ")}\n\n${USAGE}`);
+      return 1;
+    }
+    // The root `runReport` caches under, computed the same way from the same
+    // configs. It can differ if a project reference reaches outside them, in
+    // which case the message names the directory actually cleared rather than
+    // claiming success over one nobody asked about.
+    const root = commonRootDir(configs);
+    const removed = clearCache(root);
+    process.stderr.write(
+      removed ? `thicket: cleared the cache in ${root}\n` : `thicket: no cache in ${root}\n`,
+    );
+    return 0;
   }
 
   let depth: number;
@@ -116,6 +143,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       maxFindings: preset.maxFindings,
       granularity,
       includeGenerated: values["include-generated"] ?? false,
+      cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
     }));
   } catch (err) {

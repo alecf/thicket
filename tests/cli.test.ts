@@ -1,6 +1,16 @@
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { cachePathFor } from "../src/cache/db.js";
 import { main } from "../src/cli.js";
-import { emptyConfig, fixtureConfig, generatedConfig, solutionConfig } from "./helpers.js";
+import {
+  emptyConfig,
+  fixtureConfig,
+  fixtureRoot,
+  generatedConfig,
+  solutionConfig,
+} from "./helpers.js";
 
 /**
  * The CLI's contract with a harness is its exit code, so every case here
@@ -21,8 +31,22 @@ function capture() {
   return { stdout: () => out.join(""), stderr: () => err.join("") };
 }
 
+const temps: string[] = [];
+
+/** A throwaway copy of the sample fixture, so a test may write a cache into it. */
+function scratchProject(): { root: string; config: string } {
+  const root = mkdtempSync(join(tmpdir(), "thicket-cli-"));
+  temps.push(root);
+  cpSync(fixtureRoot(), root, {
+    recursive: true,
+    filter: (src) => !src.split(sep).includes(".thicket"),
+  });
+  return { root, config: join(root, "tsconfig.json") };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
 });
 
 describe("main", () => {
@@ -75,5 +99,45 @@ describe("main", () => {
     const io = capture();
     expect(await main(["--config", solutionConfig()])).toBe(0);
     expect(io.stdout()).toMatch(/3 files/);
+  });
+
+  it("--no-cache leaves no cache behind and reports the same thing", async () => {
+    const { root, config } = scratchProject();
+    const io = capture();
+    expect(await main(["--config", config, "--no-cache"])).toBe(0);
+    const plain = io.stdout();
+    expect(existsSync(cachePathFor(root))).toBe(false);
+
+    vi.restoreAllMocks();
+    const cached = capture();
+    expect(await main(["--config", config])).toBe(0);
+    expect(existsSync(cachePathFor(root))).toBe(true);
+    expect(cached.stdout()).toBe(plain);
+  });
+
+  it("cache clear removes the project's cache, and says so either way", async () => {
+    const { root, config } = scratchProject();
+    capture();
+    await main(["--config", config]);
+    expect(existsSync(cachePathFor(root))).toBe(true);
+
+    vi.restoreAllMocks();
+    const io = capture();
+    expect(await main(["cache", "clear", "--config", config])).toBe(0);
+    expect(existsSync(cachePathFor(root))).toBe(false);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/cleared/);
+
+    vi.restoreAllMocks();
+    const again = capture();
+    expect(await main(["cache", "clear", "--config", config])).toBe(0);
+    expect(again.stderr()).toMatch(/no cache/);
+  });
+
+  it("rejects an unknown command instead of analyzing anyway", async () => {
+    const io = capture();
+    expect(await main(["cache", "burn", "--config", fixtureConfig()])).not.toBe(0);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/unknown command/);
   });
 });

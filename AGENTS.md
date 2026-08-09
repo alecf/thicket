@@ -70,7 +70,24 @@ A fifth, in fuzzy matching: a fragment and its own ancestor overlap at ~0.99 sim
 
 A 48-file repo yields ~495 duplication candidates against a report budget of 20–50. Recall is not the constraint — selection is. Before adding a new detector, ask whether the ranker is already discarding good candidates. The PRD's re-entry criterion for embeddings applies to any new detection technique.
 
-### 5. Never reference specific private codebases
+### 5. The cache may never change the answer
+
+`.thicket/cache.db` stores whole fragments — position, size, kind, **and both
+normalization hashes on one row** — because clustering decides whether an L1
+finding is genuinely coarser than L0 by asking which L0 shape each member had.
+Split the levels into separate rows and that question becomes unanswerable, so
+the warm path invents findings the cold path suppresses (114 of them on a
+146-file test repository). Two rules follow:
+
+- Anything added to the cache must be verified by `tests/cache-pipeline.test.ts`,
+  which asserts the cold and warm **cluster lists** are deeply equal. Assert on
+  clusters, not on the Markdown: the report is truncated to the top findings and
+  will happily hide a cache that lost 6% of its fragments.
+- The cache is an optimization, never a dependency. A corrupt, foreign-version
+  or unwritable database degrades to "analyze everything" — it must never be the
+  reason a report cannot be produced.
+
+### 6. Never reference specific private codebases
 
 Analysis and benchmarking happen against real private repositories. **Do not name them, path them, or quote their source in code, comments, docs, commit messages, or test fixtures.** Refer to "a sample project," "test repositories," or the anonymized "Sample A"/"Sample B" used in the PRD. Fixtures live in `tests/fixtures/` and are written by hand.
 

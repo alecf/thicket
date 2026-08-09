@@ -337,6 +337,16 @@ Both caching layers emerge from one design:
 
 `occurrence.parent_hash` supports both subsumption (§5.4) and the ancestor–descendant filter (§5.3) without re-walking the tree.
 
+**As implemented, v1 collapses `fragment` and `occurrence` into one
+`fragment_occurrence` row carrying both the L0 and the L1 hash.** Keying a row
+by its own normalized hash separates the two levels of the *same* fragment, and
+the L1 suppression rule (§5.2) needs them together — without it the cached run
+reports findings the uncached run correctly drops. The row is keyed by
+`(path, seq)` rather than by byte range, because two AST nodes can share a range
+exactly (a statement and its child expression, when ASI ate the semicolon).
+Deduplication of identical shapes moves to the in-memory grouping, which had to
+happen anyway.
+
 ### 8.2 Invalidation
 
 Keyed on per-file `content_hash` plus a global `config_hash` (thicket version + normalization rules + thresholds). A config change invalidates derived tables; `thicket cache clear` resets everything.

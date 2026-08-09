@@ -1,3 +1,4 @@
+import { cachePathFor, openCache, type Cache } from "./cache/db.js";
 import { openProject } from "./extract/ts-adapter.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
@@ -20,6 +21,12 @@ export interface RunOptions {
   maxFindings?: number;
   /** Analyze generated/vendored directories too (see `GENERATED_DIR_SEGMENTS`). */
   includeGenerated?: boolean;
+  /**
+   * Reuse `.thicket/cache.db` under the project root to skip re-walking files
+   * whose content has not changed. On by default. It changes how long the run
+   * takes and nothing else — the report is identical either way.
+   */
+  cache?: boolean;
 }
 
 export interface ReportJson {
@@ -106,6 +113,11 @@ export async function runReport(
   ).slice(0, 8);
 
   const project = await openProject(opts.config, { includeGenerated });
+  // Opened against the project root rather than the cwd, so the cache belongs
+  // to the codebase being analyzed and not to wherever the tool was invoked.
+  // `openCache` answers null rather than throwing on anything it cannot use.
+  const cache: Cache | null =
+    opts.cache === false ? null : openCache(cachePathFor(project.root), configHash);
   try {
     const files = project.files();
     if (files.length === 0) throw new EmptyProjectError(opts.config);
@@ -119,7 +131,7 @@ export async function runReport(
     }
 
     const graph = buildModuleGraph(project, { granularity });
-    const clusters = subsume(await findDuplication(project, { minNodes }));
+    const clusters = subsume(await findDuplication(project, { minNodes, cache }));
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
@@ -199,6 +211,7 @@ export async function runReport(
       },
     };
   } finally {
+    cache?.close();
     project.close();
   }
 }
