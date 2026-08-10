@@ -4,7 +4,9 @@ import {
   emptyConfig,
   fixtureConfig,
   importsFixtureConfig,
+  tangleConfig,
   testSplitConfig,
+  typeOnlyConfig,
 } from "./helpers.js";
 
 describe("runReport", () => {
@@ -162,6 +164,64 @@ describe("runReport", () => {
     const { markdown } = await runReport({ config: fixtureConfig(), minNodes: 15 });
     expect(markdown).not.toContain("/Users/");
     expect(markdown).not.toMatch(/^\//m);
+  });
+
+  it("prefers the cut that dissolves the most tangle, then the cheapest", async () => {
+    // The old rule took the lowest-weight edge that broke the component at
+    // all, which reliably found the least interesting cut: on a real 7-module
+    // tangle it detached one leaf and left six knotted. Here both edges of the
+    // cycle dissolve it equally, so the tie-break decides -- and it must pick
+    // the type-only one, which is erased at compile time and costs a file
+    // move rather than a dependency inversion.
+    const { json } = await runReport({ config: typeOnlyConfig(), granularity: 2, minNodes: 100 });
+    const cycle = json.cycles.find((c) => c.modules.includes("model") && c.modules.includes("pure"));
+    expect(cycle).toBeDefined();
+    expect(cycle!.modules.sort()).toEqual(["model", "pure"]);
+    expect(cycle!.cuts).toHaveLength(1);
+    expect({ from: cycle!.cuts[0]!.from, to: cycle!.cuts[0]!.to }).toEqual({
+      from: "pure",
+      to: "model",
+    });
+    expect(cycle!.cuts[0]!.typeOnly).toBe(true);
+    // ...and the residual is stated, so "one cut" cannot read as "solved"
+    // when it is not. Here it genuinely is solved.
+    expect(cycle!.residual).toBe(1);
+  });
+
+  it("takes the cut that dissolves most, not the cheapest one that works", async () => {
+    // The reported pathology, reproduced: a three-package ring with a fourth
+    // hanging off it by one symbol each way. The cheapest breaking edge is the
+    // leaf's, and cutting it leaves the ring exactly as tangled. A heavier ring
+    // edge does strictly better, and that is the one to suggest.
+    const { json } = await runReport({ config: tangleConfig(), granularity: 2, minNodes: 100 });
+    const cycle = json.cycles[0]!;
+    expect(cycle.modules.sort()).toEqual(["alpha", "beta", "gamma", "leaf"]);
+
+    const cut = cycle.cuts[0]!;
+    // Not `alpha -> leaf` or `leaf -> alpha`, which are weight 1 and would
+    // have been chosen first under cost ordering alone.
+    expect(cut.weight).toBe(3);
+    expect([cut.from, cut.to]).not.toContain("leaf");
+    // Four modules down to two, rather than the three a leaf cut would leave.
+    expect(cycle.residual).toBe(2);
+  });
+
+  it("reports the residual honestly when a cut only detaches a leaf", async () => {
+    // A three-module ring with one extra module hanging off it: cutting the
+    // leaf's edge shrinks the SCC without untangling the ring, and the report
+    // has to say which of the two happened.
+    const { json } = await runReport({
+      config: fixtureConfig(),
+      minNodes: 15,
+      granularity: "file",
+    });
+    for (const cycle of json.cycles) {
+      expect(cycle.residual).toBeLessThanOrEqual(cycle.modules.length);
+      // Either no cut was found and nothing changed, or a cut was found and it
+      // provably shrank the component.
+      if (cycle.cuts.length === 0) expect(cycle.residual).toBe(cycle.modules.length);
+      else expect(cycle.residual).toBeLessThan(cycle.modules.length);
+    }
   });
 
   it("only suggests cuts it has verified break the cycle", async () => {

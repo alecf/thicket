@@ -4,7 +4,22 @@ import {
   renderMarkdown,
   type CycleFinding,
   type ReportInput,
+  type TangleEdge,
 } from "../src/report/markdown.js";
+
+/**
+ * A tangle edge. `files` defaults to one synthetic importer, because the
+ * report prints file counts and a zero-length list would make every edge look
+ * free to cut.
+ */
+const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
+  from,
+  to,
+  weight,
+  files: [`${from}/importer.ts`],
+  typeOnly: false,
+  ...over,
+});
 
 beforeAll(async () => {
   await initHash();
@@ -58,25 +73,22 @@ function render(cycle: CycleFinding): string {
 /** A ring of `n` modules, each importing the next, plus one chord. */
 function ring(n: number, extraEdges = 0): CycleFinding {
   const modules = Array.from({ length: n }, (_, i) => `m${String(i).padStart(2, "0")}`);
-  const edges = modules.map((from, i) => ({
-    from,
-    to: modules[(i + 1) % n]!,
-    weight: i + 1,
-  }));
+  const edges = modules.map((from, i) => edge(from, modules[(i + 1) % n]!, i + 1));
   for (let i = 0; i < extraEdges; i++) {
-    edges.push({ from: modules[0]!, to: modules[(i + 2) % n]!, weight: 99 });
+    edges.push(edge(modules[0]!, modules[(i + 2) % n]!, 99));
   }
-  return { id: "THK-CYC-ring", modules, edges, cuts: [] };
+  return { id: "THK-CYC-ring", modules, edges, cuts: [], residual: n };
 }
 
 const twoModule: CycleFinding = {
   id: "THK-CYC-1",
   modules: ["src/gamma.ts", "src/alpha.ts"], // deliberately unsorted
   edges: [
-    { from: "src/alpha.ts", to: "src/gamma.ts", weight: 3 },
-    { from: "src/gamma.ts", to: "src/alpha.ts", weight: 1 },
+    edge("src/alpha.ts", "src/gamma.ts", 3),
+    edge("src/gamma.ts", "src/alpha.ts", 1),
   ],
-  cuts: [{ from: "src/gamma.ts", to: "src/alpha.ts" }],
+  cuts: [edge("src/gamma.ts", "src/alpha.ts", 1)],
+  residual: 1,
 };
 
 describe("the cycle diagram", () => {
@@ -124,10 +136,11 @@ describe("the cycle diagram", () => {
       id: "THK-CYC-odd",
       modules: ["app/[id]/page.tsx", "lib/util.ts"],
       edges: [
-        { from: "app/[id]/page.tsx", to: "lib/util.ts", weight: 2 },
-        { from: "lib/util.ts", to: "app/[id]/page.tsx", weight: 1 },
+        edge("app/[id]/page.tsx", "lib/util.ts", 2),
+        edge("lib/util.ts", "app/[id]/page.tsx", 1),
       ],
       cuts: [],
+      residual: 1,
     };
     expect(diagram(render(odd))).toEqual([
       "flowchart LR",
@@ -145,11 +158,12 @@ describe("the cycle diagram", () => {
       id: "THK-CYC-mixed",
       modules: ["a b", "clean/path", "other"],
       edges: [
-        { from: "a b", to: "clean/path", weight: 1 },
-        { from: "clean/path", to: "other", weight: 1 },
-        { from: "other", to: "a b", weight: 1 },
+        edge("a b", "clean/path", 1),
+        edge("clean/path", "other", 1),
+        edge("other", "a b", 1),
       ],
       cuts: [],
+      residual: 1,
     };
     const nodes = diagram(render(mixed)).filter((l) => l.includes("["));
     expect(nodes).toEqual([
@@ -164,10 +178,11 @@ describe("the cycle diagram", () => {
       id: "THK-CYC-quote",
       modules: ['weird"name', "plain"],
       edges: [
-        { from: 'weird"name', to: "plain", weight: 1 },
-        { from: "plain", to: 'weird"name', weight: 1 },
+        edge('weird"name', "plain", 1),
+        edge("plain", 'weird"name', 1),
       ],
       cuts: [],
+      residual: 1,
     };
     expect(diagram(render(quoted))).toContain('  weird_name["weird#quot;name"]');
   });
@@ -179,10 +194,11 @@ describe("the cycle diagram", () => {
       id: "THK-CYC-collide",
       modules: ["a:b", "a?b"],
       edges: [
-        { from: "a:b", to: "a?b", weight: 1 },
-        { from: "a?b", to: "a:b", weight: 1 },
+        edge("a:b", "a?b", 1),
+        edge("a?b", "a:b", 1),
       ],
       cuts: [],
+      residual: 1,
     };
     const drawn = diagram(render(collide));
     expect(drawn).toEqual([
@@ -200,10 +216,11 @@ describe("the cycle diagram", () => {
       id: "THK-CYC-kw",
       modules: ["end", "start"],
       edges: [
-        { from: "end", to: "start", weight: 1 },
-        { from: "start", to: "end", weight: 1 },
+        edge("end", "start", 1),
+        edge("start", "end", 1),
       ],
       cuts: [],
+      residual: 1,
     };
     expect(diagram(render(keyword))).toContain('  _end["end"]');
   });
@@ -211,9 +228,89 @@ describe("the cycle diagram", () => {
   it("still names the suggested cut in prose beside the chart", () => {
     // The chart is for reading; the cut is for acting on. A harness that does
     // not parse mermaid must still be able to find the edge to delete.
+    expect(render(twoModule)).toContain("- **suggested cut:** `src/gamma.ts` → `src/alpha.ts`");
+  });
+
+  it("names the file a small cut lives in", () => {
+    // A one-symbol edge is one line of one file. Printing that line is the
+    // entire difference between acting on the suggestion and going to grep
+    // for it; on a real report the cut was a single import and the report
+    // never said where.
     expect(render(twoModule)).toContain(
-      "- **suggested cuts (1):** `src/gamma.ts` → `src/alpha.ts`",
+      "- **suggested cut:** `src/gamma.ts` → `src/alpha.ts` — 1 symbol in" +
+        " `src/gamma.ts/importer.ts`",
     );
+  });
+
+  it("counts the files of a cut too large to name them", () => {
+    const wide: CycleFinding = {
+      ...twoModule,
+      cuts: [
+        edge("src/gamma.ts", "src/alpha.ts", 30, {
+          files: Array.from({ length: 9 }, (_, i) => `src/f${i}.ts`),
+        }),
+      ],
+    };
+    expect(render(wide)).toContain(
+      "- **suggested cut:** `src/gamma.ts` → `src/alpha.ts` — 30 symbols across 9 files",
+    );
+  });
+
+  it("says what the cut leaves behind", () => {
+    // "suggested cuts (1)" with nothing after it reads as "apply this and the
+    // tangle is gone". On a real 7-module tangle the suggested cut detached
+    // one leaf and left the other six knotted, and the report did not say so.
+    const partial: CycleFinding = {
+      ...twoModule,
+      modules: ["a", "b", "c", "d", "e", "f", "g"],
+      residual: 6,
+    };
+    expect(render(partial)).toContain(
+      "- **leaves:** 6 of 7 modules still mutually dependent.",
+    );
+  });
+
+  it("says plainly when a cut finishes the job", () => {
+    expect(render(twoModule)).toContain("- **leaves:** nothing — this breaks the cycle completely.");
+  });
+
+  it("says so when no single edge breaks the cycle", () => {
+    const stuck: CycleFinding = { ...twoModule, cuts: [], residual: 2 };
+    const out = render(stuck);
+    expect(out).toContain("- **no single edge breaks this cycle**");
+    expect(out).not.toContain("**suggested cut:**");
+    expect(out).not.toContain("**leaves:**");
+  });
+
+  it("marks a type-only edge in the chart", () => {
+    // Such an edge has no runtime existence at all, so a cycle built from
+    // them is a filing problem rather than an initialization hazard.
+    const erased: CycleFinding = {
+      ...twoModule,
+      edges: [
+        edge("src/alpha.ts", "src/gamma.ts", 3, { typeOnly: true }),
+        edge("src/gamma.ts", "src/alpha.ts", 1),
+      ],
+      cuts: [],
+    };
+    expect(diagram(render(erased))).toEqual([
+      "flowchart LR",
+      "  src/alpha.ts -->|3 type| src/gamma.ts",
+      "  src/gamma.ts -->|1| src/alpha.ts",
+    ]);
+  });
+
+  it("explains what the arrow numbers mean, once per section", () => {
+    // The charts carried an unlabelled number on every arrow and no legend
+    // anywhere in a 2,600-line report. It is neither imports nor files, and
+    // the difference between 12 symbols and the 7 files you would edit is
+    // most of the estimate.
+    const out = renderMarkdown({ ...base, cycles: [twoModule, { ...twoModule, id: "THK-CYC-2" }] });
+    expect(out).toContain("Arrows run importer → imported.");
+    expect(out).toContain("distinct symbols bound across the edge");
+    expect(out).toContain("`type` marks one that is erased at compile time");
+    // Once, not once per finding.
+    expect(out.split("Arrows run importer").length - 1).toBe(1);
   });
 
   it("omits the chart rather than truncating it when the SCC is too large", () => {

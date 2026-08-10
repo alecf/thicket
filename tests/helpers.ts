@@ -101,3 +101,24 @@ export function monorepoConfigs(): string[] {
 export function testSplitConfig(): string {
   return resolve(here, "fixtures/testsplit/tsconfig.json");
 }
+
+/**
+ * Three packages arranged so that every type-only case is distinguishable:
+ * `pure -> model` is erased entirely, `view -> model` mixes one type-only
+ * import with one value import, and `model -> pure` is plain value. The first
+ * two close a cycle with the third, so cut selection has a type-only edge and
+ * a runtime edge that dissolve it equally.
+ */
+export function typeOnlyConfig(): string {
+  return resolve(here, "fixtures/typeonly/tsconfig.json");
+}
+
+/**
+ * A three-package ring with a fourth package hanging off it by a single
+ * symbol in each direction. The cheapest edge that breaks the component
+ * detaches the leaf and leaves the ring intact; a heavier ring edge dissolves
+ * strictly more. Distinguishes "first cut that works" from "best cut".
+ */
+export function tangleConfig(): string {
+  return resolve(here, "fixtures/tangle/tsconfig.json");
+}

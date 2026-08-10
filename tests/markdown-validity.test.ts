@@ -1,8 +1,26 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { initHash } from "../src/hash.js";
-import { renderMarkdown, type ReportInput } from "../src/report/markdown.js";
+import {
+  renderMarkdown,
+  type ReportInput,
+  type TangleEdge,
+} from "../src/report/markdown.js";
 import type { Ranked } from "../src/report/rank.js";
+
+/**
+ * A tangle edge. `files` defaults to one synthetic importer, because the
+ * report prints file counts and a zero-length list would make every edge look
+ * free to cut.
+ */
+const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
+  from,
+  to,
+  weight,
+  files: [`${from}/importer.ts`],
+  typeOnly: false,
+  ...over,
+});
 
 beforeAll(async () => {
   await initHash();
@@ -58,10 +76,11 @@ const base: ReportInput = {
       id: "THK-CYC-1",
       modules: ["core", "ui"],
       edges: [
-        { from: "core", to: "ui", weight: 4 },
-        { from: "ui", to: "core", weight: 1 },
+        edge("core", "ui", 4),
+        edge("ui", "core", 1),
       ],
-      cuts: [{ from: "ui", to: "core" }],
+      cuts: [edge("ui", "core", 1)],
+      residual: 1,
     },
   ],
   totalFindings: 2,

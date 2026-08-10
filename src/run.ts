@@ -201,13 +201,16 @@ export async function runReport(
     );
     const cycles: CycleFinding[] = components.map((modules) => {
       const members = new Set(modules);
+      // `graph.edges` is already sorted by (from, to), and filtering preserves
+      // that, so the chart's arrow order is fixed by the graph.
+      const inner = graph.edges.filter((e) => members.has(e.from) && members.has(e.to));
+      const { cuts, residual } = suggestCuts(modules, inner);
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
         modules,
-        // `graph.edges` is already sorted by (from, to), and filtering
-        // preserves that, so the chart's arrow order is fixed by the graph.
-        edges: graph.edges.filter((e) => members.has(e.from) && members.has(e.to)),
-        cuts: suggestCuts(modules, graph.edges),
+        edges: inner,
+        cuts,
+        residual,
       };
     });
 
@@ -309,35 +312,65 @@ export async function runReport(
 }
 
 /**
- * The lowest-weight single edge inside the SCC whose removal provably breaks
- * it, verified by re-running Tarjan on the induced subgraph. Returns nothing
- * when no single edge suffices: a suggested cut that does not break the cycle
- * costs the reader a refactor and buys nothing, so an empty list is the
- * honest answer.
+ * The single edge whose removal dissolves the most of the SCC, with what is
+ * left after it.
+ *
+ * The previous rule took the lowest-weight edge that broke the component at
+ * all, which reliably found the LEAST interesting cut: on a real 7-module
+ * tangle it proposed a one-symbol edge that detached a leaf and left the other
+ * six knotted, and on a 12-module one it did the same. Cheapness is a
+ * tie-break, not the objective — the objective is how much tangle the cut
+ * dissolves, so every inner edge is scored by the largest SCC that survives it.
+ *
+ * Ties go to the cut a human would rather make: a type-only edge first, since
+ * it is erased at compile time and breaking it usually means moving a types
+ * file; then fewest files to edit, which is the real unit of work; then fewest
+ * symbols; then name, so the result never depends on iteration order.
+ *
+ * Returns no cut when no single edge helps. A suggestion that does not shrink
+ * the component costs the reader a refactor and buys nothing, and `residual`
+ * then reports the component unchanged.
  */
 function suggestCuts(
   component: readonly string[],
-  edges: readonly ModuleEdge[],
-): { from: string; to: string }[] {
-  if (component.length > MAX_CUT_SEARCH_MODULES) return [];
-  const members = new Set(component);
-  const inner = edges
-    .filter((e) => members.has(e.from) && members.has(e.to))
-    .sort(
-      (a, b) =>
-        a.weight - b.weight || compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
-    );
+  inner: readonly ModuleEdge[],
+): { cuts: ModuleEdge[]; residual: number } {
+  const unchanged = { cuts: [], residual: component.length };
+  if (component.length > MAX_CUT_SEARCH_MODULES) return unchanged;
 
-  for (const candidate of inner) {
-    const adjacency = new Map<string, string[]>(component.map((m) => [m, []]));
-    for (const e of inner) {
-      if (e === candidate) continue;
-      adjacency.get(e.from)!.push(e.to);
-    }
-    const broken = stronglyConnected(component, adjacency).every(
-      (c) => c.length < component.length,
-    );
-    if (broken) return [{ from: candidate.from, to: candidate.to }];
+  const candidates = [...inner].sort(
+    (a, b) =>
+      Number(b.typeOnly) - Number(a.typeOnly) ||
+      a.files.length - b.files.length ||
+      a.weight - b.weight ||
+      compareStrings(a.from, b.from) ||
+      compareStrings(a.to, b.to),
+  );
+
+  let best: { edge: ModuleEdge; residual: number } | undefined;
+  for (const candidate of candidates) {
+    const residual = largestSccWithout(component, inner, candidate);
+    if (residual >= component.length) continue;
+    // Strictly better only, so among equally dissolving cuts the cheapest
+    // wins -- `candidates` is already in ascending cost order.
+    if (best === undefined || residual < best.residual) best = { edge: candidate, residual };
+    // Nothing can beat every module standing alone.
+    if (residual <= 1) break;
   }
-  return [];
+
+  return best === undefined ? unchanged : { cuts: [best.edge], residual: best.residual };
+}
+
+/** Size of the largest SCC of `component` once `omit` is removed. */
+function largestSccWithout(
+  component: readonly string[],
+  inner: readonly ModuleEdge[],
+  omit: ModuleEdge,
+): number {
+  const adjacency = new Map<string, string[]>(component.map((m) => [m, []]));
+  for (const e of inner) {
+    if (e === omit) continue;
+    adjacency.get(e.from)!.push(e.to);
+  }
+  return stronglyConnected(component, adjacency).reduce((max, c) => Math.max(max, c.length), 0);
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { buildModuleGraph } from "../src/graph/build.js";
 import { propagationCost, stronglyConnected } from "../src/graph/metrics.js";
-import { fixtureConfig, monorepoConfigs } from "./helpers.js";
+import { fixtureConfig, monorepoConfigs, typeOnlyConfig } from "./helpers.js";
 
 describe("stronglyConnected", () => {
   it("finds a simple 2-node cycle", () => {
@@ -128,8 +128,68 @@ describe("buildModuleGraph", () => {
     // Each package does `import { type Vec, UNIT }` from shared -> weight 2.
     // A weight of 1 here would mean edges are counted per import declaration.
     expect(graph.edges).toEqual([
-      { from: "a", to: "shared", weight: 2 },
-      { from: "b", to: "shared", weight: 2 },
+      {
+        from: "a",
+        to: "shared",
+        weight: 2,
+        files: ["a/src/index.ts"],
+        typeOnly: false,
+      },
+      {
+        from: "b",
+        to: "shared",
+        weight: 2,
+        files: ["b/src/index.ts"],
+        typeOnly: false,
+      },
     ]);
+  });
+
+  it("marks an edge type-only only when nothing on it survives compilation", async () => {
+    // The weight alone cannot tell a runtime dependency from a filing mistake.
+    // On a real application the single most interesting edge in a 12-module
+    // tangle was 100% `import type` -- it has no module-init hazard and is
+    // fixed by moving a types file -- while the edge the tool suggested
+    // cutting was a value import. Reporting them identically sends a reader
+    // after the wrong one.
+    const project = await openProject(typeOnlyConfig());
+    const graph = buildModuleGraph(project, { granularity: 2 });
+    expect(graph.modules).toEqual(["model", "pure", "view"]);
+    expect(graph.edges).toEqual([
+      {
+        from: "model",
+        to: "pure",
+        weight: 1,
+        files: ["packages/model/uses.ts"],
+        typeOnly: false,
+      },
+      {
+        from: "pure",
+        to: "model",
+        weight: 1,
+        files: ["packages/pure/describe.ts"],
+        typeOnly: true,
+      },
+      // One value import beside one type-only import: still a real dependency.
+      {
+        from: "view",
+        to: "model",
+        weight: 4,
+        files: ["packages/view/render.ts"],
+        typeOnly: false,
+      },
+    ]);
+  });
+
+  it("names every file carrying an edge, because files are the unit of work", async () => {
+    // The weight counts symbols and the edit count is files, and the two differ by
+    // up to 2x on real edges. A reader triaging a tangle needs the second.
+    const project = await openProject(typeOnlyConfig());
+    const graph = buildModuleGraph(project, { granularity: 2 });
+    const viewToModel = graph.edges.find((e) => e.from === "view" && e.to === "model")!;
+    // Four symbols from two different files in `model`, all imported by ONE
+    // file in `view`: four symbols, one edit.
+    expect(viewToModel.weight).toBe(4);
+    expect(viewToModel.files).toEqual(["packages/view/render.ts"]);
   });
 });

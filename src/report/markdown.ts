@@ -4,6 +4,18 @@ import type { Census } from "./census.js";
 import { canonicalKind } from "./kinds.js";
 import type { Ranked } from "./rank.js";
 
+/** One dependency edge inside a tangle, with what it would cost to remove. */
+export interface TangleEdge {
+  from: string;
+  to: string;
+  /** Distinct symbols bound across the edge. */
+  weight: number;
+  /** Files in `from` that carry it, sorted. This is the number of edits. */
+  files: string[];
+  /** Erased at compile time, so not a runtime dependency at all. */
+  typeOnly: boolean;
+}
+
 export interface CycleFinding {
   id: string;
   modules: string[];
@@ -13,8 +25,16 @@ export interface CycleFinding {
    * on the finding rather than recomputed at render time so the Markdown chart
    * and the JSON sidecar are guaranteed to describe the same graph.
    */
-  edges: { from: string; to: string; weight: number }[];
-  cuts: { from: string; to: string }[];
+  edges: TangleEdge[];
+  cuts: TangleEdge[];
+  /**
+   * Modules still mutually dependent after the suggested cuts, i.e. the
+   * largest SCC that survives. Equal to `modules.length` when nothing was
+   * found. Stating it is what stops "suggested cuts (1)" reading as "apply
+   * this and the tangle is gone" — the first cut on a real 7-module tangle
+   * detached one leaf and left the other six knotted.
+   */
+  residual: number;
 }
 
 export interface ReportInput {
@@ -78,6 +98,29 @@ interface Block {
   lines: string[];
 }
 
+/**
+ * Text printed once under a section heading, before its findings.
+ *
+ * The tangle charts carried an unlabelled number on every arrow and no legend
+ * anywhere in a 2,600-line report. A reader guesses it means imports or files;
+ * it means neither, and on a real edge the difference between 12 symbols and
+ * the 7 files you would actually edit is most of the estimate.
+ */
+const SECTION_PREAMBLE: Record<string, string> = {
+  "## Module tangle":
+    "Arrows run importer → imported. The number is distinct symbols bound" +
+    " across the edge; `type` marks one that is erased at compile time and so" +
+    " is not a runtime dependency at all. The dotted arrow is the suggested cut.",
+};
+
+function sectionHeader(section: string): string[] {
+  const preamble = SECTION_PREAMBLE[section];
+  // Blank line after the heading: without it the first body line becomes a
+  // lazy continuation of nothing in some parsers and a paragraph glued to
+  // the heading in others.
+  return preamble === undefined ? [section, ""] : [section, "", preamble, ""];
+}
+
 export function renderMarkdown(input: ReportInput): string {
   return renderReport(input).markdown;
 }
@@ -112,10 +155,7 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   for (const block of emitted) {
     if (block.section !== section) {
       section = block.section;
-      // Blank line after the heading: without it the first body line becomes a
-      // lazy continuation of nothing in some parsers and a paragraph glued to
-      // the heading in others.
-      lines.push(section, "");
+      lines.push(...sectionHeader(section));
     }
     lines.push(...block.lines);
   }
@@ -159,7 +199,7 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
   let section: string | undefined;
   for (const block of blocks) {
     const text = (
-      block.section === section ? block.lines : [block.section, "", ...block.lines]
+      block.section === section ? block.lines : [...sectionHeader(block.section), ...block.lines]
     ).join("\n");
     const cost = estimateTokens(text) + 1; // +1 for the joining newline
     if (used + cost > input.budgetTokens) break;
@@ -433,14 +473,47 @@ function cycleBlock(cycle: CycleFinding): string[] {
   // The chart when it fits, the member list when it does not — never both, and
   // never a chart with edges left out.
   lines.push(...(mermaidCycle(cycle) ?? memberFallback(cycle)));
-  if (cycle.cuts.length > 0) {
-    lines.push(
-      `- **suggested cuts (${cycle.cuts.length}):** ` +
-        cycle.cuts.map((c) => `\`${c.from}\` → \`${c.to}\``).join(", "),
-    );
-  }
+  lines.push(...cutLines(cycle));
   lines.push("");
   return lines;
+}
+
+/**
+ * Files named individually before an edge is summarized by count.
+ *
+ * A one-symbol edge is one line of one file, and printing that line is the
+ * whole difference between acting on the suggestion and going to grep for it.
+ * Past a few files the list stops being a location and starts being a wall.
+ */
+const MAX_CUT_FILES_NAMED = 3;
+
+function cutLines(cycle: CycleFinding): string[] {
+  if (cycle.cuts.length === 0) {
+    return [
+      `- **no single edge breaks this cycle** — all ${cycle.modules.length} modules stay` +
+        ` mutually dependent whichever one you remove.`,
+    ];
+  }
+
+  const out = cycle.cuts.map((cut) => {
+    const kind = cut.typeOnly ? " type-only" : "";
+    const symbols = `${cut.weight}${kind} symbol${cut.weight === 1 ? "" : "s"}`;
+    const where =
+      cut.files.length <= MAX_CUT_FILES_NAMED
+        ? ` in ${cut.files.map((f) => `\`${f}\``).join(", ")}`
+        : ` across ${cut.files.length} files`;
+    return `- **suggested cut:** \`${cut.from}\` → \`${cut.to}\` — ${symbols}${where}`;
+  });
+
+  // What is left, always. A cut that detaches one leaf and a cut that
+  // dissolves the tangle read identically without this line.
+  out.push(
+    cycle.residual <= 1
+      ? `- **leaves:** nothing — this breaks the cycle completely.`
+      : `- **leaves:** ${cycle.residual} of ${cycle.modules.length} modules still mutually` +
+        ` dependent.`,
+  );
+  return out;
 }
 
 /**
@@ -505,9 +578,10 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
       const to = id.get(e.to);
       // A dotted, labelled arrow for the edge `suggestCuts` verified breaks the
       // cycle: the one thing the reader is meant to do with this picture.
+      const label = e.typeOnly ? `${e.weight} type` : `${e.weight}`;
       return cuts.has(`${e.from} -> ${e.to}`)
-        ? `  ${from} -. "cut · ${e.weight}" .-> ${to}`
-        : `  ${from} -->|${e.weight}| ${to}`;
+        ? `  ${from} -. "cut · ${label}" .-> ${to}`
+        : `  ${from} -->|${label}| ${to}`;
     }),
   ];
 

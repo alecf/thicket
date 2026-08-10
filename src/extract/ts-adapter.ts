@@ -25,6 +25,20 @@ export interface ImportDetail {
    * dynamic import, which bind no names but are still real dependencies.
    */
   symbols: number;
+  /**
+   * True when every import of `target` in this file is erased at compile time
+   * -- `import type`, `export type`, or per-specifier `{ type A }`.
+   *
+   * Such a dependency has no runtime existence at all: no module-init order to
+   * get wrong, no bundler cycle, and breaking it usually means moving a types
+   * file rather than inverting a dependency. A cycle made only of these edges
+   * is a filing problem, not an architecture problem, and the report should not
+   * present the two as the same finding.
+   *
+   * A side-effect or dynamic import binds no names yet IS a runtime
+   * dependency, so it clears this flag rather than being vacuously erasable.
+   */
+  erasable: boolean;
 }
 
 export interface Project {
@@ -48,21 +62,32 @@ export interface Project {
  * Kinds are matched by enum VALUE. `SyntaxKind[k]` reverse-maps to range-marker
  * aliases for several kinds, so name matching silently misses cases.
  */
-function bindingCount(decl: Node): number {
+function bindingCount(decl: Node): { count: number; erasable: boolean } {
   let count = 0;
+  let erased = 0;
   let named = false;
+  // `import type { A }` / `export type { A }` puts the marker on the clause or
+  // the declaration, where it is a flag rather than a child node, and it
+  // applies to every binding underneath.
+  const wholeDeclErased = isTypeOnly(decl);
   forEachChildSafe(decl, (child) => {
     if (child.kind === SyntaxKind.ImportClause) {
       named = true;
-      // `import d, * as ns from` / `import d, { a, b } from`. The `type` of a
-      // type-only clause is a flag, not a child, so type-only imports count
-      // exactly like value imports — they are still coupling.
+      const clauseErased = wholeDeclErased || isTypeOnly(child);
+      // `import d, * as ns from` / `import d, { a, b } from`.
       forEachChildSafe(child, (binding) => {
-        if (binding.kind === SyntaxKind.Identifier) count += 1; // default import
-        else if (binding.kind === SyntaxKind.NamespaceImport) count += 1; // * as ns
-        else if (binding.kind === SyntaxKind.NamedImports) {
+        if (binding.kind === SyntaxKind.Identifier) {
+          count += 1; // default import
+          if (clauseErased) erased += 1;
+        } else if (binding.kind === SyntaxKind.NamespaceImport) {
+          count += 1; // * as ns
+          if (clauseErased) erased += 1;
+        } else if (binding.kind === SyntaxKind.NamedImports) {
           forEachChildSafe(binding, (spec) => {
-            if (spec.kind === SyntaxKind.ImportSpecifier) count += 1;
+            if (spec.kind !== SyntaxKind.ImportSpecifier) return;
+            count += 1;
+            // `import { type A, B }` marks the specifier, not the clause.
+            if (clauseErased || isTypeOnly(spec)) erased += 1;
           });
         }
       });
@@ -70,18 +95,37 @@ function bindingCount(decl: Node): number {
       // `export { a, b } from "./x.js"` — a re-export is an import too.
       named = true;
       forEachChildSafe(child, (spec) => {
-        if (spec.kind === SyntaxKind.ExportSpecifier) count += 1;
+        if (spec.kind !== SyntaxKind.ExportSpecifier) return;
+        count += 1;
+        if (wholeDeclErased || isTypeOnly(spec)) erased += 1;
       });
     } else if (child.kind === SyntaxKind.NamespaceExport) {
       named = true;
       count += 1; // `export * as ns from "./x.js"`
+      if (wholeDeclErased) erased += 1;
     }
   });
   // `export * from "./x.js"` names nothing, yet pulls in the whole module
   // surface; count it like a namespace import. A side-effect `import "./x.js"`
   // is the other clause-less form and correctly stays at 0.
-  if (!named && decl.kind === SyntaxKind.ExportDeclaration) count = 1;
-  return count;
+  if (!named && decl.kind === SyntaxKind.ExportDeclaration) {
+    count = 1;
+    if (wholeDeclErased) erased = 1;
+  }
+  // A clause-less import is `import "./x.js"`: no bindings, but a real runtime
+  // dependency, so it must not come out erasable by having nothing to erase.
+  return { count, erasable: count > 0 && erased === count };
+}
+
+/**
+ * The `isTypeOnly` flag, read defensively.
+ *
+ * It is a lazy getter on the unstable AST rather than an own property, and it
+ * is absent on the node kinds that cannot carry it. Reading it through a cast
+ * keeps every other access in this file on the typed surface.
+ */
+function isTypeOnly(node: Node): boolean {
+  return (node as { isTypeOnly?: boolean }).isTypeOnly === true;
 }
 
 /**
@@ -91,15 +135,17 @@ function bindingCount(decl: Node): number {
  * consulted while iterating that array — which stays the single source of
  * truth for which specifiers exist.
  */
-function bindingCountsBySpecifier(sourceFile: SourceFileNode): Map<Node, number> {
-  const out = new Map<Node, number>();
+function bindingCountsBySpecifier(
+  sourceFile: SourceFileNode,
+): Map<Node, { count: number; erasable: boolean }> {
+  const out = new Map<Node, { count: number; erasable: boolean }>();
   walk(sourceFile, (node) => {
     if (node.kind !== SyntaxKind.ImportDeclaration && node.kind !== SyntaxKind.ExportDeclaration) {
       return;
     }
-    const count = bindingCount(node);
+    const detail = bindingCount(node);
     forEachChildSafe(node, (child) => {
-      if (child.kind === SyntaxKind.StringLiteral) out.set(child, count);
+      if (child.kind === SyntaxKind.StringLiteral) out.set(child, detail);
     });
   });
   return out;
@@ -293,17 +339,22 @@ export async function openProject(
 
   function importDetailsOf(file: FileHandle): ImportDetail[] {
     const counts = bindingCountsBySpecifier(file.sourceFile);
-    const symbolsByTarget = new Map<string, number>();
+    const byTarget = new Map<string, { symbols: number; erasable: boolean }>();
     for (const specifier of file.sourceFile.imports ?? []) {
       const target = resolveImport(file, specifier);
       if (!target || target === file.path) continue;
       // A specifier with no entry is a dynamic `import()` or a `require()`:
-      // a real dependency that binds no names statically.
-      const symbols = counts.get(specifier as Node) ?? 0;
-      symbolsByTarget.set(target, (symbolsByTarget.get(target) ?? 0) + symbols);
+      // a real dependency that binds no names statically, and never erasable.
+      const detail = counts.get(specifier as Node) ?? { count: 0, erasable: false };
+      const prior = byTarget.get(target);
+      byTarget.set(target, {
+        symbols: (prior?.symbols ?? 0) + detail.count,
+        // One value import anywhere in the file makes the whole edge real.
+        erasable: (prior?.erasable ?? true) && detail.erasable,
+      });
     }
-    return [...symbolsByTarget.entries()]
-      .map(([target, symbols]) => ({ target, symbols }))
+    return [...byTarget.entries()]
+      .map(([target, d]) => ({ target, symbols: d.symbols, erasable: d.erasable }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 

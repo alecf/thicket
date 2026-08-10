@@ -1,9 +1,27 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { findingId } from "../src/report/findings.js";
 import { canonicalKind } from "../src/report/kinds.js";
-import { renderMarkdown, type ReportInput } from "../src/report/markdown.js";
+import {
+  renderMarkdown,
+  type ReportInput,
+  type TangleEdge,
+} from "../src/report/markdown.js";
 import type { Ranked } from "../src/report/rank.js";
 import { initHash } from "../src/hash.js";
+
+/**
+ * A tangle edge. `files` defaults to one synthetic importer, because the
+ * report prints file counts and a zero-length list would make every edge look
+ * free to cut.
+ */
+const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
+  from,
+  to,
+  weight,
+  files: [`${from}/importer.ts`],
+  typeOnly: false,
+  ...over,
+});
 
 beforeAll(async () => {
   await initHash();
@@ -60,10 +78,11 @@ const twoModuleCycle = {
   id: "THK-CYC-1",
   modules: ["src/alpha.ts", "src/gamma.ts"],
   edges: [
-    { from: "src/alpha.ts", to: "src/gamma.ts", weight: 3 },
-    { from: "src/gamma.ts", to: "src/alpha.ts", weight: 1 },
+    edge("src/alpha.ts", "src/gamma.ts", 3),
+    edge("src/gamma.ts", "src/alpha.ts", 1),
   ],
-  cuts: [{ from: "src/gamma.ts", to: "src/alpha.ts" }],
+  cuts: [edge("src/gamma.ts", "src/alpha.ts", 1)],
+  residual: 1,
 };
 
 const base: ReportInput = {
@@ -348,10 +367,11 @@ describe("renderMarkdown", () => {
           id: "THK-CYC-1",
           modules: ["a", "b"],
           edges: [
-            { from: "a", to: "b", weight: 1 },
-            { from: "b", to: "a", weight: 1 },
+            edge("a", "b", 1),
+            edge("b", "a", 1),
           ],
           cuts: [],
+          residual: 1,
         },
       ],
       totalFindings: 50,

@@ -13,6 +13,19 @@ export interface ModuleEdge {
    * thirty (PRD §7.2).
    */
   weight: number;
+  /**
+   * Files in `from` that carry the edge, sorted. The weight counts symbols and
+   * the work counts files, and the two differ by up to 2x on real edges -- 12
+   * symbols across 7 files is seven edits, not twelve. A reader triaging a
+   * tangle needs the second number and cannot derive it from the first.
+   */
+  files: string[];
+  /**
+   * True when every import making up this edge is erased at compile time. Such
+   * an edge is not a runtime dependency at all, so a cycle built from them has
+   * no initialization hazard and is usually fixed by moving a types file.
+   */
+  typeOnly: boolean;
 }
 
 export interface ModuleGraph {
@@ -54,10 +67,10 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
     label = chosen.label;
   }
 
-  const weights = new Map<string, number>();
+  const weights = new Map<string, { weight: number; files: Set<string>; typeOnly: boolean }>();
   for (const file of project.files()) {
     const from = moduleOf[file.path]!;
-    for (const { target, symbols } of project.importDetailsOf(file)) {
+    for (const { target, symbols, erasable } of project.importDetailsOf(file)) {
       const to = moduleOf[target];
       // An import of a file outside the analyzed set has no module.
       if (to === undefined) continue;
@@ -65,15 +78,28 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
       // that those files belong together.
       if (to === from) continue;
       const key = `${from}${KEY_SEP}${to}`;
-      weights.set(key, (weights.get(key) ?? 0) + symbols);
+      const prior = weights.get(key);
+      weights.set(key, {
+        weight: (prior?.weight ?? 0) + symbols,
+        files: (prior?.files ?? new Set<string>()).add(file.path),
+        // One runtime import anywhere across the module pair makes the whole
+        // edge real, however many type-only imports accompany it.
+        typeOnly: (prior?.typeOnly ?? true) && erasable,
+      });
     }
   }
 
   const modules = [...new Set(Object.values(moduleOf))].sort(compareStrings);
   const edges: ModuleEdge[] = [...weights.entries()]
-    .map(([key, weight]) => {
+    .map(([key, edge]) => {
       const [from, to] = key.split(KEY_SEP) as [string, string];
-      return { from, to, weight };
+      return {
+        from,
+        to,
+        weight: edge.weight,
+        files: [...edge.files].sort(compareStrings),
+        typeOnly: edge.typeOnly,
+      };
     })
     .sort((a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to));
 
