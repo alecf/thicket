@@ -8,7 +8,13 @@ import type { Ranked } from "./rank.js";
 export interface TangleEdge {
   from: string;
   to: string;
-  /** Distinct symbols bound across the edge. */
+  /**
+   * Import sites across the edge: one per symbol per importing file, with
+   * `export … from` re-exports counted as the imports they are. NOT distinct
+   * symbol names — a symbol imported in eight files counts eight times, which
+   * is the point, since it is a proxy for how many edits severing the edge
+   * costs.
+   */
   weight: number;
   /** Files in `from` that carry it, sorted. This is the number of edits. */
   files: string[];
@@ -99,18 +105,43 @@ interface Block {
 }
 
 /**
+ * What `L0` and `L1` mean, stated where the findings are.
+ *
+ * Two characters, no legend, and the most load-bearing field on a duplication
+ * finding: the level decides cluster membership and therefore whether the
+ * location list is complete. An agent handed a 115-copy L0 finding took 115 for
+ * the total; it was 115 of ~130 occurrences of that literal shape, the rest
+ * differing only in the order of two object keys. Saying so turns the location
+ * list from a claimed inventory into what it is — one exact shape's copies.
+ */
+const LEVEL_LEGEND =
+  "`L0` matches copies that are identical once formatting is normalized;" +
+  " `L1` also ignores what identifiers are called. Each finding is therefore" +
+  " the copies of one exact shape — a near-variant that differs by an inserted" +
+  " line is a separate finding, cross-referenced as **see also** where one exists.";
+
+/**
  * Text printed once under a section heading, before its findings.
  *
  * The tangle charts carried an unlabelled number on every arrow and no legend
  * anywhere in a 2,600-line report. A reader guesses it means imports or files;
  * it means neither, and on a real edge the difference between 12 symbols and
  * the 7 files you would actually edit is most of the estimate.
+ *
+ * "Import sites", not "distinct symbols", because that is what it counts: one
+ * per symbol per importing file, re-exports included. The wrong name was worse
+ * than no name — an agent computed distinct symbol names, mismatched the report
+ * on every edge of a 26-edge tangle, and concluded the tool was broken before
+ * working out what the number really was.
  */
 const SECTION_PREAMBLE: Record<string, string> = {
   "## Module tangle":
-    "Arrows run importer → imported. The number is distinct symbols bound" +
-    " across the edge; `type` marks one that is erased at compile time and so" +
-    " is not a runtime dependency at all. The dotted arrow is the suggested cut.",
+    "Arrows run importer → imported. The number is import sites — one per" +
+    " symbol per importing file, `export … from` re-exports included; `type`" +
+    " marks an edge erased at compile time and so not a runtime dependency at" +
+    " all. The dotted arrow is the suggested cut.",
+  "## Duplication": LEVEL_LEGEND,
+  "## Duplication in tests": LEVEL_LEGEND,
 };
 
 function sectionHeader(section: string): string[] {
@@ -381,12 +412,18 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
   const tag = r.tag === "source" ? "" : ` · **[${r.tag}]**`;
   return [
     // The heading carries what a reader scans for -- the id to cite and the
-    // size to judge by. Level, kind and score go on a line beneath it rather
-    // than inflating the heading past a line's width.
+    // size to judge by. Level and kind go on a line beneath it rather than
+    // inflating the heading past a line's width.
+    //
+    // The ranker's score is not printed. It is an internal sort key, the
+    // report is already emitted in score order, and two of three agents asked
+    // to act on a finding named it as noise -- one noting that on an all-test
+    // cross-module cluster the weights multiply to 1.0, so it silently
+    // reprints the recoverable-lines figure and reads as a bug.
     `### ${c.id} · ${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
       `~${r.recoverableLines} lines recoverable`,
     "",
-    `${c.level} · \`${canonicalKind(c.kind)}\` · score ${Math.round(r.score)}${tag}`,
+    `${c.level} · \`${canonicalKind(c.kind)}\`${tag}`,
     "",
     ...contextLines(r),
     // An AST kind alone does not say whether a finding is worth acting on;

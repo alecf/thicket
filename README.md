@@ -111,9 +111,11 @@ thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 mod
 
 ## Duplication
 
+`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is therefore the copies of one exact shape — a near-variant that differs by an inserted line is a separate finding, cross-referenced as **see also** where one exists.
+
 ### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
 
-L1 · `FunctionDeclaration` · score 26
+L1 · `FunctionDeclaration`
 
 - **directly imported by:** 1 file outside the cluster
 
@@ -129,7 +131,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 
 ### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
 
-L0 · `Block` · score 18
+L0 · `Block`
 
 - **directly imported by:** 1 file outside the cluster
 
@@ -145,7 +147,7 @@ L0 · `Block` · score 18
 
 ## Module tangle
 
-Arrows run importer → imported. The number is distinct symbols bound across the edge; `type` marks one that is erased at compile time and so is not a runtime dependency at all. The dotted arrow is the suggested cut.
+Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. The dotted arrow is the suggested cut.
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
@@ -227,7 +229,7 @@ The cut is chosen by **how much of the tangle it dissolves**, not by what it cos
 
 Every cut states **what it leaves**: `leaves: 6 of 7 modules still mutually dependent`, or `nothing — this breaks the cycle completely`. Without that line, "suggested cuts (1)" reads as "apply this and the tangle is gone", which for a leaf-detaching cut is false.
 
-Each tangle is drawn as a **mermaid flowchart** of the whole component — every intra-SCC edge, labelled with the number of distinct symbols crossing it, with the suggested cut as a dotted arrow. A legend above the section says what the numbers are, because they are neither imports nor files and a reader will otherwise assume one of those.
+Each tangle is drawn as a **mermaid flowchart** of the whole component — every intra-SCC edge, labelled with the number of import sites crossing it, with the suggested cut as a dotted arrow. A legend above the section says what the number is — import sites, one per symbol per importing file, re-exports included — because it is neither distinct symbols nor files, and an agent that assumed the former mismatched every edge of a 26-edge tangle and concluded the tool was broken.
 
 Edges that are **entirely `import type`** are marked `type` in the chart. Such an edge is erased at compile time: there is no module-init order to get wrong, no bundler cycle, and breaking it usually means relocating a types file rather than inverting a dependency. On a real 12-module tangle the single most interesting edge was 100% type-only while the suggested cut was a value import — reporting the two identically sends a reader after the wrong one. A single value import anywhere across the module pair clears the flag, and a side-effect `import "./x.js"` binds no names yet is emphatically not erasable. Edge weights are what make the picture actionable: a 12-module tangle in a real application turned out to be held together by a handful of 1–3 symbol edges among links carrying two thousand. The chart is drawn in full or not at all, never truncated — drop arrows from a cycle and what remains can be acyclic, so a partial chart is not a weaker claim but a wrong one. Past 20 modules or 120 edges it is replaced by the member list and a line saying so.
 

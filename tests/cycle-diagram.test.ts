@@ -307,8 +307,14 @@ describe("the cycle diagram", () => {
     // most of the estimate.
     const out = renderMarkdown({ ...base, cycles: [twoModule, { ...twoModule, id: "THK-CYC-2" }] });
     expect(out).toContain("Arrows run importer → imported.");
-    expect(out).toContain("distinct symbols bound across the edge");
-    expect(out).toContain("`type` marks one that is erased at compile time");
+    // Named for what it counts. "distinct symbols" was wrong: the same symbol
+    // imported in eight files counts eight times, and `export … from`
+    // re-exports count too. An agent computed distinct names, mismatched on
+    // every edge, and concluded the tool was broken before working out the
+    // real metric.
+    expect(out).toContain("import sites");
+    expect(out).not.toContain("distinct symbols");
+    expect(out).toContain("`type` marks an edge erased at compile time");
     // Once, not once per finding.
     expect(out.split("Arrows run importer").length - 1).toBe(1);
   });

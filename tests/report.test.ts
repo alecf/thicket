@@ -317,6 +317,42 @@ describe("renderMarkdown", () => {
     expect(out).not.toContain("FirstStatement");
   });
 
+  it("explains what L0 and L1 mean, once per section", () => {
+    // `L0` is the single most load-bearing field on a duplication finding and
+    // it is two characters with no legend anywhere. It decides cluster
+    // membership and therefore whether the location list is complete: an
+    // agent handed a 115-copy L0 finding assumed 115 was the total, and it
+    // was 115 of ~130 for that literal shape, the rest differing only in the
+    // order of two object keys.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-1"), ranked("THK-DUP-2")],
+      testDuplication: [ranked("THK-DUP-3")],
+      totalFindings: 3,
+    });
+    expect(out).toContain("`L0` matches copies that are identical once formatting is normalized");
+    expect(out).toContain("`L1` also ignores what identifiers are called");
+    // Once per section, not once per finding -- and the test section gets it
+    // too, because a reader may open the report at either one.
+    expect(out.split("`L0` matches copies").length - 1).toBe(2);
+  });
+
+  it("does not print the ranker's score", () => {
+    // An internal sort key leaking into the output. The report is already in
+    // score order, so the number ranks nothing the reader can act on -- and on
+    // an all-test cross-module cluster the weights multiply to 1.0, making it
+    // print the recoverable-lines figure a second time and read as a bug.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-1", {}, 2787)],
+      totalFindings: 1,
+    });
+    expect(out).not.toContain("score");
+    expect(out).not.toContain("2787");
+    // The fields that survive still identify the finding.
+    expect(out).toContain("L0 · `Block`");
+  });
+
   it("marks test and mixed clusters", () => {
     const out = renderMarkdown({
       ...base,

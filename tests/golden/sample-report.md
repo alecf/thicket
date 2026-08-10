@@ -15,9 +15,11 @@ thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 mod
 
 ## Duplication
 
+`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is therefore the copies of one exact shape — a near-variant that differs by an inserted line is a separate finding, cross-referenced as **see also** where one exists.
+
 ### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
 
-L1 · `FunctionDeclaration` · score 26
+L1 · `FunctionDeclaration`
 
 - **directly imported by:** 1 file outside the cluster
 
@@ -33,7 +35,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 
 ### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
 
-L0 · `Block` · score 18
+L0 · `Block`
 
 - **directly imported by:** 1 file outside the cluster
 
@@ -49,7 +51,7 @@ L0 · `Block` · score 18
 
 ## Module tangle
 
-Arrows run importer → imported. The number is distinct symbols bound across the edge; `type` marks one that is erased at compile time and so is not a runtime dependency at all. The dotted arrow is the suggested cut.
+Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. The dotted arrow is the suggested cut.
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
