@@ -92,47 +92,68 @@ The depth presets, in full:
 
 Pointed at this repository's own test fixture, `node dist/cli.js --config tests/fixtures/sample/tsconfig.json` prints exactly this:
 
-```
+`````markdown
 # thicket report
+
 thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 modules)
 
 ## Summary
-  analyzed             4 of 4 source files (100.0%)
-  duplicated mass      253 redundant nodes (overlapping; trend only)
-  duplicated coverage  37.9% of source bytes
-  propagation cost     0.44
-  dependency cycles    1 (largest SCC: 2 modules)
-  findings             3 of 3 shown
+
+| metric | value |
+| --- | --- |
+| analyzed | 4 of 4 source files (100.0%) |
+| duplicated mass | 253 redundant nodes (overlapping; trend only) |
+| duplicated coverage | 37.9% of source bytes |
+| propagation cost | 0.44 |
+| dependency cycles | 1 (largest SCC: 2 modules) |
+| findings | 3 of 3 shown |
 
 ## Duplication
-### THK-DUP-d165768d · score 26 · L1 · 3 copies × ~10 lines · ~16 lines recoverable
-  src/alpha.ts:4  src/beta.ts:3,14
-  FunctionDeclaration
-    export function normalizeAlpha(points: Point[]): Point[] {
-      const result: Point[] = [];
-      for (const p of points) {
-    …
 
-### THK-DUP-c389b5be · score 18 · L0 · 2 copies × ~10 lines · ~7 lines recoverable
-  src/alpha.ts:4  src/beta.ts:14
-  Block
-    {
-      const result: Point[] = [];
-      for (const p of points) {
-    …
+### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
+
+L1 · `FunctionDeclaration` · score 26
+
+```ts
+export function normalizeAlpha(points: Point[]): Point[] {
+  const result: Point[] = [];
+  for (const p of points) {
+…
+```
+
+- `src/alpha.ts:4`
+- `src/beta.ts:3,14`
+
+### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
+
+L0 · `Block` · score 18
+
+```ts
+{
+  const result: Point[] = [];
+  for (const p of points) {
+…
+```
+
+- `src/alpha.ts:4`
+- `src/beta.ts:14`
 
 ## Module tangle
-### THK-CYC-aca08f5a · SCC of 2 modules
-  members: src/alpha.ts → src/gamma.ts
-  suggested cuts (1): src/alpha.ts→src/gamma.ts
 
-```
+### THK-CYC-aca08f5a · SCC of 2 modules
+
+- **members:** `src/alpha.ts` → `src/gamma.ts`
+- **suggested cuts (1):** `src/alpha.ts` → `src/gamma.ts`
+
+`````
 
 That fixture holds three structurally identical `normalize` functions, two of which are byte-identical, and an `alpha ↔ gamma` import cycle. Both duplication findings are real and they are not the same finding: the **L1** one covers all three functions (identical once identifiers are α-renamed), the **L0** one covers only the two that match byte for byte — and it is reported as a `Block` rather than a `FunctionDeclaration` because the two functions have different *names*, so the largest exactly-equal node is the body.
 
-Reading the rest of a finding line: `L0`/`L1` is the normalization level, `score` is the ranker's output (only the ordering is meaningful, not the units), `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and both the file list and the per-file line list are capped, with the remainder counted (`… and 13 more files`, `:12,44,91+7`). The JSON sidecar is never truncated.
+Reading a finding: the heading carries the id to cite and the size to judge by, and the line under it carries `L0`/`L1` (the normalization level), the AST kind, the ranker's `score` (only the ordering is meaningful, not the units), and a `[test]`/`[mixed]` tag where one applies. `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and both the file list and the per-file line list are capped, with the remainder counted (`… and 13 more files`, `:12,44,91+7`). The JSON sidecar is never truncated.
 
-The three indented lines under each finding are the head of its first occurrence. An AST kind alone — `PropertyAssignment`, `Block` — does not say whether a finding is worth acting on, and deciding without an excerpt means opening files that a single cluster can span a hundred of.
+**The report is valid CommonMark**, and that is a tested property rather than an aspiration: `tests/markdown-validity.test.ts` checks the rendered report, the golden file, a scope-warning report and a truncated one for indented prose, unseparated headings, unbalanced fences, and tables missing a delimiter row. It matters because the earlier plaintext-ish format was *not* valid Markdown in a way that only showed up once rendered — every body line was indented two spaces, which CommonMark folds into the preceding paragraph, so the whole Summary collapsed onto one line and the four-space excerpt was swallowed by the location list above it instead of becoming a code block. (An indented code block cannot interrupt a paragraph; only a fenced one can.) Excerpt fences are tagged with the language of the file they came from and are lengthened past any backtick run in the source, so a fragment containing a template literal or a Markdown snippet cannot close its own block and spill the rest of the report onto the page as prose.
+
+The fenced block under each finding is the head of its first occurrence. An AST kind alone — `PropertyAssignment`, `Block` — does not say whether a finding is worth acting on, and deciding without an excerpt means opening files that a single cluster can span a hundred of.
 
 Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
 

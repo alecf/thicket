@@ -82,7 +82,10 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   for (const block of emitted) {
     if (block.section !== section) {
       section = block.section;
-      lines.push(section);
+      // Blank line after the heading: without it the first body line becomes a
+      // lazy continuation of nothing in some parsers and a paragraph glued to
+      // the heading in others.
+      lines.push(section, "");
     }
     lines.push(...block.lines);
   }
@@ -111,9 +114,9 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
   const out: Block[] = [];
   let section: string | undefined;
   for (const block of blocks) {
-    const text = (block.section === section ? block.lines : [block.section, ...block.lines]).join(
-      "\n",
-    );
+    const text = (
+      block.section === section ? block.lines : [block.section, "", ...block.lines]
+    ).join("\n");
     const cost = estimateTokens(text) + 1; // +1 for the joining newline
     if (used + cost > input.budgetTokens) break;
     used += cost;
@@ -123,21 +126,46 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
   return out;
 }
 
+/**
+ * The summary as a table rather than aligned plaintext.
+ *
+ * The aligned form was two-space indented, which CommonMark folds into the
+ * paragraph above: all six metrics rendered as one run-on line. A table is the
+ * construct that actually means "label and value", and it survives being
+ * pasted anywhere Markdown is rendered.
+ */
 function headerLines(input: ReportInput, shown: number): string[] {
+  const metrics: [string, string][] = [
+    [
+      "analyzed",
+      `${input.scope.analyzed} of ${input.scope.onDisk} source files` +
+        ` (${percent(input.scope.analyzed, input.scope.onDisk)})`,
+    ],
+    ["duplicated mass", `${input.metrics.duplicatedMass} redundant nodes (overlapping; trend only)`],
+    [
+      "duplicated coverage",
+      `${(input.metrics.redundantByteFraction * 100).toFixed(1)}% of source bytes`,
+    ],
+    ["propagation cost", input.metrics.propagationCost.toFixed(2)],
+    [
+      "dependency cycles",
+      `${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules)`,
+    ],
+    ["findings", `${shown} of ${input.totalFindings} shown`],
+  ];
+
   return [
     "# thicket report",
+    "",
     `thicket ${input.version} · config ${input.configHash} · ` +
       `${input.fileCount} files / ${input.lineCount} LOC · ` +
       `granularity: ${input.granularity} (${input.moduleCount} modules)`,
     "",
     "## Summary",
-    `  analyzed             ${input.scope.analyzed} of ${input.scope.onDisk} source files` +
-      ` (${percent(input.scope.analyzed, input.scope.onDisk)})`,
-    `  duplicated mass      ${input.metrics.duplicatedMass} redundant nodes (overlapping; trend only)`,
-    `  duplicated coverage  ${(input.metrics.redundantByteFraction * 100).toFixed(1)}% of source bytes`,
-    `  propagation cost     ${input.metrics.propagationCost.toFixed(2)}`,
-    `  dependency cycles    ${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules)`,
-    `  findings             ${shown} of ${input.totalFindings} shown`,
+    "",
+    "| metric | value |",
+    "| --- | --- |",
+    ...metrics.map(([label, value]) => `| ${label} | ${value} |`),
     "",
     ...scopeWarning(input.scope),
   ];
@@ -157,16 +185,20 @@ const MAX_GAPS_SHOWN = 5;
 function scopeWarning(scope: Scope): string[] {
   if (scope.complete) return [];
   const missing = scope.onDisk - scope.analyzed;
+  // A blockquote, because this is an aside that qualifies everything above it
+  // rather than a section of its own -- and because it renders as one visually
+  // set-apart unit wherever the report is read.
   const lines = [
-    `⚠ ${missing} source files are outside this program. Every number above is` +
-      ` drawn from the ${percent(scope.analyzed, scope.onDisk)} that is inside it.`,
+    `> **⚠ ${missing} source files are outside this program.** Every number` +
+      ` above is drawn from the ${percent(scope.analyzed, scope.onDisk)} that is inside it.`,
+    ">",
   ];
   for (const gap of scope.gaps.slice(0, MAX_GAPS_SHOWN)) {
-    const fix = gap.config === undefined ? "" : `  → --config ${gap.config}`;
-    lines.push(`    ${gap.dir}  ${gap.fileCount} files${fix}`);
+    const fix = gap.config === undefined ? "" : ` — \`--config ${gap.config}\``;
+    lines.push(`> - \`${gap.dir}\` — ${gap.fileCount} files${fix}`);
   }
   const rest = scope.gaps.length - MAX_GAPS_SHOWN;
-  if (rest > 0) lines.push(`    … and ${rest} further directories`);
+  if (rest > 0) lines.push(`> - … and ${rest} further directories`);
   lines.push("");
   return lines;
 }
@@ -192,18 +224,64 @@ function omittedLine(omitted: number): string {
  */
 function duplicationBlock(r: Ranked): string[] {
   const c = r.cluster;
-  const tag = r.tag === "source" ? "" : `  [${r.tag}]`;
+  const tag = r.tag === "source" ? "" : ` · **[${r.tag}]**`;
   return [
-    `### ${c.id} · score ${Math.round(r.score)} · ${c.level} · ` +
-      `${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
-      `~${r.recoverableLines} lines recoverable${tag}`,
-    `  ${formatOccurrences(r)}`,
-    `  ${canonicalKind(c.kind)}`,
+    // The heading carries what a reader scans for -- the id to cite and the
+    // size to judge by. Level, kind and score go on a line beneath it rather
+    // than inflating the heading past a line's width.
+    `### ${c.id} · ${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
+      `~${r.recoverableLines} lines recoverable`,
+    "",
+    `${c.level} · \`${canonicalKind(c.kind)}\` · score ${Math.round(r.score)}${tag}`,
+    "",
     // An AST kind alone does not say whether a finding is worth acting on;
     // deciding meant opening files, and a cluster can span a hundred of them.
-    ...(r.excerpt ?? []).map((line) => `    ${line}`),
+    ...excerptBlock(r),
+    ...formatOccurrences(r),
     "",
   ];
+}
+
+/** Language tags by extension, for the excerpt's fence. */
+const FENCE_LANGUAGE: Record<string, string> = {
+  ts: "ts",
+  mts: "ts",
+  cts: "ts",
+  tsx: "tsx",
+  js: "js",
+  mjs: "js",
+  cjs: "js",
+  jsx: "jsx",
+};
+
+/**
+ * The excerpt as a fenced block, tagged with the language of the file it came
+ * from.
+ *
+ * Fenced rather than indented: an indented code block cannot interrupt a
+ * paragraph, so the four-space form was being absorbed into the location list
+ * above it instead of rendering as code at all.
+ */
+function excerptBlock(r: Ranked): string[] {
+  const excerpt = r.excerpt ?? [];
+  if (excerpt.length === 0) return [];
+  const extension = r.cluster.occurrences[0]?.filePath.split(".").pop() ?? "";
+  const fence = fenceFor(excerpt);
+  return [`${fence}${FENCE_LANGUAGE[extension] ?? ""}`, ...excerpt, fence, ""];
+}
+
+/**
+ * A fence at least one backtick longer than the longest run inside the
+ * content, per CommonMark. Source code contains template literals, and a
+ * fragment holding a Markdown snippet would otherwise close its own block and
+ * spill the rest of the report onto the page as prose.
+ */
+function fenceFor(lines: readonly string[]): string {
+  let longest = 0;
+  for (const line of lines) {
+    for (const run of line.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  }
+  return "`".repeat(Math.max(3, longest + 1));
 }
 
 /**
@@ -226,11 +304,15 @@ const MAX_FILES_SHOWN = 6;
 const MAX_LINES_PER_FILE = 8;
 
 /**
- * `src/alpha.ts:4,16  src/beta.ts:2` — one entry per file rather than per
- * occurrence. Report tokens are the scarce resource, and a reader following up
- * on a cluster opens files, not offsets.
+ * One list item per file — `` - `src/alpha.ts:4,16` `` — rather than per
+ * occurrence. A reader following up on a cluster opens files, not offsets.
+ *
+ * A list rather than a run of space-separated paths on one line: six of these
+ * paths is already several hundred characters, and Markdown renders that as a
+ * single justified paragraph in which no individual location can be picked
+ * out. Backticks keep the punctuation in a path from being read as emphasis.
  */
-function formatOccurrences(r: Ranked): string {
+function formatOccurrences(r: Ranked): string[] {
   const byFile = new Map<string, number[]>();
   for (const o of r.cluster.occurrences) {
     const lines = byFile.get(o.filePath);
@@ -238,33 +320,32 @@ function formatOccurrences(r: Ranked): string {
     else byFile.set(o.filePath, [o.line]);
   }
   const sorted = [...byFile.entries()].sort((a, b) => compareStrings(a[0], b[0]));
-  const shown = sorted
-    .slice(0, MAX_FILES_SHOWN)
-    .map(([path, lines]) => {
-      const unique = [...new Set(lines)].sort((a, b) => a - b);
-      const head = unique.slice(0, MAX_LINES_PER_FILE).join(",");
-      const rest = unique.length - MAX_LINES_PER_FILE;
-      return `${path}:${head}${rest > 0 ? `+${rest}` : ""}`;
-    })
-    .join("  ");
+  const items = sorted.slice(0, MAX_FILES_SHOWN).map(([path, lines]) => {
+    const unique = [...new Set(lines)].sort((a, b) => a - b);
+    const head = unique.slice(0, MAX_LINES_PER_FILE).join(",");
+    const rest = unique.length - MAX_LINES_PER_FILE;
+    return `- \`${path}:${head}${rest > 0 ? `+${rest}` : ""}\``;
+  });
   const hidden = sorted.length - MAX_FILES_SHOWN;
   // Stated, never silent — the same rule the omitted-findings line follows.
-  return hidden > 0 ? `${shown}  … and ${hidden} more files` : shown;
+  if (hidden > 0) items.push(`- … and ${hidden} more files`);
+  return items;
 }
 
 function cycleBlock(cycle: CycleFinding): string[] {
   const lines = [
     `### ${cycle.id} · SCC of ${cycle.modules.length} modules`,
+    "",
     // `members:`, not `cycle:` — these are the mutually reachable modules in
     // sorted order, which is not in general an edge path. Labelling the join
     // as a cycle would assert edges we never checked; the verified claim is
     // the cut below it.
-    `  members: ${cycle.modules.join(" → ")}`,
+    `- **members:** ${cycle.modules.map((m) => `\`${m}\``).join(" → ")}`,
   ];
   if (cycle.cuts.length > 0) {
     lines.push(
-      `  suggested cuts (${cycle.cuts.length}): ` +
-        cycle.cuts.map((c) => `${c.from}→${c.to}`).join(", "),
+      `- **suggested cuts (${cycle.cuts.length}):** ` +
+        cycle.cuts.map((c) => `\`${c.from}\` → \`${c.to}\``).join(", "),
     );
   }
   lines.push("");

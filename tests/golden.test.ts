@@ -94,9 +94,12 @@ describe("golden report", () => {
     // rots the first time the format changes, and a tool whose entire thesis
     // is deterministic output cannot afford documentation that lies about it.
     const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-    const example = readme.match(/```\n(# thicket report\n[\s\S]*?)```/);
+    // The outer fence must be longer than the ```ts fences the report itself
+    // now contains, so this matches a run of at least four backticks and
+    // requires the closing run to be the same one.
+    const example = readme.match(/(`{4,})markdown\n(# thicket report\n[\s\S]*?)\1/);
     expect(example).not.toBeNull();
-    expect(example![1]).toBe(readFileSync(GOLDEN, "utf8"));
+    expect(example![2]).toBe(readFileSync(GOLDEN, "utf8"));
   });
 
   it("holds the golden file to the invariants the report claims", async () => {
@@ -120,7 +123,7 @@ describe("golden report", () => {
     for (const id of printed) expect(ids.has(id)).toBe(true);
 
     // ...and the "N of M" line is honest about how many it printed.
-    const shown = golden.match(/findings\s+(\d+) of (\d+) shown/);
+    const shown = golden.match(/\| findings \| (\d+) of (\d+) shown \|/);
     expect(shown).not.toBeNull();
     expect(Number(shown![1])).toBe(printed.length);
     expect(Number(shown![2])).toBe(json.totalFindings);

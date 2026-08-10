@@ -39,6 +39,8 @@ describe("canonicalKind", () => {
 const ranked = (id: string, over: Partial<Ranked["cluster"]> = {}, score = 100): Ranked => ({
   score,
   tag: "source",
+  linesPerCopy: 9,
+  recoverableLines: 16,
   cluster: {
     id,
     level: "L0",
@@ -46,9 +48,9 @@ const ranked = (id: string, over: Partial<Ranked["cluster"]> = {}, score = 100):
     nodeCount: 20,
     mass: 40,
     occurrences: [
-      { filePath: "src/alpha.ts", start: 60, end: 300, line: 4 },
-      { filePath: "src/alpha.ts", start: 400, end: 640, line: 16 },
-      { filePath: "src/beta.ts", start: 10, end: 250, line: 2 },
+      { filePath: "src/alpha.ts", start: 60, end: 300, line: 4, endLine: 12, parentId: 1 },
+      { filePath: "src/alpha.ts", start: 400, end: 640, line: 16, endLine: 24, parentId: 2 },
+      { filePath: "src/beta.ts", start: 10, end: 250, line: 2, endLine: 10, parentId: 3 },
     ],
     ...over,
   },
@@ -100,13 +102,13 @@ describe("renderMarkdown", () => {
       duplication: [ranked("THK-DUP-1")],
       totalFindings: 1,
     });
-    expect(out).toMatch(/analyzed +176 of 6286 source files \(2\.8%\)/);
+    expect(out).toMatch(/\| analyzed \| 176 of 6286 source files \(2\.8%\) \|/);
     expect(out).toMatch(/6110 source files are outside this program/);
     // The actionable half: the exact argument that closes the gap.
-    expect(out).toMatch(/apps\/web {2}5262 files {2}→ --config apps\/web\/tsconfig\.json/);
+    expect(out).toMatch(/^> - `apps\/web` — 5262 files — `--config apps\/web\/tsconfig\.json`$/m);
     // A directory with no tsconfig of its own still gets counted, without a
     // fabricated --config that would not work.
-    expect(out).toMatch(/vendored {2}848 files$/m);
+    expect(out).toMatch(/^> - `vendored` — 848 files$/m);
     // Above the findings, because it changes what every number below it means.
     expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
   });
@@ -127,12 +129,11 @@ describe("renderMarkdown", () => {
       })),
     });
     const out = renderMarkdown({ ...base, duplication: [many], totalFindings: 1 });
-    const locations = out.split("\n").find((l) => l.includes("src/f00.ts"))!;
-    expect(locations).toMatch(/… and \d+ more files/);
-    expect(locations).not.toContain("src/f39.ts");
+    expect(out).toMatch(/^- … and 34 more files$/m);
+    expect(out).not.toContain("src/f39.ts");
     // Whatever it does show must still be the first files in sorted order, so
     // two runs over the same tree truncate to the same list.
-    expect(locations).toContain("src/f00.ts");
+    expect(out).toContain("- `src/f00.ts:3`");
   });
 
   it("caps the line numbers listed for any one file", () => {
@@ -150,7 +151,7 @@ describe("renderMarkdown", () => {
     });
     const out = renderMarkdown({ ...base, duplication: [repeated], totalFindings: 1 });
     const locations = out.split("\n").find((l) => l.includes("src/table.ts"))!;
-    expect(locations).toMatch(/src\/table\.ts:1,6,11,16,21,26,31,36\+22$/);
+    expect(locations).toBe("- `src/table.ts:1,6,11,16,21,26,31,36+22`");
   });
 
   it("contains no timestamps or absolute paths", () => {
@@ -166,7 +167,7 @@ describe("renderMarkdown", () => {
 
   it("groups occurrences by file with 1-based line numbers", () => {
     const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
-    expect(out).toContain("  src/alpha.ts:4,16  src/beta.ts:2");
+    expect(out).toContain("- `src/alpha.ts:4,16`\n- `src/beta.ts:2`");
     // A byte offset must not leak into the body in place of a line.
     expect(out).not.toContain("src/alpha.ts:60");
   });
@@ -204,7 +205,7 @@ describe("renderMarkdown", () => {
     });
     expect(out).toContain("## Module tangle");
     expect(out).toContain("THK-CYC-1");
-    expect(out).toContain("src/gamma.ts→src/alpha.ts");
+    expect(out).toContain("`src/gamma.ts` → `src/alpha.ts`");
   });
 
   it("emits fewer findings under a small budget and states the true omitted count", () => {
@@ -212,13 +213,13 @@ describe("renderMarkdown", () => {
     const full = renderMarkdown({ ...base, duplication, totalFindings: 20 });
     const tight = renderMarkdown({ ...base, duplication, totalFindings: 20, budgetTokens: 200 });
 
-    expect(full).toMatch(/findings {13}20 of 20 shown/);
+    expect(full).toMatch(/\| findings \| 20 of 20 shown \|/);
     expect(full).not.toMatch(/further findings omitted/);
 
     const emitted = [...tight.matchAll(/^### THK-DUP-/gm)].length;
     expect(emitted).toBeGreaterThan(0);
     expect(emitted).toBeLessThan(20);
-    expect(tight).toContain(`findings             ${emitted} of 20 shown`);
+    expect(tight).toContain(`| findings | ${emitted} of 20 shown |`);
     expect(tight).toContain(`… ${20 - emitted} further findings omitted`);
     // The whole report, omitted line included, must fit the budget.
     expect(Math.ceil(tight.length / 4)).toBeLessThanOrEqual(200);
@@ -233,7 +234,7 @@ describe("renderMarkdown", () => {
     });
     expect(out).toContain("# thicket report");
     expect(out).toContain("## Summary");
-    expect(out).toContain("findings             0 of 1 shown");
+    expect(out).toContain("| findings | 0 of 1 shown |");
     expect(out).toContain("… 1 further findings omitted");
     expect(out).not.toContain("THK-DUP-1");
   });

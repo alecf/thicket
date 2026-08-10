@@ -92,8 +92,8 @@ describe("runReport", () => {
     expect(markdown).toContain("duplicated mass");
     expect(markdown).toContain("duplicated coverage");
     // The two must not be confusable: mass is a node count, coverage a percent.
-    expect(markdown).toMatch(/duplicated mass\s+\d+ redundant nodes/);
-    expect(markdown).toMatch(/duplicated coverage\s+\d+\.\d% of source bytes/);
+    expect(markdown).toMatch(/\| duplicated mass \| \d+ redundant nodes/);
+    expect(markdown).toMatch(/\| duplicated coverage \| \d+\.\d% of source bytes \|/);
     expect(json.metrics.duplicatedMass).toBeGreaterThan(1);
   });
 
