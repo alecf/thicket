@@ -236,7 +236,21 @@ export async function openProject(
   for (const project of snapshot.getProjects()) {
     const checker = project.checker as unknown as Checker;
     for (const name of project.program.getSourceFileNames()) {
-      if (name.includes("node_modules") || name.endsWith(".d.ts")) continue;
+      // `.json` is excluded because `resolveJsonModule` puts every imported
+      // data file into the program and the API parses it into a real
+      // Array/ObjectLiteral AST. On one application a 126,000-line LOINC code
+      // table produced six of the top findings -- clusters of identical array
+      // literals inside a single data file, which is duplication only in the
+      // sense that a phone book repeats itself -- and contributed those 126k
+      // lines to the reported LOC. Resolution is unaffected: this drops the
+      // file from ANALYSIS, not from the program.
+      if (
+        name.includes("node_modules") ||
+        name.endsWith(".d.ts") ||
+        name.endsWith(".json")
+      ) {
+        continue;
+      }
       if (seen.has(name)) continue;
       seen.add(name);
       // Segment-matched against the REPO-RELATIVE path: a checkout that lives

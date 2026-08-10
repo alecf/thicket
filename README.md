@@ -61,6 +61,7 @@ node dist/cli.js diff before.json after.json
 | `--config <path>` | tsconfig to analyze. **Repeatable.** Defaults to `./tsconfig.json`. A solution-style config that owns no files and only lists `references` is expanded. |
 | `--depth <1..5>` | Preset for how deep to look: sets the minimum fragment size and the findings cap per section. Default `3`. |
 | `--min-nodes <n>` | Override the depth preset's minimum fragment size, in AST nodes. Smaller means more, finer candidates. |
+| `--min-lines <n>` | Override the depth preset's minimum fragment size, in lines. A node count does not bound this — 15 AST nodes fit on one line — and extracting a one-line shape is a strict loss. |
 | `--budget-tokens <n>` | Hard ceiling on the whole report. Findings are dropped from the bottom of the ranking and the count dropped is always printed. |
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
 | `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. |
@@ -70,13 +71,13 @@ node dist/cli.js diff before.json after.json
 
 The depth presets, in full:
 
-| `--depth` | `--min-nodes` | findings per section |
-|---|---|---|
-| 1 | 40 | 10 |
-| 2 | 25 | 20 |
-| 3 (default) | 15 | 40 |
-| 4 | 10 | 80 |
-| 5 | 6 | 200 |
+| `--depth` | `--min-nodes` | `--min-lines` | findings per section |
+|---|---|---|---|
+| 1 | 40 | 10 | 10 |
+| 2 | 25 | 6 | 20 |
+| 3 (default) | 15 | 4 | 40 |
+| 4 | 10 | 3 | 80 |
+| 5 | 6 | 2 | 200 |
 
 `--depth` is the knob a human turns; `--budget-tokens` is the knob a harness turns, because a harness knows its context window and not its desired depth.
 
@@ -93,7 +94,7 @@ Pointed at this repository's own test fixture, `node dist/cli.js --config tests/
 
 ```
 # thicket report
-thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 modules)
 
 ## Summary
   analyzed             4 of 4 source files (100.0%)
@@ -104,11 +105,11 @@ thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 mod
   findings             3 of 3 shown
 
 ## Duplication
-### THK-DUP-d165768d · score 792 · L1 · 3 copies × 88 nodes
+### THK-DUP-d165768d · score 26 · L1 · 3 copies × ~10 lines · ~16 lines recoverable
   src/alpha.ts:4  src/beta.ts:3,14
   FunctionDeclaration
 
-### THK-DUP-c389b5be · score 305 · L0 · 2 copies × 77 nodes
+### THK-DUP-c389b5be · score 18 · L0 · 2 copies × ~10 lines · ~7 lines recoverable
   src/alpha.ts:4  src/beta.ts:14
   Block
 
@@ -121,7 +122,9 @@ thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 mod
 
 That fixture holds three structurally identical `normalize` functions, two of which are byte-identical, and an `alpha ↔ gamma` import cycle. Both duplication findings are real and they are not the same finding: the **L1** one covers all three functions (identical once identifiers are α-renamed), the **L0** one covers only the two that match byte for byte — and it is reported as a `Block` rather than a `FunctionDeclaration` because the two functions have different *names*, so the largest exactly-equal node is the body.
 
-Reading the rest of a finding line: `L0`/`L1` is the normalization level, `score` is the ranker's output (only the ordering is meaningful, not the units), and locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file.
+Reading the rest of a finding line: `L0`/`L1` is the normalization level, `score` is the ranker's output (only the ordering is meaningful, not the units), `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and both the file list and the per-file line list are capped, with the remainder counted (`… and 13 more files`, `:12,44,91+7`). The JSON sidecar is never truncated.
+
+Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
 
 `findings 3 of 3 shown` is load-bearing. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is finished.
 

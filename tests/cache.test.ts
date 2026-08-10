@@ -23,6 +23,8 @@ const frag = (over: Partial<ShapedFragment> = {}): ShapedFragment => ({
   start: 0,
   end: 10,
   line: 1,
+  endLine: 5,
+  parentId: 3,
   l0: "l0-hash",
   l1: "l1-hash",
   ...over,

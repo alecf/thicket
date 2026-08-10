@@ -2,11 +2,20 @@ import { describe, expect, it } from "vitest";
 import { isTestPath, rankClusters, subsume } from "../src/report/rank.js";
 import type { Cluster } from "../src/fingerprint/cluster.js";
 
-const occ = (filePath: string, start: number, end: number, line = 1) => ({
+/**
+ * `lines` is the span of one copy and `parentId` identifies the AST node the
+ * copy hangs off, which is how a data table is told apart from a missing
+ * abstraction. Both default to values that make an occurrence look like
+ * ordinary scattered code.
+ */
+let nextParent = 0;
+const occ = (filePath: string, start: number, end: number, line = 1, lines = 8, parentId = -1) => ({
   filePath,
   start,
   end,
   line,
+  endLine: line + lines - 1,
+  parentId: parentId === -1 ? nextParent++ : parentId,
 });
 
 const cluster = (over: Partial<Cluster>): Cluster => ({
@@ -81,6 +90,113 @@ describe("rankClusters: intra-file repetition", () => {
   });
 });
 
+describe("rankClusters: size is what makes a duplication worth fixing", () => {
+  it("weighs one more copy the same as one more line", () => {
+    // Size and count each enter the score exactly once. The previous formula
+    // had count in twice -- `(copies - 1)` multiplied again by
+    // `log2(1 + copies)` -- and size once, which inverted the judgement the
+    // report exists to support: on a real repository 25 copies of a 4-line
+    // block outscored a 22-line function duplicated across two packages by
+    // 8.5x, and the finding most obviously worth acting on ranked 28th.
+    //
+    // Held at equal spread and equal parentage, so only the trade this
+    // asserts is in play.
+    const at = (copies: number, lines: number) =>
+      rankClusters([
+        cluster({
+          id: "c",
+          occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, lines)),
+        }),
+      ])[0]!.score;
+    // (copies - 1) x (lines - 1): 4 copies of 7 lines and 7 copies of 4 lines
+    // both recover 18 lines, so neither dimension may dominate the other.
+    expect(at(4, 7)).toBe(at(7, 4));
+  });
+
+  it("scores a one-line shape at zero however often it repeats", () => {
+    // Extracting a single line replaces each copy with a call of the same
+    // length and adds a definition: the refactor is a strict loss. A score
+    // above zero here is the report spending a slot to lose the reader lines.
+    const oneLiner = cluster({
+      id: "one",
+      occurrences: Array.from({ length: 40 }, (_, i) => occ(`src/f${i}.ts`, 0, 60, 3, 1)),
+    });
+    expect(rankClusters([oneLiner])[0]!.score).toBe(0);
+  });
+
+  it("grows with the size of the duplicated fragment", () => {
+    const at = (lines: number) =>
+      rankClusters([
+        cluster({
+          id: "c",
+          occurrences: [occ("src/a.ts", 0, 500, 1, lines), occ("src/b.ts", 0, 500, 1, lines)],
+        }),
+      ])[0]!.score;
+    expect(at(20)).toBeGreaterThan(at(10));
+    expect(at(10)).toBeGreaterThan(at(5));
+  });
+});
+
+describe("rankClusters: data tables versus missing abstractions", () => {
+  // PRD §5.4 records this as the ranker's known blind spot: "a 40-node object
+  // literal repeated 15 times and a 40-node code block repeated 15 times are
+  // identical in every feature the ranker has. Separating them needs a new
+  // signal -- occurrences being consecutive siblings under one
+  // ObjectLiteralExpression -- not a new weight."
+  //
+  // `parentId` is that signal. On the repository that motivated it, ten of the
+  // top forty findings were entries of a single biomarker config table.
+  const shared = (over: Partial<Cluster>) =>
+    cluster({ nodeCount: 40, ...over });
+
+  it("ranks scattered duplication above the same shape inside one literal", () => {
+    // Both clusters span the SAME two files with the SAME copy count and the
+    // same span, so `spread` and size are held constant and the only thing
+    // separating them is whether the copies hang off one parent node. Letting
+    // the table sit in a single file instead would make this pass on the
+    // spread multiplier alone, with the sibling signal deleted.
+    const layout = (parentPerFile: boolean) =>
+      Array.from({ length: 16 }, (_, i) => {
+        const file = i < 8 ? "src/config.ts" : "src/other-config.ts";
+        return occ(file, i * 400, i * 400 + 350, i * 12 + 1, 11, parentPerFile ? (i < 8 ? 7 : 9) : -1);
+      });
+    // Ids chosen so the TABLE wins the `id asc` tie-break. Held equal on every
+    // other feature, an unweighted ranker scores these identically and the tie
+    // decides -- so with ids the other way round this passes with the sibling
+    // signal deleted.
+    const table = shared({ id: "aaa-table", kind: "PropertyAssignment", occurrences: layout(true) });
+    const scattered = shared({ id: "zzz-scattered", occurrences: layout(false) });
+    expect(rankClusters([table, scattered])[0]!.cluster.id).toBe("zzz-scattered");
+  });
+
+  it("still reports a data table rather than discarding it", () => {
+    // Down-weighted, not excluded -- the same rule intra-file repetition gets.
+    // A table that is genuinely 15 copies of real logic is still a finding.
+    const table = shared({
+      id: "table",
+      occurrences: Array.from({ length: 15 }, (_, i) =>
+        occ("src/config.ts", i * 400, i * 400 + 350, i * 12 + 1, 11, 7),
+      ),
+    });
+    expect(rankClusters([table])[0]!.score).toBeGreaterThan(0);
+  });
+
+  it("does not penalize copies that merely share a file", () => {
+    // Two repeated handlers in one module are not a data table. The signal is
+    // a shared PARENT NODE, and keying it on the file instead would sweep up
+    // every legitimate intra-file repetition.
+    const sameParent = shared({
+      id: "same",
+      occurrences: Array.from({ length: 6 }, (_, i) => occ("src/a.ts", i * 400, i * 400 + 350, i * 12 + 1, 11, 3)),
+    });
+    const sameFile = shared({
+      id: "spread",
+      occurrences: Array.from({ length: 6 }, (_, i) => occ("src/a.ts", i * 400, i * 400 + 350, i * 12 + 1, 11)),
+    });
+    expect(rankClusters([sameParent, sameFile])[0]!.cluster.id).toBe("spread");
+  });
+});
+
 describe("isTestPath", () => {
   it("recognizes common test conventions", () => {
     expect(isTestPath("src/a.test.ts")).toBe(true);
@@ -122,6 +238,35 @@ describe("rankClusters", () => {
     const scoreSplit = rankClusters([a], split)[0]!.score;
     const scoreSame = rankClusters([b], same)[0]!.score;
     expect(scoreSplit).toBeGreaterThan(scoreSame);
+  });
+
+  it("weights a mixed cluster by how much of it is really source", () => {
+    // The `[mixed]` tag exempted a cluster from the test down-weight entirely,
+    // so 429 copies of `vi.mock` scaffolding earned full weight because a
+    // couple of source files happened to share the shape. The top four
+    // findings of a real application were all test setup.
+    //
+    // A cluster that is 95% test files is a test cluster whatever the tag
+    // says, and one that is half source is the case PRD §2.7 wants surfaced:
+    // production logic reimplemented inside a test. Weight follows the source
+    // fraction rather than switching on a three-way tag.
+    const withSourceShare = (sourceCount: number, testCount: number) =>
+      rankClusters([
+        cluster({
+          id: "c",
+          occurrences: [
+            ...Array.from({ length: sourceCount }, (_, i) => occ(`src/s${i}.ts`, 0, 300, 1, 9)),
+            ...Array.from({ length: testCount }, (_, i) => occ(`src/t${i}.test.ts`, 0, 300, 1, 9)),
+          ],
+        }),
+      ])[0]!;
+
+    const barelyMixed = withSourceShare(1, 19);
+    const evenlyMixed = withSourceShare(10, 10);
+    expect(barelyMixed.tag).toBe("mixed");
+    expect(evenlyMixed.tag).toBe("mixed");
+    // Same copy count and same span: only the source share differs.
+    expect(evenlyMixed.score).toBeGreaterThan(barelyMixed.score);
   });
 
   it("down-weights all-test clusters but not mixed ones", () => {

@@ -17,12 +17,15 @@ import { VERSION } from "./version.js";
  * knob a harness turns, because it knows its context window and not its
  * desired depth (PRD §9.3).
  */
-const DEPTH_PRESETS: Record<number, { minNodes: number; maxFindings: number }> = {
-  1: { minNodes: 40, maxFindings: 10 },
-  2: { minNodes: 25, maxFindings: 20 },
-  3: { minNodes: 15, maxFindings: 40 },
-  4: { minNodes: 10, maxFindings: 80 },
-  5: { minNodes: 6, maxFindings: 200 },
+const DEPTH_PRESETS: Record<
+  number,
+  { minNodes: number; minLines: number; maxFindings: number }
+> = {
+  1: { minNodes: 40, minLines: 10, maxFindings: 10 },
+  2: { minNodes: 25, minLines: 6, maxFindings: 20 },
+  3: { minNodes: 15, minLines: 4, maxFindings: 40 },
+  4: { minNodes: 10, minLines: 3, maxFindings: 80 },
+  5: { minNodes: 6, minLines: 2, maxFindings: 200 },
 };
 const DEFAULT_DEPTH = 3;
 
@@ -32,7 +35,8 @@ Usage: thicket [options]
 
   --config <path>        tsconfig to analyze; repeatable (default ./tsconfig.json)
   --depth <1..5>         preset: min fragment size and findings per section (default ${DEFAULT_DEPTH})
-  --min-nodes <n>        override the depth preset's minimum fragment size
+  --min-nodes <n>        override the depth preset's minimum fragment size, in AST nodes
+  --min-lines <n>        override the depth preset's minimum fragment size, in lines
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
   --granularity <g>      auto | file | <directory depth> (default auto)
   --include-generated    also analyze dist/, build/, .next/ and friends
@@ -55,6 +59,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         config: { type: "string", multiple: true },
         depth: { type: "string" },
         "min-nodes": { type: "string" },
+        "min-lines": { type: "string" },
         "budget-tokens": { type: "string" },
         granularity: { type: "string" },
         "include-generated": { type: "boolean" },
@@ -112,10 +117,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   let depth: number;
   let budgetTokens: number | undefined;
   let minNodesOverride: number | undefined;
+  let minLinesOverride: number | undefined;
   try {
     depth = parseNumber(values.depth, "--depth") ?? DEFAULT_DEPTH;
     budgetTokens = parseNumber(values["budget-tokens"], "--budget-tokens");
     minNodesOverride = parseNumber(values["min-nodes"], "--min-nodes");
+    minLinesOverride = parseNumber(values["min-lines"], "--min-lines");
   } catch (err) {
     process.stderr.write(`thicket: ${(err as Error).message}\n`);
     return 1;
@@ -136,6 +143,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const minNodes = minNodesOverride ?? preset.minNodes;
+  const minLines = minLinesOverride ?? preset.minLines;
 
   let markdown: string;
   let json: unknown;
@@ -143,6 +151,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ({ markdown, json } = await runReport({
       config: configs,
       minNodes,
+      minLines,
       maxFindings: preset.maxFindings,
       granularity,
       includeGenerated: values["include-generated"] ?? false,

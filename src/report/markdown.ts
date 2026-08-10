@@ -180,17 +180,47 @@ function omittedLine(omitted: number): string {
   return `… ${omitted} further findings omitted`;
 }
 
+/**
+ * `12 copies × ~34 lines · ~370 lines recoverable`.
+ *
+ * Lines, not the AST node count the ranker used to print. A reader cannot
+ * calibrate "17 nodes" — it is 4 lines here and 11 lines two findings down —
+ * and calibration is the whole question they are asking: three duplicated
+ * lines are not worth a refactor and thirty are. `recoverable` states the
+ * prize directly, so the reader never has to multiply anything to compare two
+ * findings.
+ */
 function duplicationBlock(r: Ranked): string[] {
   const c = r.cluster;
   const tag = r.tag === "source" ? "" : `  [${r.tag}]`;
   return [
     `### ${c.id} · score ${Math.round(r.score)} · ${c.level} · ` +
-      `${c.occurrences.length} copies × ${c.nodeCount} nodes${tag}`,
+      `${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
+      `~${r.recoverableLines} lines recoverable${tag}`,
     `  ${formatOccurrences(r)}`,
     `  ${canonicalKind(c.kind)}`,
     "",
   ];
 }
+
+/**
+ * Files one finding may name before the rest are summarized.
+ *
+ * Unbounded, a single finding listed 429 paths — thousands of tokens for one
+ * entry, in a report whose whole job is fitting a context window. Six is
+ * enough to see the shape of where a cluster lives; a reader who needs the
+ * remaining sites has the JSON sidecar, which is never truncated.
+ */
+const MAX_FILES_SHOWN = 6;
+
+/**
+ * Line numbers listed for any one file before the rest are counted.
+ *
+ * Capping files alone is not enough: a shape repeated 200 times inside a
+ * single file renders as one path followed by 200 comma-separated line
+ * numbers, which is the same budget blowout in a different shape.
+ */
+const MAX_LINES_PER_FILE = 8;
 
 /**
  * `src/alpha.ts:4,16  src/beta.ts:2` — one entry per file rather than per
@@ -204,10 +234,19 @@ function formatOccurrences(r: Ranked): string {
     if (lines) lines.push(o.line);
     else byFile.set(o.filePath, [o.line]);
   }
-  return [...byFile.entries()]
-    .sort((a, b) => compareStrings(a[0], b[0]))
-    .map(([path, lines]) => `${path}:${[...new Set(lines)].sort((a, b) => a - b).join(",")}`)
+  const sorted = [...byFile.entries()].sort((a, b) => compareStrings(a[0], b[0]));
+  const shown = sorted
+    .slice(0, MAX_FILES_SHOWN)
+    .map(([path, lines]) => {
+      const unique = [...new Set(lines)].sort((a, b) => a - b);
+      const head = unique.slice(0, MAX_LINES_PER_FILE).join(",");
+      const rest = unique.length - MAX_LINES_PER_FILE;
+      return `${path}:${head}${rest > 0 ? `+${rest}` : ""}`;
+    })
     .join("  ");
+  const hidden = sorted.length - MAX_FILES_SHOWN;
+  // Stated, never silent — the same rule the omitted-findings line follows.
+  return hidden > 0 ? `${shown}  … and ${hidden} more files` : shown;
 }
 
 function cycleBlock(cycle: CycleFinding): string[] {

@@ -1,5 +1,5 @@
 # thicket report
-thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 modules)
 
 ## Summary
   analyzed             4 of 4 source files (100.0%)
@@ -10,11 +10,11 @@ thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 mod
   findings             3 of 3 shown
 
 ## Duplication
-### THK-DUP-d165768d · score 792 · L1 · 3 copies × 88 nodes
+### THK-DUP-d165768d · score 26 · L1 · 3 copies × ~10 lines · ~16 lines recoverable
   src/alpha.ts:4  src/beta.ts:3,14
   FunctionDeclaration
 
-### THK-DUP-c389b5be · score 305 · L0 · 2 copies × 77 nodes
+### THK-DUP-c389b5be · score 18 · L0 · 2 copies × ~10 lines · ~7 lines recoverable
   src/alpha.ts:4  src/beta.ts:14
   Block
 

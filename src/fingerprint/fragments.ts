@@ -49,6 +49,24 @@ export interface Fragment {
    * to the human or LLM reading the report (PRD §9.2).
    */
   line: number;
+  /**
+   * 1-based line of `end`. With `line` this gives the span in lines, which is
+   * the unit the ranker scores in and the only size a reader can calibrate
+   * against: "17 nodes" says nothing about whether this is worth a refactor.
+   */
+  endLine: number;
+  /**
+   * Pre-order ordinal of this node's parent within the file, or -1 at the top
+   * level. Two occurrences sharing one are siblings under the same AST node.
+   *
+   * This is the signal PRD §5.4 records as missing: a 40-node object literal
+   * repeated 15 times and a 40-node code block repeated 15 times are otherwise
+   * identical in every feature the ranker has, and the first is a data table
+   * that nobody will extract. An ordinal rather than the parent's offset
+   * because `getStart()` on every node -- most of which are never emitted --
+   * costs a walk the counter gives away free.
+   */
+  parentId: number;
   /** Token stream with identifier text preserved (L0 input). */
   tokensL0: string[];
   /** Token stream with identifier text preserved, renumbered later (L1 input). */
@@ -57,6 +75,20 @@ export interface Fragment {
 
 export interface ExtractOptions {
   minNodes: number;
+  /**
+   * Smallest fragment worth reporting, in lines.
+   *
+   * A node threshold alone does not bound this: 15 AST nodes fit comfortably
+   * on one line, and on a real repository 28 of 40 reported findings averaged
+   * under 7 lines per copy. Extracting a one-line shape is a strict loss --
+   * the call that replaces each copy is a line too -- so the floor removes
+   * candidates no reader would act on, before they can crowd out ones they
+   * would.
+   *
+   * Optional, defaulting to no floor, so that extraction stays a mechanism and
+   * the policy lives with the depth presets that set it.
+   */
+  minLines?: number;
 }
 
 export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragment[] {
@@ -68,7 +100,11 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     l1: string[];
   }
 
-  const visit = (node: Node): Result => {
+  // Pre-order ordinal, handed to each node's children as their parent id.
+  let counter = 0;
+
+  const visit = (node: Node, parentId: number): Result => {
+    const id = counter++;
     const kind = SyntaxKind[node.kind] ?? `Unknown${node.kind}`;
     const l0: string[] = [kind];
     const l1: string[] = [kind];
@@ -77,7 +113,7 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
 
     forEachChildSafe(node, (child) => {
       childCount++;
-      const r = visit(child);
+      const r = visit(child, id);
       nodeCount += r.nodeCount;
       appendDelimited(l0, r.l0);
       appendDelimited(l1, r.l1);
@@ -96,22 +132,29 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
 
     if (nodeCount >= opts.minNodes && !IGNORED_KINDS.has(kind)) {
       const start = node.getStart();
-      out.push({
-        filePath: file.path,
-        kind,
-        nodeCount,
-        start,
-        end: node.getEnd(),
-        line: file.sourceFile.getLineAndCharacterOfPosition(start).line + 1,
-        tokensL0: l0,
-        tokensL1: l1,
-      });
+      const end = node.getEnd();
+      const line = file.sourceFile.getLineAndCharacterOfPosition(start).line + 1;
+      const endLine = file.sourceFile.getLineAndCharacterOfPosition(end).line + 1;
+      if (endLine - line + 1 >= (opts.minLines ?? 1)) {
+        out.push({
+          filePath: file.path,
+          kind,
+          nodeCount,
+          start,
+          end,
+          line,
+          endLine,
+          parentId,
+          tokensL0: l0,
+          tokensL1: l1,
+        });
+      }
     }
     return { nodeCount, l0, l1 };
   };
 
   forEachChildSafe(file.sourceFile, (child) => {
-    visit(child);
+    visit(child, -1);
   });
   return out;
 }

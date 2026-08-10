@@ -11,6 +11,14 @@ export interface Occurrence {
   end: number;
   /** 1-based line of `start`. Display only; ranges stay byte-based. */
   line: number;
+  /** 1-based line of `end`. The span in lines is what the ranker scores. */
+  endLine: number;
+  /**
+   * Pre-order ordinal of the parent AST node within its file. Occurrences
+   * sharing a `(filePath, parentId)` are siblings under one node — entries of
+   * a data literal rather than a missing abstraction.
+   */
+  parentId: number;
 }
 
 export interface Cluster {
@@ -24,6 +32,8 @@ export interface Cluster {
 
 export interface DuplicationOptions {
   minNodes: number;
+  /** Smallest fragment worth reporting, in lines. Defaults to no floor. */
+  minLines?: number;
   /**
    * Skips re-walking files whose content has not changed since the last run.
    * Purely a speed-up: the cache stores whole fragments, so the cluster list
@@ -106,7 +116,14 @@ function collect(map: Map<string, ShapedFragment[]>, level: Level, out: Cluster[
 
 function toCluster(id: string, level: Level, frags: readonly ShapedFragment[]): Cluster {
   const occurrences = frags
-    .map((f) => ({ filePath: f.filePath, start: f.start, end: f.end, line: f.line }))
+    .map((f) => ({
+      filePath: f.filePath,
+      start: f.start,
+      end: f.end,
+      line: f.line,
+      endLine: f.endLine,
+      parentId: f.parentId,
+    }))
     .sort((a, b) => compareStrings(a.filePath, b.filePath) || a.start - b.start);
   const nodeCount = Math.min(...frags.map((f) => f.nodeCount));
   return {

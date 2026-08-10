@@ -111,6 +111,48 @@ describe("renderMarkdown", () => {
     expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
   });
 
+  it("caps the locations one finding may spend the budget on", () => {
+    // Unbounded, a single finding listed 429 file paths -- thousands of tokens
+    // for one entry, in a report whose entire point is fitting a context
+    // window. The count of what was withheld is stated, and the JSON sidecar
+    // still carries every occurrence for a harness that wants them all.
+    const many = ranked("THK-DUP-many", {
+      occurrences: Array.from({ length: 40 }, (_, i) => ({
+        filePath: `src/f${String(i).padStart(2, "0")}.ts`,
+        start: 0,
+        end: 100,
+        line: 3,
+        endLine: 9,
+        parentId: i,
+      })),
+    });
+    const out = renderMarkdown({ ...base, duplication: [many], totalFindings: 1 });
+    const locations = out.split("\n").find((l) => l.includes("src/f00.ts"))!;
+    expect(locations).toMatch(/… and \d+ more files/);
+    expect(locations).not.toContain("src/f39.ts");
+    // Whatever it does show must still be the first files in sorted order, so
+    // two runs over the same tree truncate to the same list.
+    expect(locations).toContain("src/f00.ts");
+  });
+
+  it("caps the line numbers listed for any one file", () => {
+    // Capping files alone leaves the same blowout in a different shape: one
+    // path followed by 200 comma-separated line numbers.
+    const repeated = ranked("THK-DUP-repeat", {
+      occurrences: Array.from({ length: 30 }, (_, i) => ({
+        filePath: "src/table.ts",
+        start: i * 100,
+        end: i * 100 + 90,
+        line: i * 5 + 1,
+        endLine: i * 5 + 4,
+        parentId: 2,
+      })),
+    });
+    const out = renderMarkdown({ ...base, duplication: [repeated], totalFindings: 1 });
+    const locations = out.split("\n").find((l) => l.includes("src/table.ts"))!;
+    expect(locations).toMatch(/src\/table\.ts:1,6,11,16,21,26,31,36\+22$/);
+  });
+
   it("contains no timestamps or absolute paths", () => {
     const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
     expect(out).not.toMatch(/\/Users\//);

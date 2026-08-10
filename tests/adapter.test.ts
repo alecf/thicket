@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { commonRootDir, openProject } from "../src/extract/ts-adapter.js";
 import {
@@ -120,5 +123,44 @@ describe("commonRootDir", () => {
 
   it("throws rather than guessing when given no configs", () => {
     expect(() => commonRootDir([])).toThrow();
+  });
+});
+
+describe("openProject: JSON is data, not source", () => {
+  it("does not hand back .json files for analysis", async () => {
+    // `resolveJsonModule` puts every imported .json into the program, and the
+    // TypeScript API parses them into real ArrayLiteral/ObjectLiteral ASTs.
+    // On a real application a 126,000-line LOINC code table came back as six
+    // of the top findings -- clusters of identical array literals inside one
+    // data file, which is duplication only in the sense that a phone book
+    // repeats itself. It also put 126k lines into the reported LOC.
+    const dir = await mkdtemp(join(tmpdir(), "thicket-json-"));
+    try {
+      await writeFile(
+        join(dir, "codes.json"),
+        JSON.stringify(Array.from({ length: 40 }, (_, i) => ({ code: `c${i}`, unit: "kg" }))),
+      );
+      await writeFile(
+        join(dir, "main.ts"),
+        `import codes from "./codes.json";\nexport const first = codes[0];\n`,
+      );
+      await writeFile(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { noEmit: true, resolveJsonModule: true, module: "esnext" },
+          include: ["main.ts"],
+        }),
+      );
+
+      const project = await openProject(join(dir, "tsconfig.json"));
+      const paths = project.files().map((f) => f.path);
+      // The import still resolved -- this is about what gets ANALYZED, not
+      // about breaking module resolution.
+      expect(paths).toContain("main.ts");
+      expect(paths.some((p) => p.endsWith(".json"))).toBe(false);
+      project.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

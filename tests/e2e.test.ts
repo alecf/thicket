@@ -33,10 +33,15 @@ describe("runReport", () => {
   });
 
   it("respects the budget and states the omitted count honestly", async () => {
-    const full = await runReport({ config: fixtureConfig(), minNodes: 5 });
+    // `minLines: 1` on purpose. This test is about truncation, and it needs
+    // more findings than the budget can hold; the default four-line floor
+    // leaves the fixture with few enough that everything fits and the test
+    // stops exercising the budget at all.
+    const full = await runReport({ config: fixtureConfig(), minNodes: 5, minLines: 1 });
     const tight = await runReport({
       config: fixtureConfig(),
       minNodes: 5,
+      minLines: 1,
       budgetTokens: 300,
     });
     expect(tight.markdown.length).toBeLessThan(full.markdown.length);
