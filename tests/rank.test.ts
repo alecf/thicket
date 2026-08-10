@@ -317,6 +317,51 @@ describe("subsume", () => {
     expect(subsume([parent, child]).map((c) => c.id)).toEqual(["parent"]);
   });
 
+  it("drops a child that mostly overlaps a larger cluster, not only one that matches exactly", () => {
+    // Requiring an EXACT occurrence-set match let one region of source occupy
+    // seven of the top eleven slots on a real application: the same repeated
+    // test-setup block reported as a Block of 120 copies, an ExpressionStatement
+    // of 135, an IfStatement of 115, and the L1 variants of each. The counts
+    // differ slightly -- a few files have one extra statement -- so nothing
+    // subsumed anything, and six slots went to restatements of one finding.
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 12 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        // Eleven of thirteen sit inside a `parent` occurrence...
+        ...Array.from({ length: 11 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        // ...and two are somewhere else entirely.
+        occ("src/other.ts", 0, 250, 1, 9),
+        occ("src/elsewhere.ts", 0, 250, 1, 9),
+      ],
+    });
+    expect(subsume([parent, child]).map((c) => c.id)).toEqual(["parent"]);
+  });
+
+  it("keeps a cluster that merely brushes a larger one", () => {
+    // The complement: partial overlap is not the same finding. Without this
+    // bound, "mostly contained" collapses genuinely distinct duplication.
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 3 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        ...Array.from({ length: 7 }, (_, i) => occ(`src/g${i}.ts`, 0, 250, 1, 9)),
+      ],
+    });
+    expect(subsume([parent, child]).map((c) => c.id).sort()).toEqual(["child", "parent"]);
+  });
+
   it("keeps clusters that cover different files", () => {
     const a = cluster({ id: "a" });
     const b = cluster({

@@ -3,19 +3,39 @@ import type { FileHandle, Node } from "../extract/types.js";
 import { forEachChildSafe } from "../extract/traverse.js";
 
 /**
- * Structurally identical in every file and carrying no refactoring signal.
- * Without this filter the entire top of the report is ImportDeclaration.
- * See PRD §2.4 / §5.1.
+ * Kinds carrying no refactoring signal, matched by enum VALUE.
+ *
+ * Two groups:
+ *
+ *  - **Import/export boilerplate**, structurally identical in every file.
+ *    Without this filter the entire top of the report is `ImportDeclaration`
+ *    (PRD §2.4 / §5.1).
+ *  - **Binding and parameter forms**, which are not extractable at all. A
+ *    destructuring pattern is a shape, not code: there is no refactor that
+ *    turns two matching `ObjectBindingPattern`s into one. On a real
+ *    application these took two of the top five slots, and the top one was a
+ *    destructured parameter list repeated across 136 files — which is what
+ *    passing the same seven things around looks like, not a duplication a
+ *    reader can act on.
+ *
+ * Matched by value because `SyntaxKind` is reverse-mapped and range-marker
+ * aliases can win the reverse lookup, so name matching silently misses cases
+ * (PRD §2.4). None of these are shadowed today; keying on the value means a
+ * future one cannot quietly slip through.
  */
-const IGNORED_KINDS = new Set([
-  "ImportDeclaration",
-  "ImportClause",
-  "NamedImports",
-  "ImportSpecifier",
-  "ExportDeclaration",
-  "ExportSpecifier",
-  "NamedExports",
-  "ExportAssignment",
+const IGNORED_KINDS: ReadonlySet<number> = new Set<number>([
+  SyntaxKind.ImportDeclaration,
+  SyntaxKind.ImportClause,
+  SyntaxKind.NamedImports,
+  SyntaxKind.ImportSpecifier,
+  SyntaxKind.ExportDeclaration,
+  SyntaxKind.ExportSpecifier,
+  SyntaxKind.NamedExports,
+  SyntaxKind.ExportAssignment,
+  SyntaxKind.ObjectBindingPattern,
+  SyntaxKind.ArrayBindingPattern,
+  SyntaxKind.BindingElement,
+  SyntaxKind.Parameter,
 ]);
 
 /**
@@ -67,6 +87,16 @@ export interface Fragment {
    * costs a walk the counter gives away free.
    */
   parentId: number;
+  /**
+   * Share of this fragment's named leaves that are literal values rather than
+   * identifiers, in [0, 1].
+   *
+   * L1 erases literal values, so for a fragment whose content largely IS its
+   * literals — a label map, a toast call, a config object — L1 equality says
+   * only "same shape, different data". That is what let a 5-entry
+   * `PROVIDER_LABELS` map cluster with 428 other small string maps.
+   */
+  literalShare: number;
   /** Token stream with identifier text preserved (L0 input). */
   tokensL0: string[];
   /** Token stream with identifier text preserved, renumbered later (L1 input). */
@@ -98,6 +128,9 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     nodeCount: number;
     l0: string[];
     l1: string[];
+    /** Leaves whose text L0 preserves: identifiers and literal values. */
+    identifiers: number;
+    literals: number;
   }
 
   // Pre-order ordinal, handed to each node's children as their parent id.
@@ -110,11 +143,15 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     const l1: string[] = [kind];
     let nodeCount = 1;
     let childCount = 0;
+    let identifiers = 0;
+    let literals = 0;
 
     forEachChildSafe(node, (child) => {
       childCount++;
       const r = visit(child, id);
       nodeCount += r.nodeCount;
+      identifiers += r.identifiers;
+      literals += r.literals;
       appendDelimited(l0, r.l0);
       appendDelimited(l1, r.l1);
     });
@@ -124,15 +161,18 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
         const text = safeText(node);
         l0[0] = `Id:${text}`;
         l1[0] = `Id:${text}`; // renumbered fragment-locally in normalize()
+        identifiers = 1;
       } else if (LITERAL_KINDS.has(node.kind)) {
         l0[0] = `${kind}:${safeText(node)}`;
         l1[0] = kind; // L1 keeps literal KIND, drops the value
+        literals = 1;
       }
     }
 
-    if (nodeCount >= opts.minNodes && !IGNORED_KINDS.has(kind)) {
+    if (nodeCount >= opts.minNodes && !IGNORED_KINDS.has(node.kind)) {
       const start = node.getStart();
       const end = node.getEnd();
+      const named = identifiers + literals;
       const line = file.sourceFile.getLineAndCharacterOfPosition(start).line + 1;
       const endLine = file.sourceFile.getLineAndCharacterOfPosition(end).line + 1;
       if (endLine - line + 1 >= (opts.minLines ?? 1)) {
@@ -145,12 +185,13 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
           line,
           endLine,
           parentId,
+          literalShare: named === 0 ? 0 : literals / named,
           tokensL0: l0,
           tokensL1: l1,
         });
       }
     }
-    return { nodeCount, l0, l1 };
+    return { nodeCount, l0, l1, identifiers, literals };
   };
 
   forEachChildSafe(file.sourceFile, (child) => {

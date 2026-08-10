@@ -10,7 +10,7 @@ import { compareStrings } from "../order.js";
  * newer database (or the reverse) is exactly the situation where a cache
  * silently changes the answer.
  */
-export const CACHE_SCHEMA_VERSION = 2;
+export const CACHE_SCHEMA_VERSION = 3;
 
 /** Gitignored already; `thicket cache clear` empties it. */
 const CACHE_DIR = ".thicket";
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS fragment_occurrence (
   line INTEGER NOT NULL,
   end_line INTEGER NOT NULL,
   parent_id INTEGER NOT NULL,
+  literal_share REAL NOT NULL,
   kind TEXT NOT NULL,
   node_count INTEGER NOT NULL,
   l0_hash TEXT NOT NULL,
@@ -88,7 +89,7 @@ export function openCache(path: string, configHash: string): Cache | null {
 
   const selectFile = db.prepare("SELECT content_hash FROM file WHERE path = ?");
   const selectFragments = db.prepare(
-    `SELECT "start", "end", line, end_line, parent_id, kind, node_count, l0_hash, l1_hash
+    `SELECT "start", "end", line, end_line, parent_id, literal_share, kind, node_count, l0_hash, l1_hash
        FROM fragment_occurrence WHERE path = ? ORDER BY seq`,
   );
   const insertFile = db.prepare("INSERT OR REPLACE INTO file (path, content_hash) VALUES (?, ?)");
@@ -96,8 +97,9 @@ export function openCache(path: string, configHash: string): Cache | null {
   const deleteFragments = db.prepare("DELETE FROM fragment_occurrence WHERE path = ?");
   const insertFragment = db.prepare(
     `INSERT INTO fragment_occurrence
-       (path, seq, "start", "end", line, end_line, parent_id, kind, node_count, l0_hash, l1_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (path, seq, "start", "end", line, end_line, parent_id, literal_share,
+        kind, node_count, l0_hash, l1_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const selectPaths = db.prepare("SELECT path FROM file");
 
@@ -136,6 +138,7 @@ export function openCache(path: string, configHash: string): Cache | null {
           line: Number(r.line),
           endLine: Number(r.end_line),
           parentId: Number(r.parent_id),
+          literalShare: Number(r.literal_share),
           l0: r.l0_hash,
           l1: r.l1_hash,
         })),
@@ -158,6 +161,7 @@ export function openCache(path: string, configHash: string): Cache | null {
               f.line,
               f.endLine,
               f.parentId,
+              f.literalShare,
               f.kind,
               f.nodeCount,
               f.l0,
@@ -218,6 +222,7 @@ interface FragmentRow {
   line: number;
   end_line: number;
   parent_id: number;
+  literal_share: number;
   kind: string;
   node_count: number;
   l0_hash: string;

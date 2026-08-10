@@ -25,6 +25,39 @@ describe("extractFragments", () => {
     }
   });
 
+  it("never emits binding patterns or parameters", async () => {
+    // A destructuring pattern is a shape, not code: no refactor turns two
+    // matching ObjectBindingPatterns into one. On a real application these
+    // took two of the top five report slots, the largest being a destructured
+    // parameter list repeated across 136 files -- which is what passing the
+    // same seven things around looks like, not an actionable duplication.
+    const dir = await mkdtemp(join(tmpdir(), "thicket-bind-"));
+    try {
+      await writeFile(
+        join(dir, "bind.ts"),
+        `export function run({ alpha, beta, gamma, delta, epsilon, zeta, eta }:\n` +
+          `  { alpha: number; beta: number; gamma: number; delta: number;\n` +
+          `    epsilon: number; zeta: number; eta: number }) {\n` +
+          `  return alpha + beta + gamma + delta + epsilon + zeta + eta;\n}\n`,
+      );
+      await writeFile(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { noEmit: true }, include: ["bind.ts"] }),
+      );
+      const project = await openProject(join(dir, "tsconfig.json"));
+      const file = project.files().find((f) => f.path === "bind.ts")!;
+      const frags = extractFragments(file, { minNodes: 4 });
+      const kinds = new Set(frags.map((f) => f.kind));
+      // The enclosing function is still a fragment; only the pattern is gone.
+      expect(kinds.has("FunctionDeclaration")).toBe(true);
+      expect(kinds.has("ObjectBindingPattern")).toBe(false);
+      expect(kinds.has("Parameter")).toBe(false);
+      project.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("respects the minimum node threshold", async () => {
     const project = await openProject(fixtureConfig());
     const file = project.files().find((f) => f.path === "src/alpha.ts")!;

@@ -42,7 +42,10 @@ describe("runReport", () => {
       config: fixtureConfig(),
       minNodes: 5,
       minLines: 1,
-      budgetTokens: 300,
+      // Tight enough to actually bite: the whole fixture report is ~270
+      // tokens, so a ceiling above that truncates nothing and the assertions
+      // below hold vacuously.
+      budgetTokens: 200,
     });
     expect(tight.markdown.length).toBeLessThan(full.markdown.length);
     expect(tight.markdown).toMatch(/further findings omitted/);

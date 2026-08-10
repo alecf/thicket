@@ -28,6 +28,8 @@ export interface ShapedFragment {
   endLine: number;
   /** Pre-order ordinal of the parent node, or -1 at the top level. */
   parentId: number;
+  /** Share of named leaves that are literal values; gates L1 eligibility. */
+  literalShare: number;
   /** Exact normalization hash: identifier text and literal values preserved. */
   l0: string;
   /** α-renamed normalization hash: identifiers renumbered, literals dropped. */
@@ -51,6 +53,7 @@ export function shapeFragments(file: FileHandle, opts: ExtractOptions): ShapedFr
     line: f.line,
     endLine: f.endLine,
     parentId: f.parentId,
+    literalShare: f.literalShare,
     l0: normalizeL0(f.tokensL0),
     l1: normalizeL1(f.tokensL1),
   }));

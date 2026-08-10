@@ -5,6 +5,25 @@ import { shapeFragments, type ShapedFragment } from "./shape.js";
 
 export type Level = "L0" | "L1";
 
+/**
+ * Literal density at which a fragment stops being eligible for L1 matching.
+ *
+ * L1 is the α-renaming level: its job is to see past renamed *variables*
+ * (PRD §5.2). It also drops literal values, and for a fragment whose content
+ * largely IS its literals that is all it does — `{ oura: "Oura Ring", whoop:
+ * "WHOOP" }` and `{ title: "Test", message: "Please wait" }` become the same
+ * shape. On a real application this clustered a 5-entry label map with 428
+ * other small string maps and ranked it first.
+ *
+ * 0.35 is the 90th percentile of literal share measured over 486,022
+ * fragments of a 5,216-file application, and it separates the cases cleanly:
+ * the offending label map scores 0.50 and the toast call 0.38, against 0.06
+ * for the 19 duplicated observation classes that are the report's best
+ * finding. Fragments above it keep their L0 candidacy, so identical copies of
+ * a table are still reported.
+ */
+const MAX_LITERAL_SHARE_FOR_L1 = 0.35;
+
 export interface Occurrence {
   filePath: string;
   start: number;
@@ -81,7 +100,11 @@ export function clusterFragments(fragments: readonly ShapedFragment[]): Cluster[
   const byL1 = new Map<string, ShapedFragment[]>();
   for (const frag of fragments) {
     push(byL0, frag.l0, frag);
-    push(byL1, frag.l1, frag);
+    // L1 erases literal VALUES, so for a fragment that is mostly its literals
+    // an L1 match says only "same shape, different data" -- which is the
+    // definition of two different constants, not a duplication. Such a
+    // fragment stays eligible at L0, where being byte-identical still counts.
+    if (frag.literalShare < MAX_LITERAL_SHARE_FOR_L1) push(byL1, frag.l1, frag);
   }
 
   const clusters: Cluster[] = [];
