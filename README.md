@@ -175,7 +175,15 @@ Above the excerpt, each finding carries two facts about its **surroundings**:
 - **`every copy imports:`** repo files that every file in the cluster imports, excluding ones the rest of the codebase imports just as often. This is where the copies' shared vocabulary already lives, and often where the abstraction already is. On a real report the top finding was 19 duplicated classes, and this line named the base class that already had the exact generic factory methods all 19 reimplement — the difference between "design an abstraction" and "delete the overrides".
 - **`directly imported by:`** how many files outside the cluster reach into it. This is what turns "this looks big" into "this is contained", and it is what decides whether a finding gets scheduled. *Directly* is meant literally: a re-export barrel hides its own importers behind it, so the number is a floor.
 
-Both came from handing a report to agents that had never seen this tool and asking whether its top finding was actionable. Three of them, independently, named the same gap — the report said "here are 19 identical things" and nothing about the code around them, and the surrounding facts were what decided feasibility in every case.
+A third line appears when two printed findings are **near-variants of one shape**:
+
+- **`see also THK-DUP-…:`** `81% the same shape, 5 more copies`
+
+L1 equality is exact once identifiers are renamed, so a template and a copy of it with one field inserted become two separate findings with nothing connecting them. On a real report that was 19 duplicated classes and 5 more that sat two lines from the same template — acting on the report alone leaves the five behind and costs a second visit. Similarity is shingle Jaccard over the L1 token stream, computed only among the findings actually printed, and the threshold was measured rather than guessed: across 758 non-overlapping pairs the genuine template-and-variant pair scored **0.813**, the next pair **0.462**, and everything else below 0.31, so the bar sits in the empty band between.
+
+The pairs it must *not* link are fragments and their own ancestors, which PRD §5.4 flags and which the same measurement confirmed — the two most similar pairs of all scored 1.000 and 0.921 and both were a node beside the node containing it. Overlapping occurrences are excluded outright.
+
+All three came from handing a report to agents that had never seen this tool and asking whether its top finding was actionable. Three of them, independently, named the same gap — the report said "here are 19 identical things" and nothing about the code around them, and the surrounding facts were what decided feasibility in every case.
 
 Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
 

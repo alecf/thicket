@@ -1,6 +1,7 @@
 import type { Cluster } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
+import type { Variant } from "./variants.js";
 
 export type Tag = "source" | "test" | "mixed";
 
@@ -24,6 +25,11 @@ export interface Ranked {
    * for emitted findings only.
    */
   context?: FindingContext;
+  /**
+   * Other emitted findings that are nearly this shape. Attached alongside the
+   * excerpt, for emitted findings only.
+   */
+  variants?: Variant[];
 }
 
 /**

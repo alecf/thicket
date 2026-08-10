@@ -416,9 +416,20 @@ function contextLines(r: Ranked): string[] {
   if (context === undefined) return [];
   const lines: string[] = [];
 
+
   if (context.sharedImports.length > 0) {
     lines.push(
       `- **every copy imports:** ${context.sharedImports.map((f) => `\`${f}\``).join(", ")}`,
+    );
+  }
+
+  for (const variant of r.variants ?? []) {
+    // The percentage, not just the link: 81% alike is "the same template with
+    // a field added", and a reader deciding whether to fold the two together
+    // needs to know which end of the range they are looking at.
+    lines.push(
+      `- **see also \`${variant.id}\`:** ${Math.round(variant.similarity * 100)}% the same shape,` +
+        ` ${variant.copies} more cop${variant.copies === 1 ? "y" : "ies"}`,
     );
   }
 

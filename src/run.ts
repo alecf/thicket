@@ -10,8 +10,10 @@ import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
+import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
+import { findVariants } from "./report/variants.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import { isTestMajority, rankClusters, subsume, type Ranked } from "./report/rank.js";
 import { VERSION } from "./version.js";
@@ -257,6 +259,35 @@ export async function runReport(
     };
     const emitted = production.slice(0, maxFindings).map(decorate);
     const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(decorate);
+
+    // Near-variants, across both sections, for the findings actually printed.
+    // The token streams come from re-extracting the representative file rather
+    // than from the cache, so a warm run compares exactly what a cold one does
+    // (AGENTS.md §5) -- and it is ~45 files, not the whole tree.
+    const variants = findVariants(
+      [...emitted, ...emittedTests].flatMap((r) => {
+        const first = r.cluster.occurrences[0]!;
+        const handle = byRelPath.get(first.filePath);
+        if (handle === undefined) return [];
+        const fragment = extractFragments(handle, { minNodes, minLines }).find(
+          (f) => f.start === first.start && f.end === first.end,
+        );
+        return fragment === undefined
+          ? []
+          : [
+              {
+                id: r.cluster.id,
+                tokens: fragment.tokensL1,
+                occurrences: r.cluster.occurrences,
+                copies: r.cluster.occurrences.length,
+              },
+            ];
+      }),
+    );
+    const withVariants = <T extends { cluster: { id: string } }>(r: T): T => {
+      const found = variants.get(r.cluster.id);
+      return found === undefined ? r : { ...r, variants: found };
+    };
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
     const totalFindings = ranked.length + cycles.length;
 
@@ -278,8 +309,8 @@ export async function runReport(
         largestScc: components.reduce((max, c) => Math.max(max, c.length), 0),
       },
       scope,
-      duplication: emitted,
-      testDuplication: emittedTests,
+      duplication: emitted.map(withVariants),
+      testDuplication: emittedTests.map(withVariants),
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
       census: census(ranked, cycles.length),

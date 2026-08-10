@@ -256,6 +256,39 @@ describe("renderMarkdown", () => {
     expect(out).toContain("- **directly imported by:** 1 file outside the cluster");
   });
 
+  it("cross-references a finding that is nearly the same shape", () => {
+    // Two entries that are one template and its near-copy read as unrelated
+    // work without this line, so acting on the report leaves the variant
+    // behind and costs a second visit.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: { sharedImports: [], dependents: 0 },
+          variants: [{ id: "THK-DUP-2", similarity: 0.8125, copies: 5 }],
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("- **see also `THK-DUP-2`:** 81% the same shape, 5 more copies");
+  });
+
+  it("agrees with itself on singular and plural copies of a variant", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: { sharedImports: [], dependents: 0 },
+          variants: [{ id: "THK-DUP-2", similarity: 0.7, copies: 1 }],
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("70% the same shape, 1 more copy");
+  });
+
   it("contains no timestamps or absolute paths", () => {
     const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
     expect(out).not.toMatch(/\/Users\//);
