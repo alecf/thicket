@@ -301,6 +301,52 @@ describe("the cycle diagram", () => {
     ]);
   });
 
+  it("says when nothing in the tangle is circular at file level", () => {
+    // The fact that reversed an agent's whole recommendation, and it had to
+    // write a Tarjan implementation to learn it. A 7-module SCC over 417 files
+    // had three file cycles, all inside single directories, none crossing a
+    // boundary the finding drew -- so the suggested cut removed zero real
+    // cycles and the tangle was layering drift, not an initialization hazard.
+    const out = render({
+      ...twoModule,
+      fileCycles: {
+        crossing: { count: 0, largest: 0, example: [] },
+        within: { count: 3, largest: 3, example: ["src/lib/a.ts", "src/lib/b.ts"] },
+      },
+    });
+    expect(out).toContain("- **file cycles:** none cross these modules");
+    expect(out).toContain("the SCC is a product of grouping files into directories");
+    expect(out).toContain("3 cycles exist inside individual modules (largest 3 files, including");
+    // Two named of a three-file cycle: a sample, not a ring, so no ↔.
+    expect(out).toContain("including `src/lib/a.ts`, `src/lib/b.ts`");
+    expect(out).not.toContain("↔");
+  });
+
+  it("says how many file cycles cross the modules when some do", () => {
+    const out = render({
+      ...twoModule,
+      fileCycles: {
+        crossing: { count: 12, largest: 5, example: ["src/a.ts", "src/b.ts"] },
+        within: { count: 0, largest: 0, example: [] },
+      },
+    });
+    expect(out).toContain("- **file cycles:** 12 cross these modules (largest 5 files, including `src/a.ts`, `src/b.ts`).");
+    // Verb agreement, checked because the common real case is a count of one.
+    expect(render({
+      ...twoModule,
+      fileCycles: {
+        crossing: { count: 1, largest: 2, example: ["src/a.ts"] },
+        within: { count: 0, largest: 0, example: [] },
+      },
+    })).toContain("1 crosses these modules");
+    // The reassuring sentence must not appear when the answer is the opposite.
+    expect(out).not.toContain("none cross these modules");
+  });
+
+  it("says nothing about file cycles when none were computed", () => {
+    expect(render(twoModule)).not.toContain("file cycles");
+  });
+
   it("says how much of a mixed edge is erased", () => {
     // All-or-nothing marking hid the cheapest fixes. On a real 7-module tangle
     // an edge rendered as a bare `5` was four `import type` bindings plus one

@@ -2,6 +2,7 @@ import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
+import type { FileCycles } from "../graph/file-cycles.js";
 import { canonicalKind } from "./kinds.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
@@ -44,6 +45,12 @@ export interface CycleFinding {
    * detached one leaf and left the other six knotted.
    */
   residual: number;
+  /**
+   * Whether anything in the component is circular at FILE level, which decides
+   * whether this finding is a defect or an artifact of how files were grouped.
+   * Optional so a caller assembling a finding by hand need not compute it.
+   */
+  fileCycles?: FileCycles;
 }
 
 export interface ReportInput {
@@ -598,9 +605,58 @@ function cycleBlock(cycle: CycleFinding): string[] {
   // The chart when it fits, the member list when it does not — never both, and
   // never a chart with edges left out.
   lines.push(...(mermaidCycle(cycle) ?? memberFallback(cycle)));
+  lines.push(...fileCycleLines(cycle));
   lines.push(...cutLines(cycle));
   lines.push("");
   return lines;
+}
+
+/**
+ * Whether the tangle is circular in the code or only in the grouping.
+ *
+ * The single most decision-relevant fact about a module SCC, and it was
+ * missing. Handed a 7-module tangle, an agent rebuilt the import graph at file
+ * granularity and found three cycles across 417 files, every one inside a
+ * single directory and none crossing a boundary the finding drew — so nothing
+ * circular executes, and the "fix" the report suggested removes zero real
+ * cycles. Learning that cost it a Tarjan implementation and reversed its
+ * recommendation. Had the answer been forty instead of zero, the same line
+ * would have made this the most urgent finding in the report.
+ */
+function fileCycleLines(cycle: CycleFinding): string[] {
+  const fc = cycle.fileCycles;
+  if (fc === undefined) return [];
+  const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+  // `a ↔ b ↔ c` when the list IS the cycle; `including a, b, c` when it is a
+  // sample of one. Joining four names of a 77-file cycle with ↔ asserts a
+  // four-file ring that does not exist.
+  const named = (s: { largest: number; example: string[] }) => {
+    const quoted = s.example.map((p) => `\`${p}\``);
+    return s.example.length === s.largest
+      ? `${files(s.largest)}: ${quoted.join(" ↔ ")}`
+      : `${files(s.largest)}, including ${quoted.join(", ")}`;
+  };
+
+  if (fc.crossing.count > 0) {
+    const verb = fc.crossing.count === 1 ? "crosses" : "cross";
+    return [
+      `- **file cycles:** ${fc.crossing.count} ${verb} these modules` +
+        ` (largest ${named(fc.crossing)}).`,
+    ];
+  }
+
+  // The whole point of the line: no file in these modules imports its way back
+  // to itself across a boundary, so the SCC is a statement about directories.
+  const inside =
+    fc.within.count === 0
+      ? ""
+      : ` ${fc.within.count} cycle${fc.within.count === 1 ? "" : "s"} exist` +
+        ` inside individual modules (largest ${named(fc.within)}),` +
+        ` which this grouping already claims belong together.`;
+  return [
+    `- **file cycles:** none cross these modules, so nothing here is circular at` +
+      ` runtime — the SCC is a product of grouping files into directories.${inside}`,
+  ];
 }
 
 /**

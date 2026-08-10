@@ -61,6 +61,7 @@ flowchart LR
   src/gamma.ts -->|1| src/alpha.ts
 ```
 
+- **file cycles:** 1 crosses these modules (largest 2 files: `src/alpha.ts` ↔ `src/gamma.ts`).
 - **suggested cut:** `src/alpha.ts` → `src/gamma.ts` — 1 symbol in `src/alpha.ts`
 - **leaves:** nothing — this breaks the cycle completely.
 

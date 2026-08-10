@@ -157,6 +157,7 @@ flowchart LR
   src/gamma.ts -->|1| src/alpha.ts
 ```
 
+- **file cycles:** 1 crosses these modules (largest 2 files: `src/alpha.ts` ↔ `src/gamma.ts`).
 - **suggested cut:** `src/alpha.ts` → `src/gamma.ts` — 1 symbol in `src/alpha.ts`
 - **leaves:** nothing — this breaks the cycle completely.
 
@@ -230,6 +231,8 @@ The denominator counts hand-written TypeScript only — no `.d.ts`, no generated
 **`dependency cycles` / `largest SCC`** — strongly connected components of the module graph with more than one member, via Tarjan. Each is reported with a **suggested cut**: not "there is a cycle" but "removing this edge breaks it", verified by re-running Tarjan on the graph without that edge. When no single edge suffices, the report says so rather than guessing.
 
 The cut is chosen by **how much of the tangle it dissolves**, not by what it costs. Cheapest-edge-that-works reliably finds the least interesting cut — on a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted. Cost is only the tie-break among equally dissolving cuts, and it prefers a type-only edge first (erased at compile time, so the fix is usually moving a types file), then fewest files to edit, then fewest symbols.
+
+Every tangle states **whether anything in it is actually circular at file level**. A module SCC is a claim about directories, and directories are a choice this tool made: on a real 7-module tangle across 417 files there were three file cycles, every one inside a single directory and none crossing a boundary the finding drew — so nothing circular executes, there is no module-init hazard, and the "fix" removes zero real cycles. An agent had to write its own Tarjan implementation to learn that, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict and the reason the line is worth its width. It is the same algorithm one granularity down, over a graph thicket has already built.
 
 Every cut states **what it leaves**: `leaves: 6 of 7 modules still mutually dependent`, or `nothing — this breaks the cycle completely`. Without that line, "suggested cuts (1)" reads as "apply this and the tangle is gone", which for a leaf-detaching cut is false.
 

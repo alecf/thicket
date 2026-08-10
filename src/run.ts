@@ -3,6 +3,7 @@ import { analysisScope, type Scope } from "./extract/scope.js";
 import { openProject } from "./extract/ts-adapter.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
+import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
 import { hash, initHash } from "./hash.js";
 import { compareStrings } from "./order.js";
@@ -199,6 +200,9 @@ export async function runReport(
       shapeHash: r.cluster.id,
     }));
 
+    // Hoisted above the cycle block, which needs it to walk file-level imports.
+    const byRelPath = new Map(files.map((f) => [f.path, f]));
+
     const components = stronglyConnected(graph.modules, graph.adjacency).filter(
       (c) => c.length > 1,
     );
@@ -208,12 +212,27 @@ export async function runReport(
       // that, so the chart's arrow order is fixed by the graph.
       const inner = graph.edges.filter((e) => members.has(e.from) && members.has(e.to));
       const { cuts, residual } = suggestCuts(modules, inner);
+      // Whether anything here is circular at the file level, which is the
+      // difference between a defect and an artifact of how files were grouped.
+      // Same Tarjan, one granularity down, over the files of these modules only.
+      const componentFiles = files
+        .map((f) => f.path)
+        .filter((p) => members.has(graph.moduleOf[p] ?? ""));
+      const cycles = fileCycles(
+        componentFiles,
+        (p) => {
+          const handle = byRelPath.get(p);
+          return handle === undefined ? [] : project.importsOf(handle);
+        },
+        (p) => graph.moduleOf[p],
+      );
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
         modules,
         edges: inner,
         cuts,
         residual,
+        fileCycles: cycles,
       };
     });
 
@@ -231,7 +250,6 @@ export async function runReport(
     // print: both need whole-project lookups, and a cluster can span a hundred
     // files.
     const byPath = new Map(files.map((f) => [f.path, f.sourceFile.text]));
-    const byRelPath = new Map(files.map((f) => [f.path, f]));
     const importIndex = buildImportIndex(
       files.map((f) => f.path),
       (path) => {
