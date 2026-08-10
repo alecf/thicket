@@ -47,6 +47,21 @@ export interface Cluster {
   nodeCount: number;
   occurrences: Occurrence[];
   mass: number;
+  /**
+   * Places the same shape occurs that are NOT copies of this finding, because
+   * there it sits inside different surroundings.
+   *
+   * Attached by `subsume`, from what subsumption would otherwise discard. When
+   * a child cluster collapses into this one, the child's occurrences that do
+   * NOT lie inside a parent occurrence are exactly "this fragment, nested
+   * differently" — and that is where an extraction of it tends to already
+   * live. On a real report the 115 copies of a `matchMedia` stub were dead
+   * code, because the identical block sat in the project's configured Vitest
+   * setup file behind one extra guard; that file was in the discarded child
+   * cluster, and printing it turns "extract a helper across 115 files" into
+   * "delete 115 dead blocks".
+   */
+  alsoAt?: Occurrence[];
 }
 
 export interface DuplicationOptions {

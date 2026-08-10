@@ -343,6 +343,93 @@ describe("subsume", () => {
     expect(subsume([parent, child]).map((c) => c.id)).toEqual(["parent"]);
   });
 
+  it("keeps the subsumed child's occurrences that sit outside the parent", () => {
+    // What subsumption discards is the one cheap pointer the report has at
+    // code that may already BE the extraction. On a real application the 115
+    // copies of a `matchMedia` stub were dead code -- the identical block sat
+    // in the project's configured Vitest setup file behind one extra guard --
+    // and that file was in the child cluster that got dropped. Printing it
+    // turns "extract a helper across 115 files" into "delete 115 dead blocks".
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 12 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 11 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        occ("src/setup.ts", 0, 250, 7, 15),
+        occ("src/other.ts", 0, 250, 4, 12),
+      ],
+    });
+    const [kept] = subsume([parent, child]);
+    expect(kept?.alsoAt?.map((o) => `${o.filePath}:${o.line}`)).toEqual([
+      "src/other.ts:4",
+      "src/setup.ts:7",
+    ]);
+  });
+
+  it("names the shallowest path first, because that is where shared code lives", () => {
+    // Only a few of these get named, and the one worth naming is the one that
+    // might already BE the extraction. On a real report alphabetical order
+    // buried the project's Vitest setup file -- which held the very block all
+    // 115 copies were reimplementing -- under twenty test files nested six
+    // directories deeper.
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 12 }, (_, i) => occ(`app/deep/nest/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 11 }, (_, i) => occ(`app/deep/nest/f${i}.ts`, 50, 300, 3, 9)),
+        occ("app/a/very/deep/place.ts", 0, 250, 4, 12),
+        occ("app/setup.ts", 0, 250, 7, 15),
+      ],
+    });
+    expect(subsume([parent, child])[0]?.alsoAt?.map((o) => o.filePath)).toEqual([
+      "app/setup.ts",
+      "app/a/very/deep/place.ts",
+    ]);
+  });
+
+  it("says nothing about elsewhere when the child sits entirely inside the parent", () => {
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 20,
+      occurrences: [occ("src/a.ts", 0, 100), occ("src/b.ts", 0, 100)],
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 18,
+      occurrences: [occ("src/a.ts", 5, 95), occ("src/b.ts", 5, 95)],
+    });
+    expect(subsume([parent, child])[0]?.alsoAt).toBeUndefined();
+  });
+
+  it("names a file once however often the shape is nested differently in it", () => {
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 9 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        occ("src/setup.ts", 900, 950, 40, 44),
+        occ("src/setup.ts", 0, 250, 7, 15),
+      ],
+    });
+    // One entry, at the earliest line: the reader opens the file once.
+    expect(subsume([parent, child])[0]?.alsoAt?.map((o) => o.line)).toEqual([7]);
+  });
+
   it("keeps a cluster that merely brushes a larger one", () => {
     // The complement: partial overlap is not the same finding. Without this
     // bound, "mostly contained" collapses genuinely distinct duplication.

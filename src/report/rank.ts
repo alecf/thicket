@@ -1,4 +1,4 @@
-import type { Cluster } from "../fingerprint/cluster.js";
+import type { Cluster, Occurrence } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
 import type { Variant } from "./variants.js";
@@ -233,10 +233,61 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
     (a, b) => b.nodeCount - a.nodeCount || compareStrings(a.id, b.id),
   );
   const kept: Cluster[] = [];
+  // Occurrences of a dropped child that lie outside every occurrence of the
+  // parent that swallowed it. Collected rather than discarded: they are the
+  // same shape in different surroundings, which is the one place the report
+  // can cheaply point at code that may already be the extraction.
+  const elsewhere = new Map<string, Occurrence[]>();
   for (const candidate of sorted) {
-    if (!kept.some((parent) => contains(parent, candidate))) kept.push(candidate);
+    const parent = kept.find((k) => contains(k, candidate));
+    if (parent === undefined) {
+      kept.push(candidate);
+      continue;
+    }
+    const outside = candidate.occurrences.filter((c) => !insideAny(parent, c));
+    if (outside.length > 0) {
+      const prior = elsewhere.get(parent.id);
+      if (prior) prior.push(...outside);
+      else elsewhere.set(parent.id, [...outside]);
+    }
   }
-  return kept;
+  return kept.map((c) => {
+    const outside = elsewhere.get(c.id);
+    if (outside === undefined) return c;
+    // One entry per file: the reader opens files, and a shape nested
+    // differently in twenty places in one file is still one place to look.
+    const byFile = new Map<string, Occurrence>();
+    for (const o of outside) {
+      const prior = byFile.get(o.filePath);
+      if (prior === undefined || o.line < prior.line) byFile.set(o.filePath, o);
+    }
+    return {
+      ...c,
+      // Shallowest path first. Only a few of these get named, and the one
+      // worth naming is the one that might already BE the extraction -- which
+      // lives higher in the tree than the copies do, because that is what
+      // being shared means. Alphabetical order buried a project's Vitest setup
+      // file under twenty test files nested six directories deeper.
+      alsoAt: [...byFile.values()].sort(
+        (a, b) =>
+          depth(a.filePath) - depth(b.filePath) ||
+          compareStrings(a.filePath, b.filePath) ||
+          a.line - b.line,
+      ),
+    };
+  });
+}
+
+function depth(path: string): number {
+  let n = 0;
+  for (const c of path) if (c === "/") n += 1;
+  return n;
+}
+
+function insideAny(parent: Cluster, child: Occurrence): boolean {
+  return parent.occurrences.some(
+    (p) => p.filePath === child.filePath && p.start <= child.start && p.end >= child.end,
+  );
 }
 
 /**

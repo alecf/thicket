@@ -456,6 +456,15 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
 const MAX_DEPENDENTS_NAMED = 4;
 
 /**
+ * Locations named for the same-shape-elsewhere line.
+ *
+ * A pointer, not an inventory. One of these is usually enough — the reader is
+ * being told "go look at this, it may already be the abstraction" — and the
+ * count carries the rest.
+ */
+const MAX_ALSO_AT_NAMED = 3;
+
+/**
  * What sits around the cluster.
  *
  * Given a report and asked whether its top finding was actionable, three
@@ -494,6 +503,21 @@ function contextLines(r: Ranked): string[] {
       .map((label, i) => `${label} (${r.varies![i]!.values})`)
       .join(", ");
     lines.push(`- **varies across copies:** ${named}`);
+  }
+
+  const alsoAt = r.cluster.alsoAt ?? [];
+  if (alsoAt.length > 0) {
+    // The cheapest pointer the report has at code that may already BE the
+    // extraction. On a real application 115 copies of a `matchMedia` stub were
+    // dead code -- the identical block sat in the project's configured Vitest
+    // setup file behind one extra guard -- and an agent, told only that 115
+    // files were duplicated, planned to import a new helper into all 115. The
+    // right move was to delete them.
+    const shown = alsoAt.slice(0, MAX_ALSO_AT_NAMED);
+    const rest = alsoAt.length - shown.length;
+    const named = shown.map((o) => `\`${o.filePath}:${o.line}\``).join(", ");
+    const more = rest > 0 ? `, and ${rest} more file${rest === 1 ? "" : "s"}` : "";
+    lines.push(`- **same shape in other surroundings:** ${named}${more}`);
   }
 
   for (const variant of r.variants ?? []) {

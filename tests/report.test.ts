@@ -384,6 +384,60 @@ describe("renderMarkdown", () => {
     expect(out).not.toContain("directly imported by");
   });
 
+  it("points at the same shape sitting in different surroundings", () => {
+    // The line that reverses a plan. 115 copies of a `matchMedia` stub read as
+    // "extract a helper into 115 files" until you know the identical block is
+    // already in the project's Vitest setup file behind one extra guard, at
+    // which point all 115 are dead code and the move is to delete them.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1", {
+            alsoAt: [
+              { filePath: "apps/web/vitest.setup.tsx", start: 0, end: 9, line: 36, endLine: 50, parentId: 1 },
+              { filePath: "apps/web/lib/test/match-media.ts", start: 0, end: 9, line: 11, endLine: 25, parentId: 2 },
+            ],
+          }),
+          context: { sharedImports: [], dependents: deps(0) },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **same shape in other surroundings:** `apps/web/vitest.setup.tsx:36`," +
+        " `apps/web/lib/test/match-media.ts:11`",
+    );
+  });
+
+  it("counts the same-shape locations it does not name", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1", {
+            alsoAt: Array.from({ length: 9 }, (_, i) => ({
+              filePath: `src/other${i}.ts`,
+              start: 0,
+              end: 9,
+              line: 3,
+              endLine: 8,
+              parentId: i,
+            })),
+          }),
+          context: { sharedImports: [], dependents: deps(0) },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("`src/other0.ts:3`, `src/other1.ts:3`, `src/other2.ts:3`, and 6 more files");
+  });
+
+  it("says nothing about other surroundings when there are none", () => {
+    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    expect(out).not.toContain("other surroundings");
+  });
+
   it("cross-references a finding that is nearly the same shape", () => {
     // Two entries that are one template and its near-copy read as unrelated
     // work without this line, so acting on the report leaves the variant

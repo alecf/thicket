@@ -194,6 +194,12 @@ A fourth names **what differs between the copies**:
 
 Reporting the sameness without the variation is what made a real finding read as "19 similar classes" when it was "19 rows of a config table that got compiled into classes" — and the second phrasing hands you the abstraction: a base class with four static fields. An agent asked to act on that finding spent most of its investigation rebuilding this list by hand. Only **literal values** are named: an identifier that differs is what an L1 match already means, and reporting each renamed local under whatever identifier precedes it buries the constants that matter under a dozen `x`, `y`, `sqrt`. The number is distinct values, and it is worth reading — the line above comes from a 19-copy cluster with 18 distinct LOINC codes, because two of the classes declare the same one. That is a live query-correctness bug with nothing to do with duplication, and the agent that found it had to extract the constants itself to see it.
 
+A line also appears when the same shape occurs somewhere it is **not** a copy of this finding:
+
+- **`same shape in other surroundings:`** `apps/web/vitest.setup.tsx:36`, … and 19 more files
+
+This is the report's cheapest pointer at code that may already *be* the extraction, and it costs nothing to compute — it is what subsumption was already throwing away. When a smaller cluster collapses into a larger one, the occurrences of the smaller that do not sit inside the larger are exactly "this fragment, nested differently", and that is where a deduplicated version tends to live. On a real application, 115 copies of a `matchMedia` stub read as "extract a helper into 115 files" until you know the identical block already sits in the project's configured Vitest setup file behind one extra guard — at which point all 115 are dead code and the work is to delete them. An agent given the finding without this line planned the wrong refactor. Locations are ordered **shallowest path first**, because a shared thing lives higher in the tree than its copies do; alphabetical order buried that setup file under twenty test files nested six directories deeper.
+
 A third line appears when two printed findings are **near-variants of one shape**:
 
 - **`see also THK-DUP-…:`** `81% the same shape, 5 more copies`
