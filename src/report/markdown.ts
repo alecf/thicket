@@ -350,10 +350,15 @@ function omittedSection(
     // Down-weighted by the ranker rather than dropped (PRD §5.4), so this is
     // most of the tail and almost none of the top. Saying so is what stops the
     // totals reading as untouched work.
+    //
+    // "each within one file" rather than "inside a single file": the latter
+    // reads as one particular file the report is coyly withholding the name
+    // of, when what it states is a per-candidate property that holds across
+    // thousands of different files.
     lines.push(
-      `${c.singleFile} of those candidates repeat inside a single file, which is` +
-        ` ranked down rather than excluded: it fills the tail and rarely reaches` +
-        ` the report.`,
+      `${c.singleFile} of those candidates repeat each within one file rather than` +
+        ` across files — a different file for each — which is ranked down rather` +
+        ` than excluded, so they fill the tail and rarely reach the report.`,
       "",
     );
   }

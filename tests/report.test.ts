@@ -439,7 +439,11 @@ describe("renderMarkdown", () => {
     expect(out).toContain("| 100+ | 210 |");
     expect(out).toContain("| 1–3 | 5598 |");
     expect(out).toContain("| duplication in tests | 9389 | 0 |");
-    expect(out).toContain("9382 of those candidates repeat inside a single file");
+    // Worded so it cannot be read as one particular file whose name is being
+    // withheld: this is a per-candidate property holding across thousands.
+    expect(out).toContain(
+      "9382 of those candidates repeat each within one file rather than across files",
+    );
   });
 
   it("counts shown cycles against the tangle row, not the duplication row", () => {
