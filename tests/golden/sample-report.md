@@ -19,6 +19,8 @@ thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 mod
 
 L1 · `FunctionDeclaration` · score 26
 
+- **directly imported by:** 1 file outside the cluster
+
 ```ts
 export function normalizeAlpha(points: Point[]): Point[] {
   const result: Point[] = [];
@@ -32,6 +34,8 @@ export function normalizeAlpha(points: Point[]): Point[] {
 ### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
 
 L0 · `Block` · score 18
+
+- **directly imported by:** 1 file outside the cluster
 
 ```ts
 {

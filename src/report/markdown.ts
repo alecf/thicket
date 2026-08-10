@@ -383,12 +383,55 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
     "",
     `${c.level} · \`${canonicalKind(c.kind)}\` · score ${Math.round(r.score)}${tag}`,
     "",
+    ...contextLines(r),
     // An AST kind alone does not say whether a finding is worth acting on;
     // deciding meant opening files, and a cluster can span a hundred of them.
     ...excerptBlock(r),
     ...formatOccurrences(r, maxFiles),
     "",
   ];
+}
+
+/**
+ * Files named as dependents before they are only counted.
+ *
+ * Naming a handful is strictly better than counting them, because a re-export
+ * barrel among them tells the reader the number is a floor rather than a total.
+ */
+const MAX_DEPENDENTS_NAMED = 4;
+
+/**
+ * What sits around the cluster.
+ *
+ * Given a report and asked whether its top finding was actionable, three
+ * independent agents named the same missing fact: the finding says "here are
+ * 19 identical things" and nothing about the code around them. One of those
+ * clusters turned out to share a base class that already had the exact generic
+ * factory methods all 19 copies reimplement -- the difference between
+ * designing an abstraction and deleting overrides -- and the report knew every
+ * one of them imported it.
+ */
+function contextLines(r: Ranked): string[] {
+  const context = r.context;
+  if (context === undefined) return [];
+  const lines: string[] = [];
+
+  if (context.sharedImports.length > 0) {
+    lines.push(
+      `- **every copy imports:** ${context.sharedImports.map((f) => `\`${f}\``).join(", ")}`,
+    );
+  }
+
+  // "Directly", because a re-export barrel hides its own importers behind it.
+  // Naming a small set lets the reader spot exactly that and follow it.
+  lines.push(
+    context.dependents === 0
+      ? `- **directly imported by:** nothing outside the cluster`
+      : `- **directly imported by:** ${context.dependents} file` +
+        `${context.dependents === 1 ? "" : "s"} outside the cluster`,
+  );
+  lines.push("");
+  return lines;
 }
 
 /** Language tags by extension, for the excerpt's fence. */

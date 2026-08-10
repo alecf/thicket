@@ -1,5 +1,6 @@
 import type { Cluster } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
+import type { FindingContext } from "./context.js";
 
 export type Tag = "source" | "test" | "mixed";
 
@@ -17,6 +18,12 @@ export interface Ranked {
    * will actually print.
    */
   excerpt?: string[];
+  /**
+   * What surrounds the cluster: the abstraction its copies already share, and
+   * how much of the codebase reaches into it. Attached alongside the excerpt,
+   * for emitted findings only.
+   */
+  context?: FindingContext;
 }
 
 /**

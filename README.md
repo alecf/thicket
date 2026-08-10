@@ -115,6 +115,8 @@ thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 mod
 
 L1 · `FunctionDeclaration` · score 26
 
+- **directly imported by:** 1 file outside the cluster
+
 ```ts
 export function normalizeAlpha(points: Point[]): Point[] {
   const result: Point[] = [];
@@ -128,6 +130,8 @@ export function normalizeAlpha(points: Point[]): Point[] {
 ### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
 
 L0 · `Block` · score 18
+
+- **directly imported by:** 1 file outside the cluster
 
 ```ts
 {
@@ -165,6 +169,13 @@ Reading a finding: the heading carries the id to cite and the size to judge by, 
 **The report is valid CommonMark**, and that is a tested property rather than an aspiration: `tests/markdown-validity.test.ts` checks the rendered report, the golden file, a scope-warning report and a truncated one for indented prose, unseparated headings, unbalanced fences, and tables missing a delimiter row. It matters because the earlier plaintext-ish format was *not* valid Markdown in a way that only showed up once rendered — every body line was indented two spaces, which CommonMark folds into the preceding paragraph, so the whole Summary collapsed onto one line and the four-space excerpt was swallowed by the location list above it instead of becoming a code block. (An indented code block cannot interrupt a paragraph; only a fenced one can.) Excerpt fences are tagged with the language of the file they came from and are lengthened past any backtick run in the source, so a fragment containing a template literal or a Markdown snippet cannot close its own block and spill the rest of the report onto the page as prose.
 
 The fenced block under each finding is the head of its first occurrence. An AST kind alone — `PropertyAssignment`, `Block` — does not say whether a finding is worth acting on, and deciding without an excerpt means opening files that a single cluster can span a hundred of.
+
+Above the excerpt, each finding carries two facts about its **surroundings**:
+
+- **`every copy imports:`** repo files that every file in the cluster imports, excluding ones the rest of the codebase imports just as often. This is where the copies' shared vocabulary already lives, and often where the abstraction already is. On a real report the top finding was 19 duplicated classes, and this line named the base class that already had the exact generic factory methods all 19 reimplement — the difference between "design an abstraction" and "delete the overrides".
+- **`directly imported by:`** how many files outside the cluster reach into it. This is what turns "this looks big" into "this is contained", and it is what decides whether a finding gets scheduled. *Directly* is meant literally: a re-export barrel hides its own importers behind it, so the number is a floor.
+
+Both came from handing a report to agents that had never seen this tool and asking whether its top finding was actionable. Three of them, independently, named the same gap — the report said "here are 19 identical things" and nothing about the code around them, and the surrounding facts were what decided feasibility in every case.
 
 Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
 

@@ -205,6 +205,57 @@ describe("renderMarkdown", () => {
     expect(out).toContain("- `src/f00.ts:3`");
   });
 
+  it("names the abstraction every copy already imports", () => {
+    // The fact that decided a real finding. Without it the entry reads as
+    // "design a new abstraction for 19 classes"; with it, as "they all already
+    // extend this, delete the overrides".
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: { sharedImports: ["models/VitalObservation.ts"], dependents: 5 },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("- **every copy imports:** `models/VitalObservation.ts`");
+    expect(out).toContain("- **directly imported by:** 5 files outside the cluster");
+    // Above the excerpt and the locations, because it changes what the reader
+    // is looking at before they look at it.
+    expect(out.indexOf("every copy imports")).toBeLessThan(out.indexOf("src/alpha.ts"));
+  });
+
+  it("says nothing about shared imports when the copies share none", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 2 } }],
+      totalFindings: 1,
+    });
+    expect(out).not.toContain("every copy imports");
+    expect(out).toContain("- **directly imported by:** 2 files outside the cluster");
+  });
+
+  it("reports a self-contained cluster as reached by nothing", () => {
+    // Zero is an answer, not a missing one: nothing outside imports these, so
+    // the extraction cannot break a caller.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 0 } }],
+      totalFindings: 1,
+    });
+    expect(out).toContain("- **directly imported by:** nothing outside the cluster");
+  });
+
+  it("agrees with itself on singular and plural dependents", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 1 } }],
+      totalFindings: 1,
+    });
+    expect(out).toContain("- **directly imported by:** 1 file outside the cluster");
+  });
+
   it("contains no timestamps or absolute paths", () => {
     const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
     expect(out).not.toMatch(/\/Users\//);

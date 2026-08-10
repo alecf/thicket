@@ -11,6 +11,7 @@ import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
 import { census, type Census } from "./report/census.js";
+import { buildImportIndex, findingContext } from "./report/context.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import { isTestMajority, rankClusters, subsume, type Ranked } from "./report/rank.js";
 import { VERSION } from "./version.js";
@@ -224,23 +225,38 @@ export async function runReport(
     const production = ranked.filter((r) => !isTestMajority(r.cluster));
     const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
 
-    // Excerpts are resolved only for what the report will print: the lookup
-    // needs the file texts, and a cluster can span a hundred files.
+    // Excerpts and surroundings are resolved only for what the report will
+    // print: both need whole-project lookups, and a cluster can span a hundred
+    // files.
     const byPath = new Map(files.map((f) => [f.path, f.sourceFile.text]));
-    const withExcerpt = <T extends (typeof ranked)[number]>(r: T): T => {
+    const byRelPath = new Map(files.map((f) => [f.path, f]));
+    const importIndex = buildImportIndex(
+      files.map((f) => f.path),
+      (path) => {
+        const handle = byRelPath.get(path);
+        return handle === undefined ? [] : project.importsOf(handle);
+      },
+    );
+    const decorate = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;
       const text = byPath.get(first.filePath);
-      if (text === undefined) return r;
+      const context = findingContext(
+        [...new Set(r.cluster.occurrences.map((o) => o.filePath))],
+        importIndex,
+        files.length,
+      );
+      if (text === undefined) return { ...r, context };
       return {
         ...r,
+        context,
         excerpt: excerptOf(text, first.start, first.end, {
           maxLines: EXCERPT_LINES,
           maxColumns: EXCERPT_COLUMNS,
         }),
       };
     };
-    const emitted = production.slice(0, maxFindings).map(withExcerpt);
-    const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(withExcerpt);
+    const emitted = production.slice(0, maxFindings).map(decorate);
+    const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(decorate);
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
     const totalFindings = ranked.length + cycles.length;
 
