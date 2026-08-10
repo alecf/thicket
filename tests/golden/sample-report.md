@@ -49,10 +49,8 @@ L0 · `Block` · score 18
 
 ```mermaid
 flowchart LR
-  m0["src/alpha.ts"]
-  m1["src/gamma.ts"]
-  m0 -. "cut · 1" .-> m1
-  m1 -->|1| m0
+  src/alpha.ts -. "cut · 1" .-> src/gamma.ts
+  src/gamma.ts -->|1| src/alpha.ts
 ```
 
 - **suggested cuts (1):** `src/alpha.ts` → `src/gamma.ts`

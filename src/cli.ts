@@ -38,6 +38,7 @@ Usage: thicket [options]
   --min-nodes <n>        override the depth preset's minimum fragment size, in AST nodes
   --min-lines <n>        override the depth preset's minimum fragment size, in lines
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
+  --max-locations <n>    cap the files each finding names (default: name them all)
   --granularity <g>      auto | file | <directory depth> (default auto)
   --include-generated    also analyze dist/, build/, .next/ and friends
   --json <path>          also write the JSON sidecar here
@@ -61,6 +62,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         "min-nodes": { type: "string" },
         "min-lines": { type: "string" },
         "budget-tokens": { type: "string" },
+        "max-locations": { type: "string" },
         granularity: { type: "string" },
         "include-generated": { type: "boolean" },
         json: { type: "string" },
@@ -118,11 +120,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   let budgetTokens: number | undefined;
   let minNodesOverride: number | undefined;
   let minLinesOverride: number | undefined;
+  let maxLocations: number | undefined;
   try {
     depth = parseNumber(values.depth, "--depth") ?? DEFAULT_DEPTH;
     budgetTokens = parseNumber(values["budget-tokens"], "--budget-tokens");
     minNodesOverride = parseNumber(values["min-nodes"], "--min-nodes");
     minLinesOverride = parseNumber(values["min-lines"], "--min-lines");
+    maxLocations = parseNumber(values["max-locations"], "--max-locations");
   } catch (err) {
     process.stderr.write(`thicket: ${(err as Error).message}\n`);
     return 1;
@@ -157,6 +161,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       includeGenerated: values["include-generated"] ?? false,
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
+      ...(maxLocations === undefined ? {} : { maxLocations }),
     }));
   } catch (err) {
     // A stack trace on stderr is a worse answer than a sentence: the caller is

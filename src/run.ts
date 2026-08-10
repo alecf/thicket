@@ -10,6 +10,7 @@ import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
+import { census, type Census } from "./report/census.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import { rankClusters, subsume, type Ranked } from "./report/rank.js";
 import { VERSION } from "./version.js";
@@ -23,6 +24,11 @@ export interface RunOptions {
   budgetTokens?: number;
   /** Cap on findings emitted per section, before the token budget applies. */
   maxFindings?: number;
+  /**
+   * Files one finding may name in the Markdown before the rest are counted.
+   * Unset means every one: an agent cannot open "and 13 more files".
+   */
+  maxLocations?: number;
   /** Analyze generated/vendored directories too (see `GENERATED_DIR_SEGMENTS`). */
   includeGenerated?: boolean;
   /**
@@ -58,6 +64,8 @@ export interface ReportJson {
   cycles: CycleFinding[];
   /** Candidates found, before the per-section cap or the token budget. */
   totalFindings: number;
+  /** The shape of the tail the Markdown summarizes rather than prints. */
+  census: Census;
   /** How many of them the Markdown actually printed. */
   shownInMarkdown: number;
 }
@@ -226,7 +234,9 @@ export async function runReport(
       duplication: emitted,
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
+      census: census(ranked, cycles.length),
       ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
+      ...(opts.maxLocations === undefined ? {} : { maxFilesPerFinding: opts.maxLocations }),
     };
 
     const { markdown, shown } = renderReport(input);
@@ -259,6 +269,7 @@ export async function runReport(
         })),
         cycles: input.cycles,
         totalFindings,
+        census: input.census,
         shownInMarkdown: shown,
       },
     };

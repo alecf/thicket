@@ -38,6 +38,7 @@ const base: ReportInput = {
   duplication: [],
   cycles: [],
   totalFindings: 1,
+  census: { duplication: 0, cycles: 1, bands: [], testOnly: 0, singleFile: 0 },
 };
 
 /** The mermaid source of the first diagram in a report, fence excluded. */
@@ -78,55 +79,132 @@ const twoModule: CycleFinding = {
 };
 
 describe("the cycle diagram", () => {
-  it("draws the whole SCC as a mermaid flowchart", () => {
+  it("draws the whole SCC as a mermaid flowchart named by module path", () => {
     // Pinned exactly rather than probed with `toContain`: a diagram is only
     // useful if every node and every edge is where it belongs, and a
     // substring check would pass on a chart missing half its arrows.
     expect(diagram(render(twoModule))).toEqual([
       "flowchart LR",
-      '  m0["src/alpha.ts"]',
-      '  m1["src/gamma.ts"]',
-      "  m0 -->|3| m1",
-      '  m1 -. "cut · 1" .-> m0',
+      "  src/alpha.ts -->|3| src/gamma.ts",
+      '  src/gamma.ts -. "cut · 1" .-> src/alpha.ts',
     ]);
   });
 
-  it("numbers nodes by sorted module name, not by discovery order", () => {
+  it("orders edges by module name, not by discovery order", () => {
     // Determinism (AGENTS.md §1): Tarjan hands back components in traversal
-    // order, so numbering as-received would let two runs over the same tree
-    // emit different-but-equivalent charts.
-    const reversed = { ...twoModule, modules: [...twoModule.modules].reverse() };
+    // order, so emitting as-received would let two runs over the same tree
+    // produce different-but-equivalent charts.
+    const reversed = {
+      ...twoModule,
+      modules: [...twoModule.modules].reverse(),
+      edges: [...twoModule.edges].reverse(),
+    };
     expect(diagram(render(reversed))).toEqual(diagram(render(twoModule)));
   });
 
   it("marks the suggested cut and nothing else", () => {
     const dotted = diagram(render(twoModule)).filter((l) => l.includes("-."));
-    expect(dotted).toEqual(['  m1 -. "cut · 1" .-> m0']);
+    expect(dotted).toEqual(['  src/gamma.ts -. "cut · 1" .-> src/alpha.ts']);
   });
 
   it("draws every edge solid when no cut was found", () => {
     const uncut = { ...twoModule, cuts: [] };
     expect(diagram(render(uncut))).toEqual([
       "flowchart LR",
-      '  m0["src/alpha.ts"]',
-      '  m1["src/gamma.ts"]',
-      "  m0 -->|3| m1",
-      "  m1 -->|1| m0",
+      "  src/alpha.ts -->|3| src/gamma.ts",
+      "  src/gamma.ts -->|1| src/alpha.ts",
     ]);
   });
 
-  it("quotes node labels so a path is never parsed as mermaid syntax", () => {
+  it("falls back to slugged ids when a name is not a legal mermaid id", () => {
+    // `app/[id]` is a Next.js dynamic route, not a contrived name: at file
+    // granularity a bare `[` opens a node label and wrecks the chart.
     const odd: CycleFinding = {
       id: "THK-CYC-odd",
-      modules: ['weird"name', "packages/ui-(v2)"],
+      modules: ["app/[id]/page.tsx", "lib/util.ts"],
       edges: [
-        { from: 'weird"name', to: "packages/ui-(v2)", weight: 1 },
-        { from: "packages/ui-(v2)", to: 'weird"name', weight: 1 },
+        { from: "app/[id]/page.tsx", to: "lib/util.ts", weight: 2 },
+        { from: "lib/util.ts", to: "app/[id]/page.tsx", weight: 1 },
       ],
       cuts: [],
     };
-    const nodes = diagram(render(odd)).filter((l) => l.includes("["));
-    expect(nodes).toEqual(['  m0["packages/ui-(v2)"]', '  m1["weird#quot;name"]']);
+    expect(diagram(render(odd))).toEqual([
+      "flowchart LR",
+      '  app/_id_/page.tsx["app/[id]/page.tsx"]',
+      '  lib/util.ts["lib/util.ts"]',
+      "  app/_id_/page.tsx -->|2| lib/util.ts",
+      "  lib/util.ts -->|1| app/_id_/page.tsx",
+    ]);
+  });
+
+  it("puts the whole chart on slugs when any one name is unsafe", () => {
+    // Naming some nodes by path and others by slug would read as though the
+    // two kinds of node were different kinds of thing.
+    const mixed: CycleFinding = {
+      id: "THK-CYC-mixed",
+      modules: ["a b", "clean/path", "other"],
+      edges: [
+        { from: "a b", to: "clean/path", weight: 1 },
+        { from: "clean/path", to: "other", weight: 1 },
+        { from: "other", to: "a b", weight: 1 },
+      ],
+      cuts: [],
+    };
+    const nodes = diagram(render(mixed)).filter((l) => l.includes("["));
+    expect(nodes).toEqual([
+      '  a_b["a b"]',
+      '  clean/path["clean/path"]',
+      '  other["other"]',
+    ]);
+  });
+
+  it("escapes a quote in a label rather than ending it early", () => {
+    const quoted: CycleFinding = {
+      id: "THK-CYC-quote",
+      modules: ['weird"name', "plain"],
+      edges: [
+        { from: 'weird"name', to: "plain", weight: 1 },
+        { from: "plain", to: 'weird"name', weight: 1 },
+      ],
+      cuts: [],
+    };
+    expect(diagram(render(quoted))).toContain('  weird_name["weird#quot;name"]');
+  });
+
+  it("never lets two modules collapse onto one node id", () => {
+    // `a:b` and `a?b` both slug to `a_b`. Sharing an id would merge two nodes
+    // into one and turn a two-module cycle into a self-loop.
+    const collide: CycleFinding = {
+      id: "THK-CYC-collide",
+      modules: ["a:b", "a?b"],
+      edges: [
+        { from: "a:b", to: "a?b", weight: 1 },
+        { from: "a?b", to: "a:b", weight: 1 },
+      ],
+      cuts: [],
+    };
+    const drawn = diagram(render(collide));
+    expect(drawn).toEqual([
+      "flowchart LR",
+      '  a_b["a:b"]',
+      '  a_b_2["a?b"]',
+      "  a_b -->|1| a_b_2",
+      "  a_b_2 -->|1| a_b",
+    ]);
+  });
+
+  it("slugs a module whose name is a mermaid keyword", () => {
+    // A directory really can be called `end`, and `end` closes a subgraph.
+    const keyword: CycleFinding = {
+      id: "THK-CYC-kw",
+      modules: ["end", "start"],
+      edges: [
+        { from: "end", to: "start", weight: 1 },
+        { from: "start", to: "end", weight: 1 },
+      ],
+      cuts: [],
+    };
+    expect(diagram(render(keyword))).toContain('  _end["end"]');
   });
 
   it("still names the suggested cut in prose beside the chart", () => {
@@ -157,7 +235,9 @@ describe("the cycle diagram", () => {
   it("draws a chart at the largest size it accepts", () => {
     // Guards the cap from silently drifting down to "never draws anything".
     const drawn = diagram(render(ring(20)));
-    expect(drawn.filter((l) => l.includes("["))).toHaveLength(20);
     expect(drawn.filter((l) => l.includes("-->"))).toHaveLength(20);
+    // Every module reachable in the chart, none dropped at the boundary.
+    const named = new Set(drawn.flatMap((l) => l.match(/m\d\d/g) ?? []));
+    expect(named.size).toBe(20);
   });
 });

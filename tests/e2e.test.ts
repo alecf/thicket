@@ -92,10 +92,21 @@ describe("runReport", () => {
       budgetTokens: 200,
     });
     expect(tight.markdown.length).toBeLessThan(full.markdown.length);
-    expect(tight.markdown).toMatch(/further findings omitted/);
+    expect(tight.markdown).toMatch(/findings are not shown above/);
     // The stated total must be the pre-truncation candidate count, not the
     // number shown -- otherwise a harness cannot tell it is seeing a slice.
     expect(tight.json.totalFindings).toBe(full.json.totalFindings);
+  });
+
+  it("censuses every candidate it found, printed or not", async () => {
+    // The census is what the report says the unprinted tail consists of. If it
+    // does not add up to the stated total, the summary is describing a
+    // different pile than the one the findings came off.
+    const { json } = await runReport({ config: fixtureConfig(), minNodes: 5, minLines: 1 });
+    expect(json.census.duplication + json.census.cycles).toBe(json.totalFindings);
+    const banded = json.census.bands.reduce((sum, b) => sum + b.count, 0);
+    expect(banded).toBe(json.census.duplication);
+    expect(json.census.duplication).toBeGreaterThan(0);
   });
 
   it("emits no absolute paths", async () => {
@@ -165,6 +176,6 @@ describe("runReport", () => {
     const capped = await runReport({ config: fixtureConfig(), minNodes: 5, maxFindings: 1 });
     expect(capped.json.duplication.length).toBeLessThanOrEqual(1);
     expect(capped.json.totalFindings).toBeGreaterThan(1);
-    expect(capped.markdown).toMatch(/further findings omitted/);
+    expect(capped.markdown).toMatch(/findings are not shown above/);
   });
 });

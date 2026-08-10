@@ -1,5 +1,6 @@
 import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
+import type { Census } from "./census.js";
 import { canonicalKind } from "./kinds.js";
 import type { Ranked } from "./rank.js";
 
@@ -43,8 +44,16 @@ export interface ReportInput {
   cycles: CycleFinding[];
   /** Candidate count BEFORE any truncation, so "N of M" is meaningful. */
   totalFindings: number;
+  /** What is in the tail the report did not print. */
+  census: Census;
   /** Hard ceiling on the whole report (PRD §9.3). Omit for no ceiling. */
   budgetTokens?: number;
+  /**
+   * Files one finding may name before the rest are counted. Omit to name every
+   * one, which is the default: a location an agent cannot look up is not a
+   * finding it can act on.
+   */
+  maxFilesPerFinding?: number;
 }
 
 /**
@@ -76,13 +85,15 @@ export function renderMarkdown(input: ReportInput): string {
  */
 export function renderReport(input: ReportInput): { markdown: string; shown: number } {
   const blocks: Block[] = [
-    ...input.duplication.map((r) => ({ section: "## Duplication", lines: duplicationBlock(r) })),
+    ...input.duplication.map((r) => ({
+      section: "## Duplication",
+      lines: duplicationBlock(r, input.maxFilesPerFinding),
+    })),
     ...input.cycles.map((c) => ({ section: "## Module tangle", lines: cycleBlock(c) })),
   ];
 
   const emitted = selectWithinBudget(input, blocks);
   const shown = emitted.length;
-  const omitted = input.totalFindings - shown;
 
   const lines = [...headerLines(input, shown)];
   let section: string | undefined;
@@ -96,7 +107,8 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
     }
     lines.push(...block.lines);
   }
-  if (omitted > 0) lines.push(omittedLine(omitted));
+  const shownCycles = emitted.filter((b) => b.section === "## Module tangle").length;
+  lines.push(...omittedSection(input, shown - shownCycles, shownCycles));
 
   return { markdown: lines.join("\n") + "\n", shown };
 }
@@ -113,9 +125,12 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
 function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block[] {
   if (input.budgetTokens === undefined) return [...blocks];
 
-  // Priced against the largest count either line can carry, so the reservation
-  // cannot be undershot once the real counts are known.
-  const fixed = [...headerLines(input, input.totalFindings), omittedLine(input.totalFindings)];
+  // Priced against the largest count any of these lines can carry, so the
+  // reservation cannot be undershot once the real counts are known.
+  const fixed = [
+    ...headerLines(input, input.totalFindings),
+    ...omittedSection(input, input.census.duplication, input.census.cycles),
+  ];
   let used = estimateTokens(fixed.join("\n") + "\n");
 
   const out: Block[] = [];
@@ -215,8 +230,64 @@ function percent(part: number, whole: number): string {
   return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
-function omittedLine(omitted: number): string {
-  return `… ${omitted} further findings omitted`;
+/**
+ * What did not fit, and what it consists of.
+ *
+ * This replaced a single line — `… 18768 further findings omitted` — which was
+ * true, unreadable, and the only thing standing between the reader and three
+ * incompatible conclusions: that the codebase is a mess of cycles, that one
+ * tangle is being restated thousands of times, or that the thresholds admit
+ * mostly noise. A bare five-digit number argues weakly for all three. The
+ * category split settles the first two in one line each, and the size
+ * histogram settles the third.
+ *
+ * The histogram covers every candidate rather than only the omitted ones: the
+ * question being answered is what kind of pile the printed findings came off,
+ * and a distribution with its top forty cut out is a worse answer to that.
+ */
+function omittedSection(input: ReportInput, shownDup: number, shownCyc: number): string[] {
+  const omitted = input.totalFindings - shownDup - shownCyc;
+  if (omitted <= 0) return [];
+  const c = input.census;
+
+  const lines = [
+    "## Omitted",
+    "",
+    `${omitted} of ${input.totalFindings} findings are not shown above.` +
+      ` They rank below the ones that are; this is what they consist of.`,
+    "",
+    "| category | candidates | shown |",
+    "| --- | --- | --- |",
+    `| duplication | ${c.duplication} | ${shownDup} |`,
+    `| module tangle | ${c.cycles} | ${shownCyc} |`,
+    "",
+  ];
+
+  if (c.bands.length > 0) {
+    lines.push(
+      "Duplication candidates by the lines a successful extraction would remove" +
+        " — the same number every finding above is ranked on:",
+      "",
+      "| recoverable lines | candidates |",
+      "| --- | --- |",
+      ...c.bands.map((b) => `| ${b.label} | ${b.count} |`),
+      "",
+    );
+  }
+
+  if (c.duplication > 0) {
+    // Both categories are down-weighted by the ranker rather than dropped
+    // (PRD §5.4), so they are most of the tail and almost none of the top.
+    // Saying so is what stops the totals reading as untouched work.
+    lines.push(
+      `Of those candidates, ${c.testOnly} duplicate only between test files and` +
+        ` ${c.singleFile} repeat inside a single file. Both are ranked down rather` +
+        ` than excluded, so they fill the tail and rarely reach the report.`,
+      "",
+    );
+  }
+
+  return lines;
 }
 
 /**
@@ -229,7 +300,7 @@ function omittedLine(omitted: number): string {
  * prize directly, so the reader never has to multiply anything to compare two
  * findings.
  */
-function duplicationBlock(r: Ranked): string[] {
+function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
   const c = r.cluster;
   const tag = r.tag === "source" ? "" : ` · **[${r.tag}]**`;
   return [
@@ -244,7 +315,7 @@ function duplicationBlock(r: Ranked): string[] {
     // An AST kind alone does not say whether a finding is worth acting on;
     // deciding meant opening files, and a cluster can span a hundred of them.
     ...excerptBlock(r),
-    ...formatOccurrences(r),
+    ...formatOccurrences(r, maxFiles),
     "",
   ];
 }
@@ -292,25 +363,6 @@ function fenceFor(lines: readonly string[]): string {
 }
 
 /**
- * Files one finding may name before the rest are summarized.
- *
- * Unbounded, a single finding listed 429 paths — thousands of tokens for one
- * entry, in a report whose whole job is fitting a context window. Six is
- * enough to see the shape of where a cluster lives; a reader who needs the
- * remaining sites has the JSON sidecar, which is never truncated.
- */
-const MAX_FILES_SHOWN = 6;
-
-/**
- * Line numbers listed for any one file before the rest are counted.
- *
- * Capping files alone is not enough: a shape repeated 200 times inside a
- * single file renders as one path followed by 200 comma-separated line
- * numbers, which is the same budget blowout in a different shape.
- */
-const MAX_LINES_PER_FILE = 8;
-
-/**
  * One list item per file — `` - `src/alpha.ts:4,16` `` — rather than per
  * occurrence. A reader following up on a cluster opens files, not offsets.
  *
@@ -318,8 +370,15 @@ const MAX_LINES_PER_FILE = 8;
  * paths is already several hundred characters, and Markdown renders that as a
  * single justified paragraph in which no individual location can be picked
  * out. Backticks keep the punctuation in a path from being read as emphasis.
+ *
+ * Every location, by default. These lists were capped at six files, which cost
+ * fewer tokens and made the finding unusable: "… and 13 more files" tells an
+ * agent that work remains and gives it no way to find the work, so the only
+ * move left is to grep for the shape by hand — which is the job the report was
+ * supposed to have already done. `maxFiles` exists for callers that would
+ * rather truncate than lose a whole finding to a token budget.
  */
-function formatOccurrences(r: Ranked): string[] {
+function formatOccurrences(r: Ranked, maxFiles?: number): string[] {
   const byFile = new Map<string, number[]>();
   for (const o of r.cluster.occurrences) {
     const lines = byFile.get(o.filePath);
@@ -327,13 +386,12 @@ function formatOccurrences(r: Ranked): string[] {
     else byFile.set(o.filePath, [o.line]);
   }
   const sorted = [...byFile.entries()].sort((a, b) => compareStrings(a[0], b[0]));
-  const items = sorted.slice(0, MAX_FILES_SHOWN).map(([path, lines]) => {
+  const shown = maxFiles === undefined ? sorted : sorted.slice(0, maxFiles);
+  const items = shown.map(([path, lines]) => {
     const unique = [...new Set(lines)].sort((a, b) => a - b);
-    const head = unique.slice(0, MAX_LINES_PER_FILE).join(",");
-    const rest = unique.length - MAX_LINES_PER_FILE;
-    return `- \`${path}:${head}${rest > 0 ? `+${rest}` : ""}\``;
+    return `- \`${path}:${unique.join(",")}\``;
   });
-  const hidden = sorted.length - MAX_FILES_SHOWN;
+  const hidden = sorted.length - shown.length;
   // Stated, never silent — the same rule the omitted-findings line follows.
   if (hidden > 0) items.push(`- … and ${hidden} more files`);
   return items;
@@ -382,27 +440,35 @@ const MAX_CHART_EDGES = 120;
  * arrows from a cycle and what remains may be acyclic, so a reader would draw
  * exactly the wrong conclusion from a picture that looks complete.
  *
- * Node ids are synthetic (`m0`, `m1`, …) because module names are paths and
- * mermaid would read the slashes and dots as syntax; the real name lives in the
- * quoted label. They are assigned in sorted name order, not in the order Tarjan
- * happened to return the component, so the chart is a pure function of the
- * graph like everything else here (AGENTS.md §1).
+ * Nodes are named by their module path wherever mermaid's grammar allows it —
+ * `apps/web/lib -->|2273| apps/web/models` says what the chart means without a
+ * legend. Only when some name in the component is not a legal bare identifier
+ * does the whole chart fall back to slugs with the true path as a label.
  */
 function mermaidCycle(cycle: CycleFinding): string[] | undefined {
   if (cycle.modules.length > MAX_CHART_MODULES) return undefined;
   if (cycle.edges.length > MAX_CHART_EDGES) return undefined;
 
+  // Sorted for the id assignment and the declaration block, so the chart is a
+  // pure function of the graph rather than of the order Tarjan returned the
+  // component in (AGENTS.md §1).
   const modules = [...cycle.modules].sort(compareStrings);
-  const id = new Map(modules.map((m, i) => [m, `m${i}`]));
+  const id = nodeIds(modules);
   const cuts = new Set(cycle.cuts.map((c) => `${c.from} -> ${c.to}`));
 
   const edges = [...cycle.edges].sort(
     (a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
   );
 
+  // A path used as its own id already reads as itself, so declaring it again
+  // would be the same string twice on two lines.
+  const declarations = modules.every((m) => id.get(m) === m)
+    ? []
+    : modules.map((m) => `  ${id.get(m)}["${mermaidLabel(m)}"]`);
+
   const body = [
     "flowchart LR",
-    ...modules.map((m) => `  ${id.get(m)}["${mermaidLabel(m)}"]`),
+    ...declarations,
     ...edges.map((e) => {
       const from = id.get(e.from);
       const to = id.get(e.to);
@@ -416,6 +482,74 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
 
   const fence = fenceFor(body);
   return [`${fence}mermaid`, ...body, fence, ""];
+}
+
+/**
+ * Characters mermaid accepts in a bare flowchart node id.
+ *
+ * Deliberately narrower than what its grammar really takes. The set was fixed
+ * by running candidate names through mermaid's own parser: everything here is
+ * confirmed to parse, and the characters left out (`[`, `(`, `<`, `=`, `|`,
+ * `@`, space) are confirmed to break it. `[` is not hypothetical — a Next.js
+ * dynamic route directory is literally `app/[id]`, so at file granularity the
+ * unguarded form would emit a chart that fails to render.
+ */
+const SAFE_BARE_ID = /^[A-Za-z0-9/_.-]+$/;
+
+/**
+ * Words mermaid's flowchart grammar claims for itself. `end`, `graph`,
+ * `subgraph`, `click`, `style`, `class`, `classDef`, `linkStyle` and
+ * `flowchart` were each confirmed to fail as a bare id; `direction`, `default`,
+ * `o`, `x` and `v` parsed but are listed anyway because they are meaningful in
+ * link syntax (`--o`, `--x`) and the only cost of being wrong here is a slug.
+ */
+const MERMAID_KEYWORDS = new Set([
+  "end",
+  "graph",
+  "subgraph",
+  "flowchart",
+  "click",
+  "style",
+  "class",
+  "classdef",
+  "linkstyle",
+  "direction",
+  "default",
+  "o",
+  "x",
+  "v",
+]);
+
+function isSafeBareId(name: string): boolean {
+  return SAFE_BARE_ID.test(name) && !MERMAID_KEYWORDS.has(name.toLowerCase());
+}
+
+/**
+ * Module name -> node id.
+ *
+ * All-or-nothing per chart: one unsafe name puts every node in the component on
+ * slugs, because a chart that named some nodes by path and others by slug would
+ * read as though the two kinds of node were different kinds of thing.
+ */
+function nodeIds(modules: readonly string[]): Map<string, string> {
+  if (modules.every(isSafeBareId)) return new Map(modules.map((m) => [m, m]));
+
+  const ids = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const module of modules) {
+    // Legible even in the fallback: `app/[id]/page.tsx` becomes
+    // `app/_id_/page.tsx`, which a reader can still match to the label.
+    let slug = module.replaceAll(/[^A-Za-z0-9/_.-]/g, "_");
+    if (!isSafeBareId(slug)) slug = `_${slug}`;
+    // Distinct modules can slug alike (`a/b` and `a:b` both give `a_b`), and
+    // two nodes sharing an id would silently merge into one, turning a cycle
+    // into a self-loop. `modules` is sorted, so the suffix is deterministic.
+    const base = slug;
+    for (let n = 2; taken.has(slug); n++) slug = `${base}_${n}`;
+    taken.add(slug);
+    ids.set(module, slug);
+  }
+  return ids;
 }
 
 /**

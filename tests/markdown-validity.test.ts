@@ -64,6 +64,7 @@ const base: ReportInput = {
     },
   ],
   totalFindings: 2,
+  census: { duplication: 1, cycles: 1, bands: [{ label: "10–29", count: 1 }], testOnly: 0, singleFile: 0 },
 };
 
 /**
@@ -206,7 +207,7 @@ describe("occurrence lists", () => {
     expect(out).toContain("- `src/beta.ts:14`\n");
   });
 
-  it("counts the files it withheld as a final item", () => {
+  it("counts the files it withheld when a cap is configured", () => {
     const many = ranked("THK-DUP-many", {
       cluster: {
         ...ranked("x").cluster,
@@ -215,7 +216,7 @@ describe("occurrence lists", () => {
         ),
       },
     });
-    const out = renderMarkdown({ ...base, duplication: [many] });
+    const out = renderMarkdown({ ...base, duplication: [many], maxFilesPerFinding: 6 });
     expect(out).toMatch(/^- … and 34 more files$/m);
   });
 });

@@ -84,13 +84,18 @@ const base: ReportInput = {
   duplication: [],
   cycles: [],
   totalFindings: 0,
+  census: { duplication: 0, cycles: 0, bands: [], testOnly: 0, singleFile: 0 },
 };
 
 describe("renderMarkdown", () => {
   it("always states how many findings were omitted", () => {
-    const out = renderMarkdown({ ...base, totalFindings: 495 });
+    const out = renderMarkdown({
+      ...base,
+      totalFindings: 495,
+      census: { duplication: 494, cycles: 1, bands: [], testOnly: 0, singleFile: 0 },
+    });
     expect(out).toMatch(/of 495/);
-    expect(out).toMatch(/… 495 further findings omitted/);
+    expect(out).toContain("495 of 495 findings are not shown above.");
   });
 
   it("says nothing about scope when the program covered the tree", () => {
@@ -123,32 +128,30 @@ describe("renderMarkdown", () => {
     expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
   });
 
-  it("caps the locations one finding may spend the budget on", () => {
-    // Unbounded, a single finding listed 429 file paths -- thousands of tokens
-    // for one entry, in a report whose entire point is fitting a context
-    // window. The count of what was withheld is stated, and the JSON sidecar
-    // still carries every occurrence for a harness that wants them all.
-    const many = ranked("THK-DUP-many", {
-      occurrences: Array.from({ length: 40 }, (_, i) => ({
-        filePath: `src/f${String(i).padStart(2, "0")}.ts`,
-        start: 0,
-        end: 100,
-        line: 3,
-        endLine: 9,
-        parentId: i,
-      })),
-    });
-    const out = renderMarkdown({ ...base, duplication: [many], totalFindings: 1 });
-    expect(out).toMatch(/^- … and 34 more files$/m);
-    expect(out).not.toContain("src/f39.ts");
-    // Whatever it does show must still be the first files in sorted order, so
-    // two runs over the same tree truncate to the same list.
-    expect(out).toContain("- `src/f00.ts:3`");
+  const manyFiles = ranked("THK-DUP-many", {
+    occurrences: Array.from({ length: 40 }, (_, i) => ({
+      filePath: `src/f${String(i).padStart(2, "0")}.ts`,
+      start: 0,
+      end: 100,
+      line: 3,
+      endLine: 9,
+      parentId: i,
+    })),
   });
 
-  it("caps the line numbers listed for any one file", () => {
-    // Capping files alone leaves the same blowout in a different shape: one
-    // path followed by 200 comma-separated line numbers.
+  it("names every file a finding touches", () => {
+    // These lists were capped at six. "… and 34 more files" tells an agent
+    // that work remains and gives it no way to reach the work: the only move
+    // left is to grep for the shape by hand, which is the job the report was
+    // supposed to have already done.
+    const out = renderMarkdown({ ...base, duplication: [manyFiles], totalFindings: 1 });
+    for (let i = 0; i < 40; i++) {
+      expect(out).toContain(`- \`src/f${String(i).padStart(2, "0")}.ts:3\``);
+    }
+    expect(out).not.toContain("more files");
+  });
+
+  it("names every line within a file it touches", () => {
     const repeated = ranked("THK-DUP-repeat", {
       occurrences: Array.from({ length: 30 }, (_, i) => ({
         filePath: "src/table.ts",
@@ -161,7 +164,25 @@ describe("renderMarkdown", () => {
     });
     const out = renderMarkdown({ ...base, duplication: [repeated], totalFindings: 1 });
     const locations = out.split("\n").find((l) => l.includes("src/table.ts"))!;
-    expect(locations).toBe("- `src/table.ts:1,6,11,16,21,26,31,36+22`");
+    const lines = Array.from({ length: 30 }, (_, i) => i * 5 + 1).join(",");
+    expect(locations).toBe(`- \`src/table.ts:${lines}\``);
+  });
+
+  it("caps the files per finding only when asked to", () => {
+    // The escape hatch for a caller that would rather truncate a finding than
+    // lose it whole to a token budget. What it withheld is stated, and the
+    // JSON sidecar still carries every occurrence.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [manyFiles],
+      totalFindings: 1,
+      maxFilesPerFinding: 6,
+    });
+    expect(out).toMatch(/^- … and 34 more files$/m);
+    expect(out).not.toContain("src/f39.ts");
+    // What it does show must be the first files in sorted order, so two runs
+    // over the same tree truncate to the same list.
+    expect(out).toContain("- `src/f00.ts:3`");
   });
 
   it("contains no timestamps or absolute paths", () => {
@@ -214,13 +235,13 @@ describe("renderMarkdown", () => {
     const tight = renderMarkdown({ ...base, duplication, totalFindings: 20, budgetTokens: 200 });
 
     expect(full).toMatch(/\| findings \| 20 of 20 shown \|/);
-    expect(full).not.toMatch(/further findings omitted/);
+    expect(full).not.toMatch(/## Omitted/);
 
     const emitted = [...tight.matchAll(/^### THK-DUP-/gm)].length;
     expect(emitted).toBeGreaterThan(0);
     expect(emitted).toBeLessThan(20);
     expect(tight).toContain(`| findings | ${emitted} of 20 shown |`);
-    expect(tight).toContain(`… ${20 - emitted} further findings omitted`);
+    expect(tight).toContain(`${20 - emitted} of 20 findings are not shown above.`);
     // The whole report, omitted line included, must fit the budget.
     expect(Math.ceil(tight.length / 4)).toBeLessThanOrEqual(200);
   });
@@ -235,8 +256,73 @@ describe("renderMarkdown", () => {
     expect(out).toContain("# thicket report");
     expect(out).toContain("## Summary");
     expect(out).toContain("| findings | 0 of 1 shown |");
-    expect(out).toContain("… 1 further findings omitted");
+    expect(out).toContain("1 of 1 findings are not shown above.");
     expect(out).not.toContain("THK-DUP-1");
+  });
+
+  it("breaks the omitted tail down by category and by size", () => {
+    // A bare "18768 further findings omitted" is equally consistent with a
+    // codebase drowning in cycles, with one tangle restated thousands of
+    // times, and with thresholds that admit mostly noise -- three findings
+    // that call for three different responses. The split settles the first
+    // two and the histogram settles the third.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-1")],
+      cycles: [],
+      totalFindings: 18808,
+      census: {
+        duplication: 18806,
+        cycles: 2,
+        bands: [
+          { label: "100+", count: 210 },
+          { label: "30–99", count: 1612 },
+          { label: "1–3", count: 5598 },
+        ],
+        testOnly: 9389,
+        singleFile: 9382,
+      },
+    });
+    expect(out).toContain("## Omitted");
+    expect(out).toContain("18807 of 18808 findings are not shown above.");
+    expect(out).toContain("| duplication | 18806 | 1 |");
+    expect(out).toContain("| module tangle | 2 | 0 |");
+    expect(out).toContain("| 100+ | 210 |");
+    expect(out).toContain("| 1–3 | 5598 |");
+    expect(out).toContain("9389 duplicate only between test files");
+    expect(out).toContain("9382 repeat inside a single file");
+  });
+
+  it("counts shown cycles against the tangle row, not the duplication row", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-1")],
+      cycles: [
+        {
+          id: "THK-CYC-1",
+          modules: ["a", "b"],
+          edges: [
+            { from: "a", to: "b", weight: 1 },
+            { from: "b", to: "a", weight: 1 },
+          ],
+          cuts: [],
+        },
+      ],
+      totalFindings: 50,
+      census: { duplication: 47, cycles: 3, bands: [], testOnly: 0, singleFile: 0 },
+    });
+    expect(out).toContain("| duplication | 47 | 1 |");
+    expect(out).toContain("| module tangle | 3 | 1 |");
+  });
+
+  it("says nothing about omissions when it printed everything", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-1")],
+      totalFindings: 1,
+      census: { duplication: 1, cycles: 0, bands: [{ label: "10–29", count: 1 }], testOnly: 0, singleFile: 0 },
+    });
+    expect(out).not.toContain("## Omitted");
   });
 
   it("emits findings in the order given", () => {

@@ -63,6 +63,7 @@ node dist/cli.js diff before.json after.json
 | `--min-nodes <n>` | Override the depth preset's minimum fragment size, in AST nodes. Smaller means more, finer candidates. |
 | `--min-lines <n>` | Override the depth preset's minimum fragment size, in lines. A node count does not bound this — 15 AST nodes fit on one line — and extracting a one-line shape is a strict loss. |
 | `--budget-tokens <n>` | Hard ceiling on the whole report. Findings are dropped from the bottom of the ranking and the count dropped is always printed. |
+| `--max-locations <n>` | Cap the files each finding names. Unset — the default — names every one, so an agent can reach every copy. |
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
 | `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. |
 | `--json <path>` | Additionally write the JSON sidecar here. The Markdown still goes to stdout. |
@@ -144,10 +145,8 @@ L0 · `Block` · score 18
 
 ```mermaid
 flowchart LR
-  m0["src/alpha.ts"]
-  m1["src/gamma.ts"]
-  m0 -. "cut · 1" .-> m1
-  m1 -->|1| m0
+  src/alpha.ts -. "cut · 1" .-> src/gamma.ts
+  src/gamma.ts -->|1| src/alpha.ts
 ```
 
 - **suggested cuts (1):** `src/alpha.ts` → `src/gamma.ts`
@@ -156,7 +155,7 @@ flowchart LR
 
 That fixture holds three structurally identical `normalize` functions, two of which are byte-identical, and an `alpha ↔ gamma` import cycle. Both duplication findings are real and they are not the same finding: the **L1** one covers all three functions (identical once identifiers are α-renamed), the **L0** one covers only the two that match byte for byte — and it is reported as a `Block` rather than a `FunctionDeclaration` because the two functions have different *names*, so the largest exactly-equal node is the body.
 
-Reading a finding: the heading carries the id to cite and the size to judge by, and the line under it carries `L0`/`L1` (the normalization level), the AST kind, the ranker's `score` (only the ordering is meaningful, not the units), and a `[test]`/`[mixed]` tag where one applies. `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and both the file list and the per-file line list are capped, with the remainder counted (`… and 13 more files`, `:12,44,91+7`). The JSON sidecar is never truncated.
+Reading a finding: the heading carries the id to cite and the size to judge by, and the line under it carries `L0`/`L1` (the normalization level), the AST kind, the ranker's `score` (only the ordering is meaningful, not the units), and a `[test]`/`[mixed]` tag where one applies. `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and **every** location is listed. They used to be capped at six files, which read as `… and 13 more files`: a line that tells an agent work remains and gives it no way to reach the work, leaving it to grep for the shape by hand. `--max-locations <n>` restores a cap for callers who would rather truncate a finding than lose it whole to a token budget.
 
 **The report is valid CommonMark**, and that is a tested property rather than an aspiration: `tests/markdown-validity.test.ts` checks the rendered report, the golden file, a scope-warning report and a truncated one for indented prose, unseparated headings, unbalanced fences, and tables missing a delimiter row. It matters because the earlier plaintext-ish format was *not* valid Markdown in a way that only showed up once rendered — every body line was indented two spaces, which CommonMark folds into the preceding paragraph, so the whole Summary collapsed onto one line and the four-space excerpt was swallowed by the location list above it instead of becoming a code block. (An indented code block cannot interrupt a paragraph; only a fenced one can.) Excerpt fences are tagged with the language of the file they came from and are lengthened past any backtick run in the source, so a fragment containing a template literal or a Markdown snippet cannot close its own block and spill the rest of the report onto the page as prose.
 
@@ -165,6 +164,8 @@ The fenced block under each finding is the head of its first occurrence. An AST 
 Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
 
 `findings 3 of 3 shown` is load-bearing. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is finished.
+
+When findings are held back, an **Omitted** section says what is in them: a count per category, and a histogram of the duplication candidates by recoverable lines. A bare count does not survive contact with a real repository — one run reported `18768 further findings omitted`, which argues equally well for a codebase drowning in cycles, for one tangle restated thousands of times, and for thresholds that admit mostly noise. The breakdown settled it in two lines: exactly **2** of the 18,808 were cycles, and **62%** of the duplication recovers fewer than ten lines. The histogram covers every candidate, not only the withheld ones, because the question is what kind of pile the printed findings came off.
 
 That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI additionally renders it on Linux and on macOS under a locale whose collation disagrees with code-unit order, and fails if the two machines disagree by a single byte.
 
