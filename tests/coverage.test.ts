@@ -3,7 +3,9 @@ import type { Cluster, Occurrence } from "../src/fingerprint/cluster.js";
 import { redundantByteFraction } from "../src/report/coverage.js";
 
 function occ(filePath: string, start: number, end: number): Occurrence {
-  return { filePath, start, end, line: 1 };
+  // Coverage is a byte measure; the line and parent fields exist on the type
+  // for the ranker and play no part here.
+  return { filePath, start, end, line: 1, endLine: 1, parentId: 0 };
 }
 
 function cluster(occurrences: Occurrence[]): Cluster {

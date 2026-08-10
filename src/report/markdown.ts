@@ -6,6 +6,13 @@ import type { Ranked } from "./rank.js";
 export interface CycleFinding {
   id: string;
   modules: string[];
+  /**
+   * Every dependency edge with both endpoints inside the SCC — the actual
+   * shape of the tangle, which the module list alone cannot express. Carried
+   * on the finding rather than recomputed at render time so the Markdown chart
+   * and the JSON sidecar are guaranteed to describe the same graph.
+   */
+  edges: { from: string; to: string; weight: number }[];
   cuts: { from: string; to: string }[];
 }
 
@@ -333,15 +340,10 @@ function formatOccurrences(r: Ranked): string[] {
 }
 
 function cycleBlock(cycle: CycleFinding): string[] {
-  const lines = [
-    `### ${cycle.id} · SCC of ${cycle.modules.length} modules`,
-    "",
-    // `members:`, not `cycle:` — these are the mutually reachable modules in
-    // sorted order, which is not in general an edge path. Labelling the join
-    // as a cycle would assert edges we never checked; the verified claim is
-    // the cut below it.
-    `- **members:** ${cycle.modules.map((m) => `\`${m}\``).join(" → ")}`,
-  ];
+  const lines = [`### ${cycle.id} · SCC of ${cycle.modules.length} modules`, ""];
+  // The chart when it fits, the member list when it does not — never both, and
+  // never a chart with edges left out.
+  lines.push(...(mermaidCycle(cycle) ?? memberFallback(cycle)));
   if (cycle.cuts.length > 0) {
     lines.push(
       `- **suggested cuts (${cycle.cuts.length}):** ` +
@@ -350,4 +352,95 @@ function cycleBlock(cycle: CycleFinding): string[] {
   }
   lines.push("");
   return lines;
+}
+
+/**
+ * Modules in one SCC before its chart stops being worth drawing.
+ *
+ * Above this a flowchart is a hairball: nothing about which edge to cut is
+ * legible, and the layout costs more tokens than the module list it replaced.
+ */
+const MAX_CHART_MODULES = 20;
+
+/**
+ * Edges in one SCC before its chart stops being worth drawing.
+ *
+ * Set by token cost, not by legibility: the reader is a model, for which the
+ * chart text simply is the adjacency list, so a dense graph is harder to lay
+ * out but no harder to consume. 120 edges is roughly 600 tokens — a few
+ * duplication findings' worth — and it is comfortably above the 61 a real
+ * 12-module tangle carried. A complete digraph on `MAX_CHART_MODULES` would be
+ * 380, which is where the ceiling earns its keep.
+ */
+const MAX_CHART_EDGES = 120;
+
+/**
+ * The tangle as a mermaid flowchart, or `undefined` when it is too large.
+ *
+ * All-or-nothing on purpose. Every other list in this report truncates and says
+ * so, but a partial dependency chart is not a smaller true statement — drop
+ * arrows from a cycle and what remains may be acyclic, so a reader would draw
+ * exactly the wrong conclusion from a picture that looks complete.
+ *
+ * Node ids are synthetic (`m0`, `m1`, …) because module names are paths and
+ * mermaid would read the slashes and dots as syntax; the real name lives in the
+ * quoted label. They are assigned in sorted name order, not in the order Tarjan
+ * happened to return the component, so the chart is a pure function of the
+ * graph like everything else here (AGENTS.md §1).
+ */
+function mermaidCycle(cycle: CycleFinding): string[] | undefined {
+  if (cycle.modules.length > MAX_CHART_MODULES) return undefined;
+  if (cycle.edges.length > MAX_CHART_EDGES) return undefined;
+
+  const modules = [...cycle.modules].sort(compareStrings);
+  const id = new Map(modules.map((m, i) => [m, `m${i}`]));
+  const cuts = new Set(cycle.cuts.map((c) => `${c.from} -> ${c.to}`));
+
+  const edges = [...cycle.edges].sort(
+    (a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
+  );
+
+  const body = [
+    "flowchart LR",
+    ...modules.map((m) => `  ${id.get(m)}["${mermaidLabel(m)}"]`),
+    ...edges.map((e) => {
+      const from = id.get(e.from);
+      const to = id.get(e.to);
+      // A dotted, labelled arrow for the edge `suggestCuts` verified breaks the
+      // cycle: the one thing the reader is meant to do with this picture.
+      return cuts.has(`${e.from} -> ${e.to}`)
+        ? `  ${from} -. "cut · ${e.weight}" .-> ${to}`
+        : `  ${from} -->|${e.weight}| ${to}`;
+    }),
+  ];
+
+  const fence = fenceFor(body);
+  return [`${fence}mermaid`, ...body, fence, ""];
+}
+
+/**
+ * Mermaid reads a bare `"` as the end of a label. `#quot;` is its own escape
+ * for one, so a module whose name contains a quote renders instead of breaking
+ * the rest of the chart.
+ */
+function mermaidLabel(module: string): string {
+  return module.replaceAll('"', "#quot;");
+}
+
+/** Members named before the rest are counted, when no chart is drawn. */
+const MAX_MEMBERS_SHOWN = 8;
+
+function memberFallback(cycle: CycleFinding): string[] {
+  const shown = [...cycle.modules].sort(compareStrings).slice(0, MAX_MEMBERS_SHOWN);
+  const hidden = cycle.modules.length - shown.length;
+  // Joined with commas, not arrows: these are the mutually reachable modules in
+  // sorted order, which is not in general an edge path, and rendering them as
+  // one would assert edges that may not exist.
+  const members =
+    shown.map((m) => `\`${m}\``).join(", ") + (hidden > 0 ? `, … and ${hidden} more` : "");
+  return [
+    `- **members (${cycle.modules.length}):** ${members}`,
+    `- **chart omitted:** ${cycle.modules.length} modules, ${cycle.edges.length} edges` +
+      ` is past what a flowchart shows usefully`,
+  ];
 }

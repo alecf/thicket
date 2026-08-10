@@ -56,6 +56,16 @@ const ranked = (id: string, over: Partial<Ranked["cluster"]> = {}, score = 100):
   },
 });
 
+const twoModuleCycle = {
+  id: "THK-CYC-1",
+  modules: ["src/alpha.ts", "src/gamma.ts"],
+  edges: [
+    { from: "src/alpha.ts", to: "src/gamma.ts", weight: 3 },
+    { from: "src/gamma.ts", to: "src/alpha.ts", weight: 1 },
+  ],
+  cuts: [{ from: "src/gamma.ts", to: "src/alpha.ts" }],
+};
+
 const base: ReportInput = {
   version: "0.1.0",
   configHash: "abc123",
@@ -192,17 +202,7 @@ describe("renderMarkdown", () => {
   });
 
   it("emits cycles with their suggested cuts", () => {
-    const out = renderMarkdown({
-      ...base,
-      cycles: [
-        {
-          id: "THK-CYC-1",
-          modules: ["src/alpha.ts", "src/gamma.ts"],
-          cuts: [{ from: "src/gamma.ts", to: "src/alpha.ts" }],
-        },
-      ],
-      totalFindings: 1,
-    });
+    const out = renderMarkdown({ ...base, cycles: [twoModuleCycle], totalFindings: 1 });
     expect(out).toContain("## Module tangle");
     expect(out).toContain("THK-CYC-1");
     expect(out).toContain("`src/gamma.ts` → `src/alpha.ts`");

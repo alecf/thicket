@@ -175,11 +175,17 @@ export async function runReport(
     const components = stronglyConnected(graph.modules, graph.adjacency).filter(
       (c) => c.length > 1,
     );
-    const cycles: CycleFinding[] = components.map((modules) => ({
-      id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
-      modules,
-      cuts: suggestCuts(modules, graph.edges),
-    }));
+    const cycles: CycleFinding[] = components.map((modules) => {
+      const members = new Set(modules);
+      return {
+        id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
+        modules,
+        // `graph.edges` is already sorted by (from, to), and filtering
+        // preserves that, so the chart's arrow order is fixed by the graph.
+        edges: graph.edges.filter((e) => members.has(e.from) && members.has(e.to)),
+        cuts: suggestCuts(modules, graph.edges),
+      };
+    });
 
     // Excerpts are resolved only for what the report will print: the lookup
     // needs the file texts, and a cluster can span a hundred files.

@@ -19,6 +19,50 @@ describe("runReport", () => {
     expect(json.cycles.length).toBeGreaterThan(0);
   });
 
+  it("carries the SCC's real edges, and only those, on every cycle", async () => {
+    // The chart is only worth drawing if what it draws is a cycle. Asserting
+    // that the edges exist is not enough -- a filter that dropped half of them
+    // would still pass that -- so this reconstructs reachability from the
+    // edges alone and requires every member to reach every other.
+    const { json } = await runReport({
+      config: fixtureConfig(),
+      minNodes: 15,
+      granularity: "file",
+    });
+    expect(json.cycles.length).toBeGreaterThan(0);
+
+    for (const cycle of json.cycles) {
+      expect(cycle.edges.length).toBeGreaterThan(0);
+      const members = new Set(cycle.modules);
+      for (const e of cycle.edges) {
+        expect(members.has(e.from)).toBe(true);
+        expect(members.has(e.to)).toBe(true);
+      }
+
+      // Floyd-Warshall style closure over the drawn edges only.
+      const reach = new Map(cycle.modules.map((m) => [m, new Set<string>()]));
+      for (const e of cycle.edges) reach.get(e.from)!.add(e.to);
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const targets of reach.values()) {
+          for (const via of [...targets]) {
+            for (const end of reach.get(via) ?? []) {
+              if (!targets.has(end)) {
+                targets.add(end);
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+      for (const a of cycle.modules) {
+        for (const b of cycle.modules) {
+          expect(reach.get(a)!.has(b), `${a} cannot reach ${b}`).toBe(true);
+        }
+      }
+    }
+  });
+
   it("is byte-identical across two runs", async () => {
     const a = await runReport({ config: fixtureConfig(), minNodes: 15 });
     const b = await runReport({ config: fixtureConfig(), minNodes: 15 });

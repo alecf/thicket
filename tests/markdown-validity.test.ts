@@ -52,7 +52,17 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [ranked("THK-DUP-1")],
-  cycles: [{ id: "THK-CYC-1", modules: ["core", "ui"], cuts: [{ from: "core", to: "ui" }] }],
+  cycles: [
+    {
+      id: "THK-CYC-1",
+      modules: ["core", "ui"],
+      edges: [
+        { from: "core", to: "ui", weight: 4 },
+        { from: "ui", to: "core", weight: 1 },
+      ],
+      cuts: [{ from: "ui", to: "core" }],
+    },
+  ],
   totalFindings: 2,
 };
 

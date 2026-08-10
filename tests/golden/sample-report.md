@@ -47,6 +47,13 @@ L0 · `Block` · score 18
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
-- **members:** `src/alpha.ts` → `src/gamma.ts`
+```mermaid
+flowchart LR
+  m0["src/alpha.ts"]
+  m1["src/gamma.ts"]
+  m0 -. "cut · 1" .-> m1
+  m1 -->|1| m0
+```
+
 - **suggested cuts (1):** `src/alpha.ts` → `src/gamma.ts`
 

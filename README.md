@@ -142,7 +142,14 @@ L0 · `Block` · score 18
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
-- **members:** `src/alpha.ts` → `src/gamma.ts`
+```mermaid
+flowchart LR
+  m0["src/alpha.ts"]
+  m1["src/gamma.ts"]
+  m0 -. "cut · 1" .-> m1
+  m1 -->|1| m0
+```
+
 - **suggested cuts (1):** `src/alpha.ts` → `src/gamma.ts`
 
 `````
@@ -180,6 +187,8 @@ The denominator counts hand-written TypeScript only — no `.d.ts`, no generated
 **`propagation cost`** — the density of the module dependency graph's transitive closure: of all *n²* ordered module pairs, the share where the first transitively depends on the second. It is the "change one thing, how much can be affected" number. A module inside a cycle reaches itself, which is why cycles push it up.
 
 **`dependency cycles` / `largest SCC`** — strongly connected components of the module graph with more than one member, via Tarjan. Each is reported with a **suggested cut**: not "there is a cycle" but "removing this edge breaks it", verified by re-running Tarjan on the graph without that edge. When no single edge suffices, the list is empty rather than a guess.
+
+Each tangle is drawn as a **mermaid flowchart** of the whole component — every intra-SCC edge, labelled with the number of distinct symbols crossing it, with the suggested cut as a dotted arrow. Edge weights are what make the picture actionable: a 12-module tangle in a real application turned out to be held together by a handful of 1–3 symbol edges among links carrying two thousand. The chart is drawn in full or not at all, never truncated — drop arrows from a cycle and what remains can be acyclic, so a partial chart is not a weaker claim but a wrong one. Past 20 modules or 120 edges it is replaced by the member list and a line saying so.
 
 **Finding IDs** (`THK-DUP-…`, `THK-CYC-…`) are derived from **content, never position**. Code that merely moves — reformatted, shifted down by an added import, reordered within its file — keeps its ID, so `thicket diff` reports what was actually resolved rather than what was merely touched. This is the loop's backbone and it has an end-to-end test that moves real code and asserts the IDs survive.
 
