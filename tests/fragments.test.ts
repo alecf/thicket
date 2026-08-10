@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { extractFragments } from "../src/fingerprint/fragments.js";
@@ -90,5 +93,47 @@ describe("extractFragments", () => {
     const a = extractFragments(file, { minNodes: 8 }).map((f) => `${f.kind}:${f.start}:${f.end}`);
     const b = extractFragments(file, { minNodes: 8 }).map((f) => `${f.kind}:${f.start}:${f.end}`);
     expect(a).toEqual(b);
+  });
+
+  it("extracts from a file far larger than the argument limit", async () => {
+    // `l0.push("(", ...r.l0, ")")` passes every token of a child's stream as a
+    // separate ARGUMENT. A file's top-level token stream is one entry per AST
+    // node, so the spread blows V8's argument limit -- reported as "Maximum
+    // call stack size exceeded", which reads like runaway recursion and is not.
+    //
+    // The distinction matters because it points at the wrong fix: measured
+    // across a 5,216-file application, the deepest AST is 41 levels and the
+    // median is 18. Depth is never the problem; SIZE is. This fixture is
+    // shallow and merely long, so it fails only for the real reason.
+    //
+    // The statements are wrapped in ONE top-level call because
+    // `extractFragments` visits each top-level statement separately: a flat
+    // file of 20k sibling statements never accumulates a large stream and
+    // passes even unfixed. The shape that actually breaks is a whole file
+    // inside a single construct -- exactly how a 5,000-line `describe()` test
+    // file is written.
+    const dir = await mkdtemp(join(tmpdir(), "thicket-big-"));
+    try {
+      const body = Array.from(
+        { length: 20_000 },
+        (_, i) => `  const v${i} = { id: ${i}, name: "n${i}" };`,
+      ).join("\n");
+      await writeFile(join(dir, "big.ts"), `describe("everything", () => {\n${body}\n});\n`);
+      await writeFile(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { noEmit: true }, include: ["big.ts"] }),
+      );
+
+      const project = await openProject(join(dir, "tsconfig.json"));
+      const file = project.files().find((f) => f.path === "big.ts")!;
+      const frags = extractFragments(file, { minNodes: 6 });
+      // Assert the extraction is real, not merely non-throwing: one fragment
+      // per object literal. A guard that swallowed the file would pass a bare
+      // "does not throw".
+      expect(frags.filter((f) => f.kind === "ObjectLiteralExpression").length).toBe(20_000);
+      project.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

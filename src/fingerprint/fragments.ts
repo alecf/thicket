@@ -79,8 +79,8 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
       childCount++;
       const r = visit(child);
       nodeCount += r.nodeCount;
-      l0.push("(", ...r.l0, ")");
-      l1.push("(", ...r.l1, ")");
+      appendDelimited(l0, r.l0);
+      appendDelimited(l1, r.l1);
     });
 
     if (childCount === 0) {
@@ -114,6 +114,24 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     visit(child);
   });
   return out;
+}
+
+/**
+ * Append `child`'s tokens to `parent`, wrapped in structure markers.
+ *
+ * Written as a loop because `parent.push("(", ...child, ")")` passes every
+ * token of `child` as a separate ARGUMENT, and a file written as one top-level
+ * construct — a 5,000-line `describe()`, a large component tree — overruns
+ * V8's argument limit. It surfaces as `RangeError: Maximum call stack size
+ * exceeded`, which reads like runaway recursion and sends you looking for a
+ * depth bound that is not the problem: across a 5,216-file application the
+ * deepest AST measured 41 levels against a median of 18. The limit is on
+ * WIDTH, so no traversal rewrite fixes it and no realistic depth cap trips it.
+ */
+function appendDelimited(parent: string[], child: readonly string[]): void {
+  parent.push("(");
+  for (const token of child) parent.push(token);
+  parent.push(")");
 }
 
 function safeText(node: Node): string {
