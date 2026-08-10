@@ -119,6 +119,17 @@ export function typeOnlyConfig(): string {
  * detaches the leaf and leaves the ring intact; a heavier ring edge dissolves
  * strictly more. Distinguishes "first cut that works" from "best cut".
  */
+/**
+ * Four classes that differ ONLY in the string constants they carry, which is
+ * the shape a real report got wrong: it said "19 classes are the same" and
+ * said nothing about what makes each one different, so the reader could not
+ * tell a missing abstraction from a config table until they had extracted the
+ * varying constants by hand.
+ */
+export function configTableConfig(): string {
+  return resolve(here, "fixtures/config/tsconfig.json");
+}
+
 export function tangleConfig(): string {
   return resolve(here, "fixtures/tangle/tsconfig.json");
 }

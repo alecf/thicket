@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
 import {
+  configTableConfig,
   emptyConfig,
   fixtureConfig,
   importsFixtureConfig,
@@ -286,5 +287,25 @@ describe("runReport", () => {
     expect(capped.json.duplication.length).toBeLessThanOrEqual(1);
     expect(capped.json.totalFindings).toBeGreaterThan(1);
     expect(capped.markdown).toMatch(/findings are not shown above/);
+  });
+});
+
+describe("what varies between the copies", () => {
+  it("names the constants that parameterize a repeated shape", async () => {
+    // The gap that cost an agent most of its investigation: the report said 19
+    // classes were the same and stopped, when what decided the refactor was
+    // the short list of what DIFFERS -- six constants, which turns "19 similar
+    // classes" into "19 rows of a config table" and hands you the base class's
+    // field list. Extracting them by hand is also how it found two classes
+    // sharing a LOINC code, a live bug unrelated to the duplication.
+    const { markdown } = await runReport({ config: configTableConfig(), cache: false });
+    const line = markdown.split("\n").find((l) => l.startsWith("- **varies across copies:**"));
+    expect(line).toBeDefined();
+    for (const constant of ["loincCode", "loincDisplay", "unit", "junctionKey"]) {
+      expect(line).toContain(`\`${constant}\` (4)`);
+    }
+    // The class name differs too, and saying so would be noise: that is what
+    // an L1 match already means, and it would bury the four that matter.
+    expect(line).not.toContain("Observation");
   });
 });

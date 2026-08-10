@@ -182,6 +182,12 @@ Above the excerpt, each finding carries two facts about its **surroundings**:
 
   The line is **omitted entirely for a cluster of test files**, where it is a constant dressed as evidence: nothing imports a test file, so `nothing outside the cluster` holds for every such finding and distinguishes none of them.
 
+A fourth names **what differs between the copies**:
+
+- **`varies across copies:`** `loincCode` (18), `loincDisplay` (19), `unit` (13), `unitCode` (13)
+
+Reporting the sameness without the variation is what made a real finding read as "19 similar classes" when it was "19 rows of a config table that got compiled into classes" — and the second phrasing hands you the abstraction: a base class with four static fields. An agent asked to act on that finding spent most of its investigation rebuilding this list by hand. Only **literal values** are named: an identifier that differs is what an L1 match already means, and reporting each renamed local under whatever identifier precedes it buries the constants that matter under a dozen `x`, `y`, `sqrt`. The number is distinct values, and it is worth reading — the line above comes from a 19-copy cluster with 18 distinct LOINC codes, because two of the classes declare the same one. That is a live query-correctness bug with nothing to do with duplication, and the agent that found it had to extract the constants itself to see it.
+
 A third line appears when two printed findings are **near-variants of one shape**:
 
 - **`see also THK-DUP-…:`** `81% the same shape, 5 more copies`

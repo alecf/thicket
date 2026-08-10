@@ -2,6 +2,7 @@ import type { Cluster } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
 import type { Variant } from "./variants.js";
+import type { Variation } from "./variation.js";
 
 export type Tag = "source" | "test" | "mixed";
 
@@ -30,6 +31,11 @@ export interface Ranked {
    * excerpt, for emitted findings only.
    */
   variants?: Variant[];
+  /**
+   * What differs between the copies. Empty for an exact (L0) cluster, where
+   * nothing does. Attached alongside the excerpt, for emitted findings only.
+   */
+  varies?: Variation[];
 }
 
 /**

@@ -481,6 +481,18 @@ function contextLines(r: Ranked): string[] {
     lines.push(`- **every copy imports:** ${named.join(", ")}`);
   }
 
+  // Before the near-variant links: what varies inside THIS finding decides
+  // the shape of the abstraction, and the links decide its scope.
+  if (r.varies !== undefined && r.varies.length > 0) {
+    // Backticks on a real identifier, none on the prose fallback: `an unnamed
+    // literal` reads as code that does not exist.
+    const named = r.varies
+      .map((v) => (/^[A-Za-z_$][\w$]*$/.test(v.label) ? `\`${v.label}\`` : v.label))
+      .map((label, i) => `${label} (${r.varies![i]!.values})`)
+      .join(", ");
+    lines.push(`- **varies across copies:** ${named}`);
+  }
+
   for (const variant of r.variants ?? []) {
     // The percentage, not just the link: 81% alike is "the same template with
     // a field added", and a reader deciding whether to fold the two together

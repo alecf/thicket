@@ -15,6 +15,7 @@ import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
 import { findVariants } from "./report/variants.js";
+import { variations } from "./report/variation.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import { isTestMajority, rankClusters, subsume, type Ranked } from "./report/rank.js";
 import { VERSION } from "./version.js";
@@ -138,6 +139,17 @@ const EXCERPT_COLUMNS = 100;
  * than a guess.
  */
 const MAX_CUT_SEARCH_MODULES = 32;
+
+/**
+ * Copies compared when working out what varies between them.
+ *
+ * A bound on work, not on truth: the answer is which constants differ, and a
+ * shape that is parameterized by `loincCode` shows that in its first twenty
+ * copies as clearly as in its hundred and fifteenth. The printed value counts
+ * are therefore counts within the sample, which is why they are rendered as a
+ * plain number rather than "N of N copies".
+ */
+const MAX_COPIES_COMPARED = 20;
 
 /**
  * Orchestration only. Every algorithm lives in its own module; this wires
@@ -282,18 +294,37 @@ export async function runReport(
     const emitted = production.slice(0, maxFindings).map(decorate);
     const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(decorate);
 
+    // Fragments re-extracted rather than read from the cache, so a warm run
+    // compares exactly what a cold one does (AGENTS.md §5). Memoized per file
+    // because a 115-copy cluster would otherwise re-walk 115 ASTs, and two
+    // findings in one file would walk it twice.
+    const fragmentsByFile = new Map<string, ReturnType<typeof extractFragments>>();
+    const fragmentAt = (o: { filePath: string; start: number; end: number }) => {
+      let all = fragmentsByFile.get(o.filePath);
+      if (all === undefined) {
+        const handle = byRelPath.get(o.filePath);
+        all = handle === undefined ? [] : extractFragments(handle, { minNodes, minLines });
+        fragmentsByFile.set(o.filePath, all);
+      }
+      return all.find((f) => f.start === o.start && f.end === o.end);
+    };
+
+    // What varies between the copies -- the parameter list of the abstraction
+    // the finding is asking for. Only emitted findings pay for it.
+    const varies = new Map<string, ReturnType<typeof variations>>();
+    for (const r of [...emitted, ...emittedTests]) {
+      const streams = r.cluster.occurrences
+        .slice(0, MAX_COPIES_COMPARED)
+        .map((o) => fragmentAt(o)?.tokensL0);
+      if (streams.some((s) => s === undefined)) continue;
+      varies.set(r.cluster.id, variations(streams as string[][]));
+    }
+
     // Near-variants, across both sections, for the findings actually printed.
-    // The token streams come from re-extracting the representative file rather
-    // than from the cache, so a warm run compares exactly what a cold one does
-    // (AGENTS.md §5) -- and it is ~45 files, not the whole tree.
     const variants = findVariants(
       [...emitted, ...emittedTests].flatMap((r) => {
         const first = r.cluster.occurrences[0]!;
-        const handle = byRelPath.get(first.filePath);
-        if (handle === undefined) return [];
-        const fragment = extractFragments(handle, { minNodes, minLines }).find(
-          (f) => f.start === first.start && f.end === first.end,
-        );
+        const fragment = fragmentAt(first);
         return fragment === undefined
           ? []
           : [
@@ -308,7 +339,9 @@ export async function runReport(
     );
     const withVariants = <T extends { cluster: { id: string } }>(r: T): T => {
       const found = variants.get(r.cluster.id);
-      return found === undefined ? r : { ...r, variants: found };
+      const differs = varies.get(r.cluster.id);
+      const out = found === undefined ? r : { ...r, variants: found };
+      return differs === undefined || differs.length === 0 ? out : { ...out, varies: differs };
     };
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
     const totalFindings = ranked.length + cycles.length;
