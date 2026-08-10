@@ -13,10 +13,18 @@ thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 mod
 ### THK-DUP-d165768d · score 26 · L1 · 3 copies × ~10 lines · ~16 lines recoverable
   src/alpha.ts:4  src/beta.ts:3,14
   FunctionDeclaration
+    export function normalizeAlpha(points: Point[]): Point[] {
+      const result: Point[] = [];
+      for (const p of points) {
+    …
 
 ### THK-DUP-c389b5be · score 18 · L0 · 2 copies × ~10 lines · ~7 lines recoverable
   src/alpha.ts:4  src/beta.ts:14
   Block
+    {
+      const result: Point[] = [];
+      for (const p of points) {
+    …
 
 ## Module tangle
 ### THK-CYC-aca08f5a · SCC of 2 modules

@@ -7,6 +7,7 @@ import { propagationCost, stronglyConnected } from "./graph/metrics.js";
 import { hash, initHash } from "./hash.js";
 import { compareStrings } from "./order.js";
 import { redundantByteFraction } from "./report/coverage.js";
+import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
@@ -95,6 +96,15 @@ const DEFAULT_MIN_LINES = 4;
 const DEFAULT_MAX_FINDINGS = 40;
 
 /**
+ * Excerpt size. Three lines is usually enough to tell a genuine missing
+ * abstraction from two things that merely share a shape, and at roughly 60
+ * tokens per finding it is the best value per token in the report. The column
+ * cap stops one minified or generated line from flooding it.
+ */
+const EXCERPT_LINES = 3;
+const EXCERPT_COLUMNS = 100;
+
+/**
  * Above this an exhaustive single-edge cut search stops being cheap, and a
  * tangle that large is not fixed by one cut anyway. We report no cuts rather
  * than a guess.
@@ -171,7 +181,21 @@ export async function runReport(
       cuts: suggestCuts(modules, graph.edges),
     }));
 
-    const emitted = ranked.slice(0, maxFindings);
+    // Excerpts are resolved only for what the report will print: the lookup
+    // needs the file texts, and a cluster can span a hundred files.
+    const byPath = new Map(files.map((f) => [f.path, f.sourceFile.text]));
+    const emitted = ranked.slice(0, maxFindings).map((r) => {
+      const first = r.cluster.occurrences[0]!;
+      const text = byPath.get(first.filePath);
+      if (text === undefined) return r;
+      return {
+        ...r,
+        excerpt: excerptOf(text, first.start, first.end, {
+          maxLines: EXCERPT_LINES,
+          maxColumns: EXCERPT_COLUMNS,
+        }),
+      };
+    });
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
     const totalFindings = ranked.length + cycles.length;
 

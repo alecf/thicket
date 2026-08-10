@@ -199,6 +199,9 @@ function duplicationBlock(r: Ranked): string[] {
       `~${r.recoverableLines} lines recoverable${tag}`,
     `  ${formatOccurrences(r)}`,
     `  ${canonicalKind(c.kind)}`,
+    // An AST kind alone does not say whether a finding is worth acting on;
+    // deciding meant opening files, and a cluster can span a hundred of them.
+    ...(r.excerpt ?? []).map((line) => `    ${line}`),
     "",
   ];
 }
