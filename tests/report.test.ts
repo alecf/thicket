@@ -19,6 +19,7 @@ const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge
   to,
   weight,
   files: [`${from}/importer.ts`],
+  erased: 0,
   typeOnly: false,
   ...over,
 });

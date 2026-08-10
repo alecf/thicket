@@ -18,7 +18,9 @@ export interface TangleEdge {
   weight: number;
   /** Files in `from` that carry it, sorted. This is the number of edits. */
   files: string[];
-  /** Erased at compile time, so not a runtime dependency at all. */
+  /** How many of `weight` are erased at compile time. */
+  erased: number;
+  /** ALL of it erased, so not a runtime dependency at all. */
   typeOnly: boolean;
 }
 
@@ -674,7 +676,7 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
       const to = id.get(e.to);
       // A dotted, labelled arrow for the edge `suggestCuts` verified breaks the
       // cycle: the one thing the reader is meant to do with this picture.
-      const label = e.typeOnly ? `${e.weight} type` : `${e.weight}`;
+      const label = edgeLabel(e);
       return cuts.has(`${e.from} -> ${e.to}`)
         ? `  ${from} -. "cut · ${label}" .-> ${to}`
         : `  ${from} -->|${label}| ${to}`;
@@ -683,6 +685,21 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
 
   const fence = fenceFor(body);
   return [`${fence}mermaid`, ...body, fence, ""];
+}
+
+/**
+ * `148`, `12 type`, or `5 (4 type)`.
+ *
+ * The middle form is the whole edge erased; the third says most of it is, which
+ * is where the cheap fixes are. A real 7-module tangle printed a bare `5` for an
+ * edge that was four `import type` bindings plus one runtime import in a single
+ * file — relocate that file and the edge disappears, but nothing on the chart
+ * suggested looking. An edge with nothing erased stays bare rather than
+ * carrying `(0 type)`: annotating the majority to flag the minority is noise.
+ */
+function edgeLabel(e: TangleEdge): string {
+  if (e.typeOnly) return `${e.weight} type`;
+  return e.erased > 0 ? `${e.weight} (${e.erased} type)` : `${e.weight}`;
 }
 
 /**

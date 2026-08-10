@@ -133,6 +133,7 @@ describe("buildModuleGraph", () => {
         to: "shared",
         weight: 2,
         files: ["a/src/index.ts"],
+        erased: 1,
         typeOnly: false,
       },
       {
@@ -140,6 +141,7 @@ describe("buildModuleGraph", () => {
         to: "shared",
         weight: 2,
         files: ["b/src/index.ts"],
+        erased: 1,
         typeOnly: false,
       },
     ]);
@@ -154,13 +156,24 @@ describe("buildModuleGraph", () => {
     // after the wrong one.
     const project = await openProject(typeOnlyConfig());
     const graph = buildModuleGraph(project, { granularity: 2 });
-    expect(graph.modules).toEqual(["model", "pure", "view"]);
+    expect(graph.modules).toEqual(["effect", "model", "pure", "view"]);
     expect(graph.edges).toEqual([
+      {
+        // A side-effect import beside an erased one: one binding, erased, and
+        // still a runtime dependency. See the test below.
+        from: "effect",
+        to: "model",
+        weight: 1,
+        files: ["packages/effect/register.ts"],
+        erased: 1,
+        typeOnly: false,
+      },
       {
         from: "model",
         to: "pure",
         weight: 1,
         files: ["packages/model/uses.ts"],
+        erased: 0,
         typeOnly: false,
       },
       {
@@ -168,6 +181,7 @@ describe("buildModuleGraph", () => {
         to: "model",
         weight: 1,
         files: ["packages/pure/describe.ts"],
+        erased: 1,
         typeOnly: true,
       },
       // One value import beside one type-only import: still a real dependency.
@@ -176,9 +190,39 @@ describe("buildModuleGraph", () => {
         to: "model",
         weight: 4,
         files: ["packages/view/render.ts"],
+        erased: 2,
         typeOnly: false,
       },
     ]);
+  });
+
+  it("does not erase an edge whose only unerased import binds no names", async () => {
+    // `import "./x.js"` beside `import type { A } from "./x.js"` is one
+    // binding, erased -- so a rule of "every binding is erased" is vacuously
+    // true, and the edge comes out type-only. It is the opposite: the
+    // side-effect import is the one form that exists purely for its runtime
+    // effect, and calling this edge erasable would tell a reader a live
+    // module-init dependency can be cut by moving a types file.
+    const project = await openProject(typeOnlyConfig());
+    const graph = buildModuleGraph(project, { granularity: 2 });
+    const effect = graph.edges.find((e) => e.from === "effect" && e.to === "model")!;
+    expect(effect.weight).toBe(1);
+    expect(effect.erased).toBe(1);
+    expect(effect.typeOnly).toBe(false);
+  });
+
+  it("counts how much of a mixed edge is erased, not just whether all of it is", async () => {
+    // The boolean alone hides the cheapest fixes. A real 7-module tangle had
+    // an edge printed as a bare `5` that was four `import type` bindings and
+    // exactly one runtime import in one file: moving that file makes the whole
+    // edge erasable. `4 (2 type)` says there is something to look at; `4` does
+    // not.
+    const project = await openProject(typeOnlyConfig());
+    const graph = buildModuleGraph(project, { granularity: 2 });
+    const viewToModel = graph.edges.find((e) => e.from === "view" && e.to === "model")!;
+    expect(viewToModel.weight).toBe(4);
+    expect(viewToModel.erased).toBe(2);
+    expect(viewToModel.typeOnly).toBe(false);
   });
 
   it("names every file carrying an edge, because files are the unit of work", async () => {

@@ -17,6 +17,7 @@ const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge
   to,
   weight,
   files: [`${from}/importer.ts`],
+  erased: 0,
   typeOnly: false,
   ...over,
 });
@@ -296,6 +297,28 @@ describe("the cycle diagram", () => {
     expect(diagram(render(erased))).toEqual([
       "flowchart LR",
       "  src/alpha.ts -->|3 type| src/gamma.ts",
+      "  src/gamma.ts -->|1| src/alpha.ts",
+    ]);
+  });
+
+  it("says how much of a mixed edge is erased", () => {
+    // All-or-nothing marking hid the cheapest fixes. On a real 7-module tangle
+    // an edge rendered as a bare `5` was four `import type` bindings plus one
+    // runtime import in a single file -- move that file and the edge erases
+    // entirely. The bare number sends the reader to grep five files.
+    const mixed: CycleFinding = {
+      ...twoModule,
+      edges: [
+        edge("src/alpha.ts", "src/gamma.ts", 5, { erased: 4 }),
+        // Nothing erased stays bare: a parenthetical `(0 type)` on every
+        // ordinary edge is noise on the majority to annotate the minority.
+        edge("src/gamma.ts", "src/alpha.ts", 1),
+      ],
+      cuts: [],
+    };
+    expect(diagram(render(mixed))).toEqual([
+      "flowchart LR",
+      "  src/alpha.ts -->|5 (4 type)| src/gamma.ts",
       "  src/gamma.ts -->|1| src/alpha.ts",
     ]);
   });

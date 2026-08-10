@@ -26,17 +26,28 @@ export interface ImportDetail {
    */
   symbols: number;
   /**
-   * True when every import of `target` in this file is erased at compile time
-   * -- `import type`, `export type`, or per-specifier `{ type A }`.
+   * How many of those bindings are erased at compile time -- `import type`,
+   * `export type`, or per-specifier `{ type A }`.
    *
-   * Such a dependency has no runtime existence at all: no module-init order to
-   * get wrong, no bundler cycle, and breaking it usually means moving a types
-   * file rather than inverting a dependency. A cycle made only of these edges
-   * is a filing problem, not an architecture problem, and the report should not
-   * present the two as the same finding.
+   * A count rather than the `erasable` boolean it replaced, because
+   * all-or-nothing hides the cheapest fixes. On a real 7-module tangle an edge
+   * carrying five bindings was four `import type`s plus exactly one runtime
+   * import in one file: relocate that file and the whole edge erases. The
+   * boolean says only "not type-only" and leaves the reader to grep five files
+   * to find that out.
    *
-   * A side-effect or dynamic import binds no names yet IS a runtime
-   * dependency, so it clears this flag rather than being vacuously erasable.
+   * NOT the whole story on its own -- see `erasable`.
+   */
+  erased: number;
+  /**
+   * True when every import of `target` in this file is erased at compile time.
+   *
+   * Deliberately not derived from `erased === symbols`, because that is
+   * vacuously true for the one import form that exists purely for its runtime
+   * effect: `import "./x.js"` binds no names, so it contributes 0 to both
+   * counts and vanishes from the comparison. A file doing that beside an
+   * `import type` would report a live module-init dependency as erasable, and
+   * a reader would be told a types file move breaks the cycle.
    */
   erasable: boolean;
 }
@@ -62,7 +73,7 @@ export interface Project {
  * Kinds are matched by enum VALUE. `SyntaxKind[k]` reverse-maps to range-marker
  * aliases for several kinds, so name matching silently misses cases.
  */
-function bindingCount(decl: Node): { count: number; erasable: boolean } {
+function bindingCount(decl: Node): { count: number; erased: number } {
   let count = 0;
   let erased = 0;
   let named = false;
@@ -112,9 +123,12 @@ function bindingCount(decl: Node): { count: number; erasable: boolean } {
     count = 1;
     if (wholeDeclErased) erased = 1;
   }
-  // A clause-less import is `import "./x.js"`: no bindings, but a real runtime
-  // dependency, so it must not come out erasable by having nothing to erase.
-  return { count, erasable: count > 0 && erased === count };
+  // Both numbers, not the "is it all erased" verdict: a partly erased edge is
+  // where the cheap fixes hide, and the verdict throws that away. A clause-less
+  // `import "./x.js"` comes back {0, 0} -- a real runtime dependency that must
+  // not read as erasable for having nothing to erase, which is why every
+  // consumer tests `symbols > 0` before comparing the two.
+  return { count, erased };
 }
 
 /**
@@ -137,8 +151,8 @@ function isTypeOnly(node: Node): boolean {
  */
 function bindingCountsBySpecifier(
   sourceFile: SourceFileNode,
-): Map<Node, { count: number; erasable: boolean }> {
-  const out = new Map<Node, { count: number; erasable: boolean }>();
+): Map<Node, { count: number; erased: number }> {
+  const out = new Map<Node, { count: number; erased: number }>();
   walk(sourceFile, (node) => {
     if (node.kind !== SyntaxKind.ImportDeclaration && node.kind !== SyntaxKind.ExportDeclaration) {
       return;
@@ -339,22 +353,30 @@ export async function openProject(
 
   function importDetailsOf(file: FileHandle): ImportDetail[] {
     const counts = bindingCountsBySpecifier(file.sourceFile);
-    const byTarget = new Map<string, { symbols: number; erasable: boolean }>();
+    const byTarget = new Map<string, { symbols: number; erased: number; erasable: boolean }>();
     for (const specifier of file.sourceFile.imports ?? []) {
       const target = resolveImport(file, specifier);
       if (!target || target === file.path) continue;
       // A specifier with no entry is a dynamic `import()` or a `require()`:
       // a real dependency that binds no names statically, and never erasable.
-      const detail = counts.get(specifier as Node) ?? { count: 0, erasable: false };
+      const detail = counts.get(specifier as Node) ?? { count: 0, erased: 0 };
       const prior = byTarget.get(target);
+      // The counts sum; erasability is vetoed. They are different questions:
+      // a side-effect import contributes nothing to either count and must
+      // still make the whole target non-erasable.
+      const erasable = detail.count > 0 && detail.erased === detail.count;
+      // Summed, not vetoed. The same file imported three times as
+      // erased/real/erased is 3 bindings of which 2 erase, and both numbers
+      // survive -- deciding per declaration, or letting the last one win,
+      // loses the middle import entirely.
       byTarget.set(target, {
         symbols: (prior?.symbols ?? 0) + detail.count,
-        // One value import anywhere in the file makes the whole edge real.
-        erasable: (prior?.erasable ?? true) && detail.erasable,
+        erased: (prior?.erased ?? 0) + detail.erased,
+        erasable: (prior?.erasable ?? true) && erasable,
       });
     }
     return [...byTarget.entries()]
-      .map(([target, d]) => ({ target, symbols: d.symbols, erasable: d.erasable }))
+      .map(([target, d]) => ({ target, symbols: d.symbols, erased: d.erased, erasable: d.erasable }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 

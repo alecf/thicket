@@ -102,10 +102,10 @@ describe("importDetailsOf", () => {
     // `import { type Point, ORIGIN } from "./util/shared.js"` -> 2
     // `import { scale } from "./gamma.js"`                    -> 1
     expect(project.importDetailsOf(alpha)).toEqual([
-      { target: "src/gamma.ts", symbols: 1, erasable: false },
+      { target: "src/gamma.ts", symbols: 1, erased: 0, erasable: false },
       // `{ type Point, ORIGIN }` mixes an erased binding with a real one, so
       // the dependency survives compilation.
-      { target: "src/util/shared.ts", symbols: 2, erasable: false },
+      { target: "src/util/shared.ts", symbols: 2, erased: 1, erasable: false },
     ]);
   });
 
@@ -119,9 +119,28 @@ describe("importDetailsOf", () => {
     //          `export * as sideNs` = 1.  Total 2 — the side-effect import
     //          alone would still be an edge, at weight 0.
     expect(project.importDetailsOf(main)).toEqual([
-      { target: "src/dep.ts", symbols: 7, erasable: false },
-      { target: "src/side.ts", symbols: 2, erasable: false },
+      { target: "src/dep.ts", symbols: 7, erased: 2, erasable: false },
+      { target: "src/side.ts", symbols: 2, erased: 0, erasable: false },
     ]);
+  });
+
+  it("counts the erased bindings of a partly type-only edge", async () => {
+    // An all-or-nothing flag hides the cheapest fixes in a tangle. A real
+    // 7-module SCC carried an edge printed as a bare `5` whose whole runtime
+    // dependency was a single import in one file -- the other four bindings
+    // were `import type`. The count points straight at that file; the boolean
+    // says only "not type-only" and leaves the reader to grep.
+    const project = await openProject(typeOnlyConfig());
+    const render = project.files().find((f) => f.path === "packages/view/render.ts")!;
+    const types = project
+      .importDetailsOf(render)
+      .find((d) => d.target === "packages/model/types.ts")!;
+    expect(types).toEqual({
+      target: "packages/model/types.ts",
+      symbols: 3,
+      erased: 2,
+      erasable: false,
+    });
   });
 
   it("marks an import erasable only when every binding from it is erased", async () => {
@@ -135,7 +154,7 @@ describe("importDetailsOf", () => {
 
     // `import type { Shape }` and nothing else.
     expect(detail("packages/pure/describe.ts")).toEqual([
-      { target: "packages/model/types.ts", symbols: 1, erasable: true },
+      { target: "packages/model/types.ts", symbols: 1, erased: 1, erasable: true },
     ]);
 
     // The same file imported three times, erased / real / erased. Deciding
@@ -143,13 +162,13 @@ describe("importDetailsOf", () => {
     // strength of the trailing `import type` line -- so the ordering here is
     // load-bearing, not incidental.
     expect(detail("packages/view/render.ts")).toEqual([
-      { target: "packages/model/consts.ts", symbols: 1, erasable: false },
-      { target: "packages/model/types.ts", symbols: 3, erasable: false },
+      { target: "packages/model/consts.ts", symbols: 1, erased: 0, erasable: false },
+      { target: "packages/model/types.ts", symbols: 3, erased: 2, erasable: false },
     ]);
 
     // A plain value import is never erasable.
     expect(detail("packages/model/uses.ts")).toEqual([
-      { target: "packages/pure/describe.ts", symbols: 1, erasable: false },
+      { target: "packages/pure/describe.ts", symbols: 1, erased: 0, erasable: false },
     ]);
   });
 
@@ -160,6 +179,7 @@ describe("importDetailsOf", () => {
     const project = await openProject(importsFixtureConfig());
     const main = project.files().find((f) => f.path === "src/main.ts")!;
     const side = project.importDetailsOf(main).find((d) => d.target === "src/side.ts")!;
+    expect(side.erased).toBe(0);
     expect(side.erasable).toBe(false);
   });
 

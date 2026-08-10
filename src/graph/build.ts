@@ -21,9 +21,24 @@ export interface ModuleEdge {
    */
   files: string[];
   /**
-   * True when every import making up this edge is erased at compile time. Such
-   * an edge is not a runtime dependency at all, so a cycle built from them has
-   * no initialization hazard and is usually fixed by moving a types file.
+   * How many of `weight` are erased at compile time.
+   *
+   * The count, not just the all-or-nothing verdict below it: a real 7-module
+   * tangle carried an edge of 5 bindings that was four `import type`s and one
+   * runtime import in a single file. Relocating that file erases the edge
+   * entirely, and `typeOnly: false` alone gives the reader no reason to look.
+   */
+  erased: number;
+  /**
+   * True when every import making up this edge is erased at compile time.
+   *
+   * NOT `erased === weight`. A side-effect `import "./x.js"` binds no names, so
+   * it contributes nothing to either count and vanishes from that comparison --
+   * an edge carrying one of those beside one `import type` would report as
+   * erasable, telling a reader a live module-init dependency can be cut by
+   * moving a types file.
+   * Such an edge is not a runtime dependency at all, so a cycle built from them
+   * has no initialization hazard and is usually fixed by moving a types file.
    */
   typeOnly: boolean;
 }
@@ -67,10 +82,13 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
     label = chosen.label;
   }
 
-  const weights = new Map<string, { weight: number; files: Set<string>; typeOnly: boolean }>();
+  const weights = new Map<
+    string,
+    { weight: number; erased: number; files: Set<string>; typeOnly: boolean }
+  >();
   for (const file of project.files()) {
     const from = moduleOf[file.path]!;
-    for (const { target, symbols, erasable } of project.importDetailsOf(file)) {
+    for (const { target, symbols, erased, erasable } of project.importDetailsOf(file)) {
       const to = moduleOf[target];
       // An import of a file outside the analyzed set has no module.
       if (to === undefined) continue;
@@ -81,6 +99,7 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
       const prior = weights.get(key);
       weights.set(key, {
         weight: (prior?.weight ?? 0) + symbols,
+        erased: (prior?.erased ?? 0) + erased,
         files: (prior?.files ?? new Set<string>()).add(file.path),
         // One runtime import anywhere across the module pair makes the whole
         // edge real, however many type-only imports accompany it.
@@ -98,6 +117,7 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
         to,
         weight: edge.weight,
         files: [...edge.files].sort(compareStrings),
+        erased: edge.erased,
         typeOnly: edge.typeOnly,
       };
     })
