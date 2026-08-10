@@ -123,6 +123,9 @@ L1 · `FunctionDeclaration`
 export function normalizeAlpha(points: Point[]): Point[] {
   const result: Point[] = [];
   for (const p of points) {
+    const dx = p.x - ORIGIN.x;
+    const dy = p.y - ORIGIN.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
 …
 ```
 
@@ -139,6 +142,9 @@ L0 · `Block`
 {
   const result: Point[] = [];
   for (const p of points) {
+    const dx = p.x - ORIGIN.x;
+    const dy = p.y - ORIGIN.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
 …
 ```
 
@@ -245,6 +251,10 @@ Every cut states **what it leaves**: `leaves: 6 of 7 modules still mutually depe
 Each tangle is drawn as a **mermaid flowchart** of the whole component — every intra-SCC edge, labelled with the number of import sites crossing it, with the suggested cut as a dotted arrow. A legend above the section says what the number is — import sites, one per symbol per importing file, re-exports included — because it is neither distinct symbols nor files, and an agent that assumed the former mismatched every edge of a 26-edge tangle and concluded the tool was broken.
 
 Edges that are **entirely `import type`** are marked `type` in the chart. Such an edge is erased at compile time: there is no module-init order to get wrong, no bundler cycle, and breaking it usually means relocating a types file rather than inverting a dependency. On a real 12-module tangle the single most interesting edge was 100% type-only while the suggested cut was a value import — reporting the two identically sends a reader after the wrong one. A single value import anywhere across the module pair clears the flag, and a side-effect `import "./x.js"` binds no names yet is emphatically not erasable — which is why the flag is vetoed rather than derived from the counts, since an import binding zero names erases zero and would vanish from `erased === weight`. An edge that is only **mostly** erased says so: `5 (4 type)` means four of its five bindings are `import type` and the whole runtime dependency is one import in one file, which is usually the cheapest cut available. A real 7-module tangle printed that edge as a bare `5` and nothing suggested looking at it. Edge weights are what make the picture actionable: a 12-module tangle in a real application turned out to be held together by a handful of 1–3 symbol edges among links carrying two thousand. The chart is drawn in full or not at all, never truncated — drop arrows from a cycle and what remains can be acyclic, so a partial chart is not a weaker claim but a wrong one. Past 20 modules or 120 edges it is replaced by the member list and a line saying so.
+
+A finding that names more than a dozen files gets its location list **summarized above the list, not instead of it**: `spread across 1 directory: apps/web/models/member/vitals ×19`, or `spread across 66 directories: … and 63 more directories`. One agent handed a 115-file list wanted nine tenths of it replaced by exactly this — whether the finding is one directory's convention or a cross-package problem was the thing it could not see and had to count by hand. Another, holding a 19-file list, called every entry of it "the finding's backbone" and used all of them. Both are right about their own finding, so the list stays and gains a header.
+
+The **excerpt scales with the size of one copy** — 60% of its lines, floor three, ceiling ten. A flat three lines failed on exactly the findings that needed it most: on a real 15-line block the elided lines 4–13 were the only thing separating that cluster from five near-identical siblings, so the excerpt showed the reader the agreement and hid the disagreement. Three lines of a 100-line class is still right, which is why it is a fraction rather than a bigger constant.
 
 **Finding IDs** (`THK-DUP-…`, `THK-CYC-…`) are derived from **content, never position**. Code that merely moves — reformatted, shifted down by an added import, reordered within its file — keeps its ID, so `thicket diff` reports what was actually resolved rather than what was merely touched. This is the loop's backbone and it has an end-to-end test that moves real code and asserts the IDs survive.
 

@@ -196,6 +196,54 @@ describe("renderMarkdown", () => {
     expect(locations).toBe(`- \`src/table.ts:${lines}\``);
   });
 
+  it("summarizes where a long location list lands, above the list", () => {
+    // An agent handed a 115-file list wanted to know whether this was one
+    // app's convention or a cross-package problem, and counting directories by
+    // hand was its only route to the answer. The list itself stays: a
+    // different agent called every entry of a 19-file list "the backbone" and
+    // used all of them.
+    const spread = ranked("THK-DUP-spread", {
+      occurrences: Array.from({ length: 20 }, (_, i) => ({
+        filePath: i < 12 ? `src/a/f${i}.ts` : i < 18 ? `src/b/f${i}.ts` : `src/c/f${i}.ts`,
+        start: 0,
+        end: 100,
+        line: 3,
+        endLine: 9,
+        parentId: i,
+      })),
+    });
+    const out = renderMarkdown({ ...base, duplication: [spread], totalFindings: 1 });
+    expect(out).toContain(
+      "- **spread across 3 directories:** `src/a` ×12, `src/b` ×6, `src/c` ×2",
+    );
+    expect(out.indexOf("spread across")).toBeLessThan(out.indexOf("- `src/a/f0.ts"));
+    // Additive, never a replacement.
+    expect(out).toContain("- `src/c/f19.ts:3`");
+  });
+
+  it("does not summarize a location list short enough to read", () => {
+    // Below the threshold the list IS the summary, and a header restating it
+    // is a line of noise on every small finding in the report.
+    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    expect(out).not.toContain("spread across");
+  });
+
+  it("names only the largest directories and counts the rest", () => {
+    const many = ranked("THK-DUP-many-dirs", {
+      occurrences: Array.from({ length: 20 }, (_, i) => ({
+        filePath: `src/d${String(i).padStart(2, "0")}/f.ts`,
+        start: 0,
+        end: 100,
+        line: 3,
+        endLine: 9,
+        parentId: i,
+      })),
+    });
+    const out = renderMarkdown({ ...base, duplication: [many], totalFindings: 1 });
+    expect(out).toContain("**spread across 20 directories:**");
+    expect(out).toContain("… and 17 more directories");
+  });
+
   it("caps the files per finding only when asked to", () => {
     // The escape hatch for a caller that would rather truncate a finding than
     // lose it whole to a token budget. What it withheld is stated, and the

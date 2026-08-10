@@ -439,6 +439,9 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
     // An AST kind alone does not say whether a finding is worth acting on;
     // deciding meant opening files, and a cluster can span a hundred of them.
     ...excerptBlock(r),
+    ...(new Set(r.cluster.occurrences.map((o) => o.filePath)).size > SPREAD_SUMMARY_THRESHOLD
+      ? spreadLine(r)
+      : []),
     ...formatOccurrences(r, maxFiles),
     "",
   ];
@@ -593,6 +596,44 @@ function fenceFor(lines: readonly string[]): string {
  * supposed to have already done. `maxFiles` exists for callers that would
  * rather truncate than lose a whole finding to a token budget.
  */
+/**
+ * Files in one finding before its location list gets a summary above it.
+ *
+ * Below this the list IS the summary — a reader takes in eight paths at a
+ * glance. Above it they cannot, and an agent handed a 115-file list said so:
+ * it wanted to know whether this was one app's convention or a cross-package
+ * problem, and counting directories by hand was the only way to find out.
+ */
+const SPREAD_SUMMARY_THRESHOLD = 12;
+
+/** Directories named in that summary before the rest are counted. */
+const MAX_SPREAD_DIRS = 3;
+
+/**
+ * `apps/web/components/calendar ×18, apps/web/models/vitals ×19, … and 40 more
+ * directories` — the shape of the location list, above the location list.
+ *
+ * Deliberately additive. One agent called the full file list "the finding's
+ * backbone" and used every entry of it; another, holding a 115-file list,
+ * wanted nine tenths of it replaced by exactly this. Both are right about
+ * their own finding, so the list stays and gains a header.
+ */
+function spreadLine(r: Ranked): string[] {
+  const counts = new Map<string, number>();
+  for (const path of new Set(r.cluster.occurrences.map((o) => o.filePath))) {
+    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".";
+    counts.set(dir, (counts.get(dir) ?? 0) + 1);
+  }
+  if (counts.size === 0) return [];
+
+  const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1] || compareStrings(a[0], b[0]));
+  const shown = ordered.slice(0, MAX_SPREAD_DIRS);
+  const rest = ordered.length - shown.length;
+  const named = shown.map(([dir, n]) => `\`${dir}\` ×${n}`).join(", ");
+  const more = rest > 0 ? `, … and ${rest} more director${rest === 1 ? "y" : "ies"}` : "";
+  return [`- **spread across ${ordered.length} director${ordered.length === 1 ? "y" : "ies"}:** ${named}${more}`];
+}
+
 function formatOccurrences(r: Ranked, maxFiles?: number): string[] {
   const byFile = new Map<string, number[]>();
   for (const o of r.cluster.occurrences) {

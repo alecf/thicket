@@ -109,12 +109,32 @@ const DEFAULT_MIN_LINES = 4;
 const DEFAULT_MAX_FINDINGS = 40;
 
 /**
- * Excerpt size. Three lines is usually enough to tell a genuine missing
- * abstraction from two things that merely share a shape, and at roughly 60
- * tokens per finding it is the best value per token in the report. The column
- * cap stops one minified or generated line from flooding it.
+ * Excerpt size, as a share of one copy's span.
+ *
+ * A flat three lines was too little on exactly the findings that needed it
+ * most. On a 15-line duplicated block the elided lines 4-13 were the ONLY
+ * thing separating that cluster from five near-identical siblings -- the three
+ * shown were the part every variant had in common -- so the excerpt showed a
+ * reader the agreement and hid the disagreement. Three lines of a 100-line
+ * class is still the right call, hence a fraction with a ceiling rather than a
+ * bigger constant.
  */
-const EXCERPT_LINES = 3;
+const EXCERPT_SHARE = 0.6;
+
+/**
+ * Ceiling on that share. Ten lines is roughly 200 tokens, and a report of
+ * forty findings spends about 8k tokens on excerpts -- affordable against a
+ * document whose whole point is that a reader never has to open the files.
+ */
+const EXCERPT_LINES_MAX = 10;
+
+/** Floor, so a shape short enough to elide nothing still shows in full. */
+const EXCERPT_LINES_MIN = 3;
+
+function excerptLines(linesPerCopy: number): number {
+  const share = Math.round(linesPerCopy * EXCERPT_SHARE);
+  return Math.min(EXCERPT_LINES_MAX, Math.max(EXCERPT_LINES_MIN, share));
+}
 
 /**
  * Slots the test-duplication section gets, as a share of the production
@@ -286,7 +306,7 @@ export async function runReport(
         ...r,
         context,
         excerpt: excerptOf(text, first.start, first.end, {
-          maxLines: EXCERPT_LINES,
+          maxLines: excerptLines(r.linesPerCopy),
           maxColumns: EXCERPT_COLUMNS,
         }),
       };

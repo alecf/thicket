@@ -27,6 +27,9 @@ L1 · `FunctionDeclaration`
 export function normalizeAlpha(points: Point[]): Point[] {
   const result: Point[] = [];
   for (const p of points) {
+    const dx = p.x - ORIGIN.x;
+    const dy = p.y - ORIGIN.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
 …
 ```
 
@@ -43,6 +46,9 @@ L0 · `Block`
 {
   const result: Point[] = [];
   for (const p of points) {
+    const dx = p.x - ORIGIN.x;
+    const dy = p.y - ORIGIN.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
 …
 ```
 

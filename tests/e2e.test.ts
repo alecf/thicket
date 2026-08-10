@@ -309,3 +309,22 @@ describe("what varies between the copies", () => {
     expect(line).not.toContain("Observation");
   });
 });
+
+describe("the excerpt", () => {
+  it("shows enough of a long shape to tell it from a near-identical sibling", async () => {
+    // A flat three lines failed on exactly the findings that needed it most.
+    // On a real 15-line block the elided lines 4-13 were the only thing
+    // separating that cluster from five near-identical siblings; the three
+    // shown were the part every variant had in common, so the excerpt
+    // displayed the agreement and hid the disagreement.
+    const { markdown } = await runReport({ config: configTableConfig(), cache: false });
+    const fence = markdown.split("\n");
+    const open = fence.findIndex((l) => l === "```ts");
+    const close = fence.findIndex((l, i) => i > open && l === "```");
+    const body = fence.slice(open + 1, close);
+    expect(body.length).toBeGreaterThan(4);
+    // The constants the finding says vary must be visible in the code it shows,
+    // or the reader has been told what to look for and not shown where.
+    expect(body.join("\n")).toContain("loincDisplay");
+  });
+});
