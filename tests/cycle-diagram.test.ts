@@ -301,6 +301,64 @@ describe("the cycle diagram", () => {
     ]);
   });
 
+  it("lifts a shared prefix out of the node names and into the heading", () => {
+    // Every node in a real 7-module chart began `apps/mobile/`, seven times
+    // over, on 26 edges. It is the one part of the name that distinguishes
+    // nothing, and it crowded the part that does.
+    const prefixed: CycleFinding = {
+      id: "THK-CYC-p",
+      modules: ["apps/mobile/lib", "apps/mobile/utils", "apps/mobile/hooks"],
+      edges: [
+        edge("apps/mobile/lib", "apps/mobile/utils", 28),
+        edge("apps/mobile/utils", "apps/mobile/hooks", 3),
+        edge("apps/mobile/hooks", "apps/mobile/lib", 127),
+      ],
+      cuts: [edge("apps/mobile/utils", "apps/mobile/hooks", 3)],
+      residual: 2,
+    };
+    const out = render(prefixed);
+    expect(out).toContain("### THK-CYC-p · SCC of 3 modules under `apps/mobile/`");
+    expect(diagram(out)).toEqual([
+      "flowchart LR",
+      "  hooks -->|127| lib",
+      "  lib -->|28| utils",
+      '  utils -. "cut · 3" .-> hooks',
+    ]);
+    // The cut names modules, so it is relative too, and the heading says so.
+    expect(out).toContain("- **suggested cut:** `utils` → `hooks`");
+  });
+
+  it("does not strip a prefix that is only part of a path segment", () => {
+    // `packages/core/mobile` and `packages/core/mobile-web` share the STRING
+    // `packages/core/mobile` and share the DIRECTORY `packages/core`.
+    // Stripping the string would produce a node named `-web/lib`.
+    const sibling: CycleFinding = {
+      id: "THK-CYC-s",
+      modules: ["packages/core/mobile/lib", "packages/core/mobile-web/lib"],
+      edges: [
+        edge("packages/core/mobile/lib", "packages/core/mobile-web/lib", 1),
+        edge("packages/core/mobile-web/lib", "packages/core/mobile/lib", 1),
+      ],
+      cuts: [],
+      residual: 2,
+    };
+    const out = render(sibling);
+    expect(out).toContain("under `packages/core/`");
+    expect(diagram(out)).toEqual([
+      "flowchart LR",
+      "  mobile-web/lib -->|1| mobile/lib",
+      "  mobile/lib -->|1| mobile-web/lib",
+    ]);
+  });
+
+  it("leaves a single shared directory in place", () => {
+    // `src/` is the source root: four characters, and it tells the reader
+    // where they are. Lifting it churns every node name to save nothing.
+    const out = render(twoModule);
+    expect(out).toContain("### THK-CYC-1 · SCC of 2 modules\n");
+    expect(diagram(out)).toContain("  src/alpha.ts -->|3| src/gamma.ts");
+  });
+
   it("says when nothing in the tangle is circular at file level", () => {
     // The fact that reversed an agent's whole recommendation, and it had to
     // write a Tarjan implementation to learn it. A 7-module SCC over 417 files

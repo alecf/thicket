@@ -678,14 +678,66 @@ function formatOccurrences(r: Ranked, maxFiles?: number): string[] {
 }
 
 function cycleBlock(cycle: CycleFinding): string[] {
-  const lines = [`### ${cycle.id} · SCC of ${cycle.modules.length} modules`, ""];
+  // A shared prefix is the one part of every module name that distinguishes
+  // nothing. On a real 7-module tangle every node began `apps/mobile/`, seven
+  // times over and again on both ends of 26 edges, crowding the part that
+  // does distinguish. Lifted into the heading, where it is said once.
+  const prefix = commonModulePrefix(cycle.modules);
+  const scoped = prefix === "" ? cycle : relativize(cycle, prefix);
+  const under = prefix === "" ? "" : ` under \`${prefix}\``;
+  const lines = [`### ${cycle.id} · SCC of ${cycle.modules.length} modules${under}`, ""];
   // The chart when it fits, the member list when it does not — never both, and
   // never a chart with edges left out.
-  lines.push(...(mermaidCycle(cycle) ?? memberFallback(cycle)));
+  lines.push(...(mermaidCycle(scoped) ?? memberFallback(scoped)));
   lines.push(...fileCycleLines(cycle));
-  lines.push(...cutLines(cycle));
+  lines.push(...cutLines(scoped));
   lines.push("");
   return lines;
+}
+
+/**
+ * Longest shared directory prefix of every module in the component, with its
+ * trailing slash, or `""` when there is none.
+ *
+ * Whole segments only. `apps/mobile` and `apps/mobile-web` share the STRING
+ * `apps/mobile` and share the DIRECTORY `apps` — stripping the string would
+ * leave a node named `-web/lib`.
+ */
+function commonModulePrefix(modules: readonly string[]): string {
+  if (modules.length < 2) return "";
+  // See MIN_PREFIX_SEGMENTS.
+  let common = modules[0]!.split("/").slice(0, -1);
+  for (const module of modules.slice(1)) {
+    const segments = module.split("/");
+    let i = 0;
+    while (i < common.length && i < segments.length - 1 && common[i] === segments[i]) i++;
+    common = common.slice(0, i);
+    if (common.length === 0) return "";
+  }
+  return common.length < MIN_PREFIX_SEGMENTS ? "" : `${common.join("/")}/`;
+}
+
+/**
+ * Path segments a shared prefix must have before it is worth lifting.
+ *
+ * One segment is the source root — `src/`, `app/`, `lib/` — which is short and
+ * orients the reader; removing it churns the chart to save four characters.
+ * Two or more is monorepo nesting, where the same `apps/mobile/` appears
+ * fourteen times on a seven-node chart and is the only part of every name that
+ * distinguishes nothing.
+ */
+const MIN_PREFIX_SEGMENTS = 2;
+
+/** The same finding with `prefix` removed from every module name. */
+function relativize(cycle: CycleFinding, prefix: string): CycleFinding {
+  const strip = (m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m);
+  const edge = (e: TangleEdge) => ({ ...e, from: strip(e.from), to: strip(e.to) });
+  return {
+    ...cycle,
+    modules: cycle.modules.map(strip),
+    edges: cycle.edges.map(edge),
+    cuts: cycle.cuts.map(edge),
+  };
 }
 
 /**
