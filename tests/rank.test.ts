@@ -392,6 +392,51 @@ describe("subsume", () => {
     ).toEqual(["pair", "triple"]);
   });
 
+  it("drops an L1 cluster nested inside the L0 cluster it restates", () => {
+    // A real report spent two of one section's five slots on this: an L0
+    // `IfStatement` of 115 copies and, at the same file and line, the L1
+    // `Block` of 121 that is its body with the guard normalized away. Same
+    // code, same site, one finding.
+    const guard = cluster({
+      id: "l0-if",
+      level: "L0",
+      nodeCount: 30,
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const body = cluster({
+      id: "l1-block",
+      level: "L1",
+      nodeCount: 24,
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/f${i}.ts`, 20, 380, 1, 14)),
+    });
+    expect(subsume([guard, body]).map((c) => c.id)).toEqual(["l0-if"]);
+  });
+
+  it("keeps an L0 cluster nested inside an L1 one even when every copy overlaps", () => {
+    // The other direction is not symmetric, which is the whole point. An exact
+    // cluster inside a fuzzy one is a STRONGER claim about a subset -- "these
+    // three are structurally alike, and of them these two match byte for byte"
+    // -- and the two support different refactors. Overlap here is 100%, so
+    // only the level rule can keep them apart.
+    const fuzzy = cluster({
+      id: "l1-outer",
+      level: "L1",
+      nodeCount: 30,
+      occurrences: Array.from({ length: 3 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const exact = cluster({
+      id: "l0-inner",
+      level: "L0",
+      nodeCount: 24,
+      occurrences: Array.from({ length: 3 }, (_, i) => occ(`src/f${i}.ts`, 20, 380, 1, 14)),
+    });
+    expect(
+      subsume([fuzzy, exact])
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(["l0-inner", "l1-outer"]);
+  });
+
   it("is deterministic regardless of input order", () => {
     const a = cluster({
       id: "aaa",

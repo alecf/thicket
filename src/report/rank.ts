@@ -239,13 +239,34 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
  */
 const SUBSUME_OVERLAP = 0.8;
 
+/**
+ * Whether a nested cluster at `inner`'s level restates one at `outer`'s, or
+ * says something the outer one does not.
+ *
+ * The relation is deliberately asymmetric, because the two nestings mean
+ * opposite things:
+ *
+ * - **Exact outside, fuzzy inside** (L0 containing L1) is one finding twice. A
+ *   real report spent two of a section's five slots on an L0 `IfStatement` of
+ *   115 copies and, at the same file and the same line, the L1 `Block` of 121
+ *   that is its body with the guard normalized away. Nothing is learned from
+ *   the second entry that the first did not already say.
+ * - **Fuzzy outside, exact inside** (L1 containing L0) is two findings. In the
+ *   sample fixture an L1 cluster unites three structurally identical functions
+ *   while the L0 cluster inside it covers the two that match byte for byte,
+ *   and those support different refactors -- the exact pair is trivially
+ *   extractable, the fuzzy triple needs the differences reconciled first.
+ *
+ * Collapsing both directions deletes the second case; collapsing neither -- the
+ * original rule -- pays for the first.
+ */
+function levelsCollapse(outer: string, inner: string): boolean {
+  if (outer === inner) return true;
+  return outer === "L0" && inner === "L1";
+}
+
 function contains(parent: Cluster, child: Cluster): boolean {
-  // Only within one level. A nested cluster at a DIFFERENT level is a stronger
-  // claim about a subset, not a restatement: in the sample fixture an L1
-  // cluster unites three structurally identical functions while the L0 cluster
-  // inside it covers the two that match byte for byte, and the L0 one is the
-  // trivially extractable pair. Collapsing across levels deletes that.
-  if (parent.level !== child.level) return false;
+  if (!levelsCollapse(parent.level, child.level)) return false;
   // Directional: `child`'s occurrences must sit inside `parent`'s, so a small
   // fragment can never swallow the larger one it is nested in, whatever the
   // iteration order.
