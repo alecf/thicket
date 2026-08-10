@@ -1,3 +1,4 @@
+import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import { canonicalKind } from "./kinds.js";
 import type { Ranked } from "./rank.js";
@@ -29,6 +30,8 @@ export interface ReportInput {
     cycleCount: number;
     largestScc: number;
   };
+  /** How much of the tree on disk this program actually covered. */
+  scope: Scope;
   duplication: Ranked[];
   cycles: CycleFinding[];
   /** Candidate count BEFORE any truncation, so "N of M" is meaningful. */
@@ -128,13 +131,49 @@ function headerLines(input: ReportInput, shown: number): string[] {
       `granularity: ${input.granularity} (${input.moduleCount} modules)`,
     "",
     "## Summary",
+    `  analyzed             ${input.scope.analyzed} of ${input.scope.onDisk} source files` +
+      ` (${percent(input.scope.analyzed, input.scope.onDisk)})`,
     `  duplicated mass      ${input.metrics.duplicatedMass} redundant nodes (overlapping; trend only)`,
     `  duplicated coverage  ${(input.metrics.redundantByteFraction * 100).toFixed(1)}% of source bytes`,
     `  propagation cost     ${input.metrics.propagationCost.toFixed(2)}`,
     `  dependency cycles    ${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules)`,
     `  findings             ${shown} of ${input.totalFindings} shown`,
     "",
+    ...scopeWarning(input.scope),
   ];
+}
+
+/** Gaps listed before the report is believed, capped so it stays a warning. */
+const MAX_GAPS_SHOWN = 5;
+
+/**
+ * The block that says the report is partial, and how to make it whole.
+ *
+ * Placed above the findings rather than below them because it changes what
+ * every number beneath it means. A run over 2.8% of a monorepo reported zero
+ * dependency cycles and a propagation cost of 0.05; both were artifacts of the
+ * missing 97%, and nothing in the report said so.
+ */
+function scopeWarning(scope: Scope): string[] {
+  if (scope.complete) return [];
+  const missing = scope.onDisk - scope.analyzed;
+  const lines = [
+    `⚠ ${missing} source files are outside this program. Every number above is` +
+      ` drawn from the ${percent(scope.analyzed, scope.onDisk)} that is inside it.`,
+  ];
+  for (const gap of scope.gaps.slice(0, MAX_GAPS_SHOWN)) {
+    const fix = gap.config === undefined ? "" : `  → --config ${gap.config}`;
+    lines.push(`    ${gap.dir}  ${gap.fileCount} files${fix}`);
+  }
+  const rest = scope.gaps.length - MAX_GAPS_SHOWN;
+  if (rest > 0) lines.push(`    … and ${rest} further directories`);
+  lines.push("");
+  return lines;
+}
+
+function percent(part: number, whole: number): string {
+  if (whole === 0) return "100%";
+  return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
 function omittedLine(omitted: number): string {

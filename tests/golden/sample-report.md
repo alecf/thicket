@@ -2,6 +2,7 @@
 thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 modules)
 
 ## Summary
+  analyzed             4 of 4 source files (100.0%)
   duplicated mass      253 redundant nodes (overlapping; trend only)
   duplicated coverage  37.9% of source bytes
   propagation cost     0.44

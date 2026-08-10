@@ -67,6 +67,19 @@ export function generatedConfig(): string {
   return resolve(here, "fixtures/generated/tsconfig.json");
 }
 
+/**
+ * A root config that excludes `packages/`, beside a `packages/lib` that has
+ * its own tsconfig — the shape of a real monorepo whose root config covered
+ * 3% of the tree. Carries one decoy per way the on-disk count can inflate:
+ * `dist/` build output, a `.d.ts`, and a checkout inside a dot-directory.
+ */
+export function partialRoot(): string {
+  return resolve(here, "fixtures/partial");
+}
+export function partialConfig(): string {
+  return resolve(partialRoot(), "tsconfig.json");
+}
+
 export function monorepoRoot(): string {
   return resolve(here, "fixtures/monorepo");
 }

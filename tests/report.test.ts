@@ -68,6 +68,7 @@ const base: ReportInput = {
     cycleCount: 1,
     largestScc: 2,
   },
+  scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [],
   cycles: [],
   totalFindings: 0,
@@ -78,6 +79,36 @@ describe("renderMarkdown", () => {
     const out = renderMarkdown({ ...base, totalFindings: 495 });
     expect(out).toMatch(/of 495/);
     expect(out).toMatch(/… 495 further findings omitted/);
+  });
+
+  it("says nothing about scope when the program covered the tree", () => {
+    expect(renderMarkdown(base)).not.toMatch(/outside this program/);
+  });
+
+  it("warns above the findings when the program covered part of the tree", () => {
+    const out = renderMarkdown({
+      ...base,
+      scope: {
+        analyzed: 176,
+        onDisk: 6286,
+        complete: false,
+        gaps: [
+          { dir: "apps/web", fileCount: 5262, config: "apps/web/tsconfig.json" },
+          { dir: "vendored", fileCount: 848 },
+        ],
+      },
+      duplication: [ranked("THK-DUP-1")],
+      totalFindings: 1,
+    });
+    expect(out).toMatch(/analyzed +176 of 6286 source files \(2\.8%\)/);
+    expect(out).toMatch(/6110 source files are outside this program/);
+    // The actionable half: the exact argument that closes the gap.
+    expect(out).toMatch(/apps\/web {2}5262 files {2}→ --config apps\/web\/tsconfig\.json/);
+    // A directory with no tsconfig of its own still gets counted, without a
+    // fabricated --config that would not work.
+    expect(out).toMatch(/vendored {2}848 files$/m);
+    // Above the findings, because it changes what every number below it means.
+    expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
   });
 
   it("contains no timestamps or absolute paths", () => {

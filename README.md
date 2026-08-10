@@ -96,6 +96,7 @@ Pointed at this repository's own test fixture, `node dist/cli.js --config tests/
 thicket 0.1.0 · config ce6df2e5 · 4 files / 56 LOC · granularity: file (4 modules)
 
 ## Summary
+  analyzed             4 of 4 source files (100.0%)
   duplicated mass      253 redundant nodes (overlapping; trend only)
   duplicated coverage  37.9% of source bytes
   propagation cost     0.44
@@ -127,6 +128,16 @@ Reading the rest of a finding line: `L0`/`L1` is the normalization level, `score
 That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI additionally renders it on Linux and on macOS under a locale whose collation disagrees with code-unit order, and fails if the two machines disagree by a single byte.
 
 ## What the metrics mean
+
+**`analyzed`** — how many of the TypeScript files on disk under the project root ended up in the program, and therefore in everything below it. A `tsconfig.json` decides this, and it can decide it very differently from what you expect: one real monorepo's root config excluded `apps` and `packages`, so the default run built its program from **176 of 6,286 files** and reported zero dependency cycles and a propagation cost of 0.05. Both were artifacts of the missing 97%. When the program misses part of the tree, thicket says so above the findings and names the `--config` that closes each gap:
+
+```
+⚠ 6110 source files are outside this program. Every number above is drawn from the 2.8% that is inside it.
+    apps/web  5262 files  → --config apps/web/tsconfig.json
+    apps/mobile  451 files  → --config apps/mobile/tsconfig.json
+```
+
+The denominator counts hand-written TypeScript only — no `.d.ts`, no generated directories, and nothing under a dot-directory, because an agent worktree in `.claude/` is a second copy of the whole repository and would halve every coverage figure in the report.
 
 **`duplicated mass`** — Σ *nodes × (copies − 1)* over the reported clusters: roughly "how many AST nodes a perfect deduplication would delete". Clusters **overlap and nest** — a `Block` sits inside the `FunctionDeclaration` containing it, and both are reported — so the same source is charged more than once. It is **not a fraction of anything**, and it is not comparable between two different codebases. It is a trend number: watch it fall across iterations of one loop.
 

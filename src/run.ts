@@ -1,4 +1,5 @@
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
+import { analysisScope, type Scope } from "./extract/scope.js";
 import { openProject } from "./extract/ts-adapter.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
@@ -37,6 +38,8 @@ export interface ReportJson {
   granularity: string;
   moduleCount: number;
   metrics: ReportInput["metrics"];
+  /** What the program covered of the tree on disk, and what it missed. */
+  scope: Scope;
   duplication: {
     /** THK-DUP finding id; identical to the one the Markdown prints. */
     id: string;
@@ -130,6 +133,11 @@ export async function runReport(
       totalBytes += file.sourceFile.text.length;
     }
 
+    const scope = analysisScope(
+      project.root,
+      files.map((f) => f.path),
+    );
+
     const graph = buildModuleGraph(project, { granularity });
     const clusters = subsume(await findDuplication(project, { minNodes, cache }));
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
@@ -172,6 +180,7 @@ export async function runReport(
         cycleCount: cycles.length,
         largestScc: components.reduce((max, c) => Math.max(max, c.length), 0),
       },
+      scope,
       duplication: emitted,
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
@@ -190,6 +199,7 @@ export async function runReport(
         granularity: input.granularity,
         moduleCount: input.moduleCount,
         metrics: input.metrics,
+        scope,
         duplication: emitted.map((r) => ({
           id: r.cluster.id,
           shapeHash: r.shapeHash,
