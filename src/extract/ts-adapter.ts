@@ -60,6 +60,17 @@ export interface Project {
   resolveImport(from: FileHandle, specifier: unknown): string | undefined;
   importsOf(file: FileHandle): string[];
   importDetailsOf(file: FileHandle): ImportDetail[];
+  /**
+   * What this file forwards with `export … from`, if it forwards and does
+   * nothing else. Empty for every other file, including one that re-exports
+   * beside code of its own.
+   *
+   * The exclusivity matters: a report field whose job is to name the shared
+   * abstraction pointed at a nine-line `export * from` shim and stopped there,
+   * leaving the 1012-line base class the refactor turned on to be found by
+   * hand. Following the hop is only sound when the file really is a stand-in.
+   */
+  reexportsOf(file: FileHandle): string[];
   close(): void;
 }
 
@@ -140,6 +151,32 @@ function bindingCount(decl: Node): { count: number; erased: number } {
  */
 function isTypeOnly(node: Node): boolean {
   return (node as { isTypeOnly?: boolean }).isTypeOnly === true;
+}
+
+/**
+ * Targets of the file's `export … from` declarations, or none when the file
+ * also imports something it does not forward.
+ *
+ * A pure forwarder is a file the reader can see through. One that imports on
+ * its own account is not: what a cluster shares with it may be the part it
+ * declares rather than the part it passes along.
+ */
+function reexportSpecifiers(sourceFile: SourceFileNode): { nodes: Node[]; exclusive: boolean } {
+  const nodes: Node[] = [];
+  let plainImports = 0;
+  walk(sourceFile, (node) => {
+    if (node.kind === SyntaxKind.ImportDeclaration) {
+      // `import "./x.js"` and every other import form: this file consumes as
+      // well as forwards.
+      plainImports += 1;
+      return;
+    }
+    if (node.kind !== SyntaxKind.ExportDeclaration) return;
+    forEachChildSafe(node, (child) => {
+      if (child.kind === SyntaxKind.StringLiteral) nodes.push(child);
+    });
+  });
+  return { nodes, exclusive: plainImports === 0 };
 }
 
 /**
@@ -380,12 +417,24 @@ export async function openProject(
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 
+  function reexportsOf(file: FileHandle): string[] {
+    const { nodes, exclusive } = reexportSpecifiers(file.sourceFile);
+    if (!exclusive || nodes.length === 0) return [];
+    const targets = new Set<string>();
+    for (const node of nodes) {
+      const target = resolveImport(file, node);
+      if (target && target !== file.path) targets.add(target);
+    }
+    return [...targets].sort(compareStrings);
+  }
+
   return {
     root,
     files: () => files,
     getSourceFile: (relPath) => byRel.get(relPath)?.sourceFile,
     resolveImport,
     importDetailsOf,
+    reexportsOf,
     /** Resolved import targets, deduped and sorted. Weights live in `importDetailsOf`. */
     importsOf: (file: FileHandle) => importDetailsOf(file).map((d) => d.target),
     close: () => api.close(),

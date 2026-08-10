@@ -175,7 +175,11 @@ The fenced block under each finding is the head of its first occurrence. An AST 
 Above the excerpt, each finding carries two facts about its **surroundings**:
 
 - **`every copy imports:`** repo files that every file in the cluster imports, excluding ones the rest of the codebase imports just as often. This is where the copies' shared vocabulary already lives, and often where the abstraction already is. On a real report the top finding was 19 duplicated classes, and this line named the base class that already had the exact generic factory methods all 19 reimplement — the difference between "design an abstraction" and "delete the overrides".
-- **`directly imported by:`** how many files outside the cluster reach into it. This is what turns "this looks big" into "this is contained", and it is what decides whether a finding gets scheduled. *Directly* is meant literally: a re-export barrel hides its own importers behind it, so the number is a floor.
+
+  A **re-export shim is followed through**: `models/vitals/VitalObservation.ts → packages/models/src/wearables/VitalObservation.ts`. Naming only the first is how that same finding failed on the next run — the file it named is nine lines of `export * from`, and the 1012-line base class the whole refactor turns on was one hop further on, leaving an agent to find it by hand. A file is followed only when it forwards exactly one module and imports nothing on its own account; a thirty-module barrel stands for no single thing, so it is named as itself.
+- **`directly imported by:`** how many files outside the cluster reach into it. This is what turns "this looks big" into "this is contained", and it is what decides whether a finding gets scheduled. A re-export barrel among those importers hides its own consumers behind it, so what it hides is counted and the barrel named: `5 files outside the cluster, and 17 files more through models/vitals/index.ts`. The bare 5 was a floor presented as a total, and an agent that went and checked concluded the number was a bug.
+
+  The line is **omitted entirely for a cluster of test files**, where it is a constant dressed as evidence: nothing imports a test file, so `nothing outside the cluster` holds for every such finding and distinguishes none of them.
 
 A third line appears when two printed findings are **near-variants of one shape**:
 

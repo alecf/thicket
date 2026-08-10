@@ -238,6 +238,10 @@ export async function runReport(
         const handle = byRelPath.get(path);
         return handle === undefined ? [] : project.importsOf(handle);
       },
+      (path) => {
+        const handle = byRelPath.get(path);
+        return handle === undefined ? [] : project.reexportsOf(handle);
+      },
     );
     const decorate = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;

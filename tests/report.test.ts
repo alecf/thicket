@@ -75,6 +75,13 @@ const ranked = (id: string, over: Partial<Ranked["cluster"]> = {}, score = 100):
   },
 });
 
+/** A dependents record with nothing hidden behind a barrel. */
+const deps = (direct: number, throughBarrels = 0, barrels: string[] = []) => ({
+  direct,
+  throughBarrels,
+  barrels,
+});
+
 const twoModuleCycle = {
   id: "THK-CYC-1",
   modules: ["src/alpha.ts", "src/gamma.ts"],
@@ -215,7 +222,10 @@ describe("renderMarkdown", () => {
       duplication: [
         {
           ...ranked("THK-DUP-1"),
-          context: { sharedImports: ["models/VitalObservation.ts"], dependents: 5 },
+          context: {
+            sharedImports: [{ path: "models/VitalObservation.ts" }],
+            dependents: deps(5),
+          },
         },
       ],
       totalFindings: 1,
@@ -230,7 +240,7 @@ describe("renderMarkdown", () => {
   it("says nothing about shared imports when the copies share none", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 2 } }],
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(2) } }],
       totalFindings: 1,
     });
     expect(out).not.toContain("every copy imports");
@@ -242,7 +252,7 @@ describe("renderMarkdown", () => {
     // the extraction cannot break a caller.
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 0 } }],
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(0) } }],
       totalFindings: 1,
     });
     expect(out).toContain("- **directly imported by:** nothing outside the cluster");
@@ -251,10 +261,79 @@ describe("renderMarkdown", () => {
   it("agrees with itself on singular and plural dependents", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: 1 } }],
+      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(1) } }],
       totalFindings: 1,
     });
     expect(out).toContain("- **directly imported by:** 1 file outside the cluster");
+  });
+
+  it("follows a re-export shim to what it stands in front of", () => {
+    // The field exists to point at the abstraction that already exists. On a
+    // real finding it named a nine-line `export * from` and stopped, leaving
+    // the 1012-line base class the whole refactor turns on to be found by hand.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [
+              { path: "models/vitals/VitalObservation.ts", forwardsTo: "packages/models/src/wearables/VitalObservation.ts" },
+            ],
+            dependents: deps(1),
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **every copy imports:** `models/vitals/VitalObservation.ts` →" +
+        " `packages/models/src/wearables/VitalObservation.ts`",
+    );
+  });
+
+  it("says how many more files reach the cluster through a barrel", () => {
+    // The direct count alone was a floor presented as a total: 5 files, one of
+    // them an `index.ts` that 17 more went through. An agent could not
+    // reconcile 5 with what it found and concluded the number was a bug.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: { sharedImports: [], dependents: deps(5, 17, ["models/vitals/index.ts"]) },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **directly imported by:** 5 files outside the cluster, and 17 files more" +
+        " through `models/vitals/index.ts`",
+    );
+  });
+
+  it("says nothing about who imports a cluster of test files", () => {
+    // Nothing imports a test file, so the line is a guaranteed constant
+    // dressed as evidence -- and it answers the opposite of the question that
+    // decides a test finding, which is what the copies depend ON.
+    const out = renderMarkdown({
+      ...base,
+      testDuplication: [
+        {
+          ...ranked("THK-DUP-T", {
+            occurrences: [
+              { filePath: "src/a.test.ts", start: 0, end: 10, line: 1, endLine: 4, parentId: 1 },
+              { filePath: "src/b.test.ts", start: 0, end: 10, line: 1, endLine: 4, parentId: 2 },
+            ],
+          }),
+          tag: "test",
+          context: { sharedImports: [], dependents: deps(0) },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("## Duplication in tests");
+    expect(out).not.toContain("directly imported by");
   });
 
   it("cross-references a finding that is nearly the same shape", () => {
@@ -266,7 +345,7 @@ describe("renderMarkdown", () => {
       duplication: [
         {
           ...ranked("THK-DUP-1"),
-          context: { sharedImports: [], dependents: 0 },
+          context: { sharedImports: [], dependents: deps(0) },
           variants: [{ id: "THK-DUP-2", similarity: 0.8125, copies: 5 }],
         },
       ],
@@ -281,7 +360,7 @@ describe("renderMarkdown", () => {
       duplication: [
         {
           ...ranked("THK-DUP-1"),
-          context: { sharedImports: [], dependents: 0 },
+          context: { sharedImports: [], dependents: deps(0) },
           variants: [{ id: "THK-DUP-2", similarity: 0.7, copies: 1 }],
         },
       ],

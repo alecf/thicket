@@ -1,8 +1,9 @@
 import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
+import type { Dependents } from "./context.js";
 import { canonicalKind } from "./kinds.js";
-import type { Ranked } from "./rank.js";
+import { isTestMajority, type Ranked } from "./rank.js";
 
 /** One dependency edge inside a tangle, with what it would cost to remove. */
 export interface TangleEdge {
@@ -462,9 +463,15 @@ function contextLines(r: Ranked): string[] {
 
 
   if (context.sharedImports.length > 0) {
-    lines.push(
-      `- **every copy imports:** ${context.sharedImports.map((f) => `\`${f}\``).join(", ")}`,
+    // `shim.ts` → `packages/models/Base.ts` when the copies import a re-export
+    // that stands in front of the real thing. Naming only the first sent an
+    // agent to a nine-line `export * from` when what it needed -- the base
+    // class with the factory methods all 19 copies reimplement -- was one hop
+    // further on.
+    const named = context.sharedImports.map((s) =>
+      s.forwardsTo === undefined ? `\`${s.path}\`` : `\`${s.path}\` → \`${s.forwardsTo}\``,
     );
+    lines.push(`- **every copy imports:** ${named.join(", ")}`);
   }
 
   for (const variant of r.variants ?? []) {
@@ -477,16 +484,36 @@ function contextLines(r: Ranked): string[] {
     );
   }
 
-  // "Directly", because a re-export barrel hides its own importers behind it.
-  // Naming a small set lets the reader spot exactly that and follow it.
-  lines.push(
-    context.dependents === 0
-      ? `- **directly imported by:** nothing outside the cluster`
-      : `- **directly imported by:** ${context.dependents} file` +
-        `${context.dependents === 1 ? "" : "s"} outside the cluster`,
-  );
+  const dependents = dependentsLine(r, context.dependents);
+  if (dependents !== undefined) lines.push(dependents);
   lines.push("");
   return lines;
+}
+
+/**
+ * How much of the codebase reaches into the cluster.
+ *
+ * The direct count alone was a floor presented as a total. On a real 19-file
+ * cluster it read `5 files outside the cluster` — four co-located tests and an
+ * `index.ts` — while 17 further files reached the cluster through that index.
+ * An agent checked, could not reconcile 5 with what it found, and concluded the
+ * number was a bug. It was not; it was half the sentence.
+ *
+ * Suppressed entirely for a test-majority cluster, where it is a constant
+ * dressed as evidence: nothing imports a test file, so `nothing outside the
+ * cluster` is guaranteed for all 115 members and says nothing about any of them.
+ */
+function dependentsLine(r: Ranked, d: Dependents): string | undefined {
+  if (isTestMajority(r.cluster)) return undefined;
+  const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+  if (d.direct === 0) return `- **directly imported by:** nothing outside the cluster`;
+
+  const barrels = d.barrels.map((b) => `\`${b}\``).join(", ");
+  const hidden =
+    d.throughBarrels === 0
+      ? ""
+      : `, and ${files(d.throughBarrels)} more through ${barrels}`;
+  return `- **directly imported by:** ${files(d.direct)} outside the cluster${hidden}`;
 }
 
 /** Language tags by extension, for the excerpt's fence. */
