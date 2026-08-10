@@ -142,7 +142,7 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
     // duplication is real -- 231 copies of a mock logger wants a helper -- but
     // it is not what the report exists to rank.
     ...input.testDuplication.map((r) => ({
-      section: "## Test duplication",
+      section: "## Duplication in tests",
       lines: duplicationBlock(r, input.maxFilesPerFinding),
     })),
   ];
@@ -163,7 +163,7 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   lines.push(
     ...omittedSection(input, {
       duplication: shownIn("## Duplication"),
-      testDuplication: shownIn("## Test duplication"),
+      testDuplication: shownIn("## Duplication in tests"),
       cycles: shownIn("## Module tangle"),
     }),
   );
@@ -318,7 +318,7 @@ function omittedSection(
 
   const rows: [string, number, number][] = [
     ["duplication", c.duplication, shown.duplication],
-    ["test duplication", c.testDuplication, shown.testDuplication],
+    ["duplication in tests", c.testDuplication, shown.testDuplication],
     ["module tangle", c.cycles, shown.cycles],
   ];
 

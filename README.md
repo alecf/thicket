@@ -162,7 +162,7 @@ flowchart LR
 
 That fixture holds three structurally identical `normalize` functions, two of which are byte-identical, and an `alpha ↔ gamma` import cycle. Both duplication findings are real and they are not the same finding: the **L1** one covers all three functions (identical once identifiers are α-renamed), the **L0** one covers only the two that match byte for byte — and it is reported as a `Block` rather than a `FunctionDeclaration` because the two functions have different *names*, so the largest exactly-equal node is the body.
 
-Findings appear under `## Duplication`, then `## Module tangle`, then `## Test duplication` — which is also the order a token budget spends itself in, so pressure costs test hygiene before it costs production work.
+Findings appear under `## Duplication`, then `## Module tangle`, then `## Duplication in tests` — which is also the order a token budget spends itself in, so pressure costs test hygiene before it costs production work.
 
 Reading a finding: the heading carries the id to cite and the size to judge by, and the line under it carries `L0`/`L1` (the normalization level), the AST kind, the ranker's `score` (only the ordering is meaningful, not the units), and a `[test]`/`[mixed]` tag where one applies. `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and **every** location is listed. They used to be capped at six files, which read as `… and 13 more files`: a line that tells an agent work remains and gives it no way to reach the work, leaving it to grep for the shape by hand. `--max-locations <n>` restores a cap for callers who would rather truncate a finding than lose it whole to a token budget.
 
@@ -193,7 +193,7 @@ When findings are held back, an **Omitted** section says what is in them: a coun
 
 ### Two duplication sections
 
-Duplication whose copies are mostly test files goes in a **`## Test duplication`** section of its own, with its own much smaller cap, below the production findings and below the module tangle.
+Duplication whose copies are mostly test files goes in a **`## Duplication in tests`** section of its own, with its own much smaller cap, below the production findings and below the module tangle.
 
 This is a split rather than a weight because no weight worked. Test scaffolding took **10 of the top 40** slots on a real application — 231 copies of `{ info: vi.fn(), warn: vi.fn() }`, 124 of `afterEach(() => vi.restoreAllMocks())` — and the ranker was right that they were large: `recoverableLines` is `(copies − 1) × (linesPerCopy − 1)`, so a 6-line shape repeated 231 times genuinely does dominate a 30-line clone repeated twice. Sweeping the test down-weight from 0.4 to 0 moved the count from 10 to 0 continuously, with no natural break anywhere on the curve — every threshold was an arbitrary point on a smooth tradeoff, and the ones low enough to clear the top 40 also buried real cross-test duplication.
 

@@ -123,11 +123,11 @@ describe("runReport", () => {
 
     // ...and the report still leads with the production clone.
     expect(markdown.indexOf("## Duplication")).toBeLessThan(
-      markdown.indexOf("## Test duplication"),
+      markdown.indexOf("## Duplication in tests"),
     );
     const production = markdown.slice(
       markdown.indexOf("## Duplication"),
-      markdown.indexOf("## Test duplication"),
+      markdown.indexOf("## Duplication in tests"),
     );
     expect(production).toContain("src/order.ts");
     expect(production).not.toContain(".test.ts");

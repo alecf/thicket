@@ -378,8 +378,8 @@ describe("renderMarkdown", () => {
       totalFindings: 2,
       census: { duplication: 1, cycles: 0, bands: [], testDuplication: 1, singleFile: 0 },
     });
-    expect(out).toContain("## Test duplication");
-    expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Test duplication"));
+    expect(out).toContain("## Duplication in tests");
+    expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Duplication in tests"));
     expect(out.indexOf("THK-DUP-src")).toBeLessThan(out.indexOf("THK-DUP-mock"));
   });
 
@@ -405,7 +405,7 @@ describe("renderMarkdown", () => {
       totalFindings: 2,
       census: { duplication: 0, cycles: 0, bands: [], testDuplication: 2, singleFile: 0 },
     });
-    expect(out).toContain("## Test duplication");
+    expect(out).toContain("## Duplication in tests");
     expect(out).not.toContain("## Duplication\n");
   });
 
@@ -438,7 +438,7 @@ describe("renderMarkdown", () => {
     expect(out).toContain("| module tangle | 2 | 0 |");
     expect(out).toContain("| 100+ | 210 |");
     expect(out).toContain("| 1–3 | 5598 |");
-    expect(out).toContain("| test duplication | 9389 | 0 |");
+    expect(out).toContain("| duplication in tests | 9389 | 0 |");
     expect(out).toContain("9382 of those candidates repeat inside a single file");
   });
 
