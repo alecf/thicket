@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
-import { emptyConfig, fixtureConfig, importsFixtureConfig } from "./helpers.js";
+import {
+  emptyConfig,
+  fixtureConfig,
+  importsFixtureConfig,
+  testSplitConfig,
+} from "./helpers.js";
 
 describe("runReport", () => {
   it("produces a report naming the fixture's known duplication", async () => {
@@ -98,15 +103,59 @@ describe("runReport", () => {
     expect(tight.json.totalFindings).toBe(full.json.totalFindings);
   });
 
+  it("never lets test duplication take a production finding's slot", async () => {
+    // The failure this replaces: 10 of the top 40 findings on a real
+    // application were test scaffolding. This fixture reproduces the shape --
+    // its highest-scoring cluster of all is a mock-logger setup repeated
+    // across four test files, well above the one production clone.
+    const options = { config: testSplitConfig(), minNodes: 8, minLines: 2 } as const;
+    const { json, markdown } = await runReport(options);
+
+    // The guard is only load-bearing if the scaffolding really does outrank
+    // the production clone. Assert that, so this cannot pass by accident on a
+    // fixture that stopped exercising the case.
+    const best = [...json.duplication].sort((a, b) => b.score - a.score)[0]!;
+    expect(best.tag).toBe("test");
+    expect(json.census.duplication).toBe(1);
+    expect(json.census.testDuplication).toBe(2);
+
+    // ...and the report still leads with the production clone.
+    expect(markdown.indexOf("## Duplication")).toBeLessThan(
+      markdown.indexOf("## Test duplication"),
+    );
+    const production = markdown.slice(
+      markdown.indexOf("## Duplication"),
+      markdown.indexOf("## Test duplication"),
+    );
+    expect(production).toContain("src/order.ts");
+    expect(production).not.toContain(".test.ts");
+  });
+
+  it("keeps the production finding when only one slot is available", async () => {
+    // `maxFindings` caps each section independently, so the scaffolding
+    // cannot consume the production section's only slot.
+    const { markdown } = await runReport({
+      config: testSplitConfig(),
+      minNodes: 8,
+      minLines: 2,
+      maxFindings: 1,
+    });
+    expect(markdown).toContain("src/order.ts");
+  });
+
   it("censuses every candidate it found, printed or not", async () => {
     // The census is what the report says the unprinted tail consists of. If it
     // does not add up to the stated total, the summary is describing a
     // different pile than the one the findings came off.
-    const { json } = await runReport({ config: fixtureConfig(), minNodes: 5, minLines: 1 });
-    expect(json.census.duplication + json.census.cycles).toBe(json.totalFindings);
-    const banded = json.census.bands.reduce((sum, b) => sum + b.count, 0);
-    expect(banded).toBe(json.census.duplication);
-    expect(json.census.duplication).toBeGreaterThan(0);
+    // Run against the fixture that actually has both kinds, so the test
+    // half of this sum is not always zero.
+    const { json } = await runReport({ config: testSplitConfig(), minNodes: 8, minLines: 2 });
+    const { census } = json;
+    expect(census.duplication + census.testDuplication + census.cycles).toBe(json.totalFindings);
+    const banded = census.bands.reduce((sum, b) => sum + b.count, 0);
+    expect(banded).toBe(census.duplication);
+    expect(census.duplication).toBeGreaterThan(0);
+    expect(census.testDuplication).toBeGreaterThan(0);
   });
 
   it("emits no absolute paths", async () => {

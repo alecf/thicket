@@ -55,16 +55,26 @@ describe("census", () => {
     expect(census([at(0)], 0).bands).toEqual([{ label: "0", count: 1 }]);
   });
 
-  it("counts clusters that live entirely in tests", () => {
+  it("splits test-majority candidates out of the duplication count", () => {
+    // A half-test cluster counts as test: the split exists so scaffolding
+    // cannot displace production work, and a tie is as much one as the other.
     const c = census(
       [
-        at(20, ["src/a.test.ts", "src/b.test.ts"]),
-        at(20, ["src/a.test.ts", "src/b.ts"]),
-        at(20, ["src/a.ts", "src/b.ts"]),
+        at(20, ["src/a.test.ts", "src/b.test.ts"]), // all test
+        at(20, ["src/a.test.ts", "src/b.ts"]), // half test
+        at(20, ["src/a.ts", "src/b.ts"]), // all source
       ],
       0,
     );
-    expect(c.testOnly).toBe(1);
+    expect(c.testDuplication).toBe(2);
+    expect(c.duplication).toBe(1);
+  });
+
+  it("bands production candidates only", () => {
+    // The histogram sits under the production section. Folding test
+    // scaffolding back in would restate the pile the split separated.
+    const c = census([at(50, ["a.test.ts", "b.test.ts"]), at(50, ["a.ts", "b.ts"])], 0);
+    expect(c.bands).toEqual([{ label: "30–99", count: 1 }]);
   });
 
   it("counts clusters confined to one file", () => {

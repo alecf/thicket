@@ -41,6 +41,11 @@ export interface ReportInput {
   /** How much of the tree on disk this program actually covered. */
   scope: Scope;
   duplication: Ranked[];
+  /**
+   * Duplication whose copies are mostly test files, kept in a section of its
+   * own so it cannot displace production findings (see `isTestMajority`).
+   */
+  testDuplication: Ranked[];
   cycles: CycleFinding[];
   /** Candidate count BEFORE any truncation, so "N of M" is meaningful. */
   totalFindings: number;
@@ -90,6 +95,13 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
       lines: duplicationBlock(r, input.maxFilesPerFinding),
     })),
     ...input.cycles.map((c) => ({ section: "## Module tangle", lines: cycleBlock(c) })),
+    // Last, so a token budget spends itself on production work first. Test
+    // duplication is real -- 231 copies of a mock logger wants a helper -- but
+    // it is not what the report exists to rank.
+    ...input.testDuplication.map((r) => ({
+      section: "## Test duplication",
+      lines: duplicationBlock(r, input.maxFilesPerFinding),
+    })),
   ];
 
   const emitted = selectWithinBudget(input, blocks);
@@ -107,8 +119,14 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
     }
     lines.push(...block.lines);
   }
-  const shownCycles = emitted.filter((b) => b.section === "## Module tangle").length;
-  lines.push(...omittedSection(input, shown - shownCycles, shownCycles));
+  const shownIn = (section: string) => emitted.filter((b) => b.section === section).length;
+  lines.push(
+    ...omittedSection(input, {
+      duplication: shownIn("## Duplication"),
+      testDuplication: shownIn("## Test duplication"),
+      cycles: shownIn("## Module tangle"),
+    }),
+  );
 
   return { markdown: lines.join("\n") + "\n", shown };
 }
@@ -129,7 +147,11 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
   // reservation cannot be undershot once the real counts are known.
   const fixed = [
     ...headerLines(input, input.totalFindings),
-    ...omittedSection(input, input.census.duplication, input.census.cycles),
+    ...omittedSection(input, {
+      duplication: input.census.duplication,
+      testDuplication: input.census.testDuplication,
+      cycles: input.census.cycles,
+    }),
   ];
   let used = estimateTokens(fixed.join("\n") + "\n");
 
@@ -245,10 +267,20 @@ function percent(part: number, whole: number): string {
  * question being answered is what kind of pile the printed findings came off,
  * and a distribution with its top forty cut out is a worse answer to that.
  */
-function omittedSection(input: ReportInput, shownDup: number, shownCyc: number): string[] {
-  const omitted = input.totalFindings - shownDup - shownCyc;
+function omittedSection(
+  input: ReportInput,
+  shown: { duplication: number; testDuplication: number; cycles: number },
+): string[] {
+  const printed = shown.duplication + shown.testDuplication + shown.cycles;
+  const omitted = input.totalFindings - printed;
   if (omitted <= 0) return [];
   const c = input.census;
+
+  const rows: [string, number, number][] = [
+    ["duplication", c.duplication, shown.duplication],
+    ["test duplication", c.testDuplication, shown.testDuplication],
+    ["module tangle", c.cycles, shown.cycles],
+  ];
 
   const lines = [
     "## Omitted",
@@ -258,8 +290,7 @@ function omittedSection(input: ReportInput, shownDup: number, shownCyc: number):
     "",
     "| category | candidates | shown |",
     "| --- | --- | --- |",
-    `| duplication | ${c.duplication} | ${shownDup} |`,
-    `| module tangle | ${c.cycles} | ${shownCyc} |`,
+    ...rows.map(([label, total, seen]) => `| ${label} | ${total} | ${seen} |`),
     "",
   ];
 
@@ -275,14 +306,14 @@ function omittedSection(input: ReportInput, shownDup: number, shownCyc: number):
     );
   }
 
-  if (c.duplication > 0) {
-    // Both categories are down-weighted by the ranker rather than dropped
-    // (PRD §5.4), so they are most of the tail and almost none of the top.
-    // Saying so is what stops the totals reading as untouched work.
+  if (c.singleFile > 0) {
+    // Down-weighted by the ranker rather than dropped (PRD §5.4), so this is
+    // most of the tail and almost none of the top. Saying so is what stops the
+    // totals reading as untouched work.
     lines.push(
-      `Of those candidates, ${c.testOnly} duplicate only between test files and` +
-        ` ${c.singleFile} repeat inside a single file. Both are ranked down rather` +
-        ` than excluded, so they fill the tail and rarely reach the report.`,
+      `${c.singleFile} of those candidates repeat inside a single file, which is` +
+        ` ranked down rather than excluded: it fills the tail and rarely reaches` +
+        ` the report.`,
       "",
     );
   }

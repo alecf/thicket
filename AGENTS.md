@@ -70,6 +70,11 @@ A fifth, in fuzzy matching: a fragment and its own ancestor overlap at ~0.99 sim
 
 A 48-file repo yields ~495 duplication candidates against a report budget of 20–50. Recall is not the constraint — selection is. Before adding a new detector, ask whether the ranker is already discarding good candidates. The PRD's re-entry criterion for embeddings applies to any new detection technique.
 
+Two corollaries, both learned the expensive way:
+
+- **`recoverableLines` is `(copies − 1) × (linesPerCopy − 1)`, so per-copy size is only half the value.** A 6-line shape repeated 231 times outranks a 30-line clone repeated twice, and it is *right* to. Filtering on lines-per-copy therefore does not remove noise — on a real application, raising `--min-lines` from 4 to 10 deleted 29 of the top 40 findings and 32% of the recoverable lines while barely denting the noise it was aimed at.
+- **When a weight has to arbitrate between two incomparable kinds of work, split the sections instead.** Test scaffolding held 10 of the top 40 slots; sweeping the test weight from 0.4 to 0 moved that count smoothly to 0 with no natural break, meaning every threshold was arbitrary. `## Test duplication` is a separate section with its own cap, so nothing has to be scored against it.
+
 ### 5. The cache may never change the answer
 
 `.thicket/cache.db` stores whole fragments — position, size, kind, **and both

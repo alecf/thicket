@@ -1,4 +1,4 @@
-import { isTestPath, type Ranked } from "./rank.js";
+import { isTestMajority, type Ranked } from "./rank.js";
 
 /**
  * What the report did not print.
@@ -16,14 +16,14 @@ import { isTestPath, type Ranked } from "./rank.js";
  * actually asking is "what is the shape of the pile the top forty came off".
  */
 export interface Census {
-  /** Duplication candidates found, before any truncation. */
+  /** Production-majority duplication candidates found, before any truncation. */
   duplication: number;
+  /** Test-majority duplication candidates, the report's second section. */
+  testDuplication: number;
   /** Cycle findings found, before any truncation. */
   cycles: number;
   /** Duplication candidates per band, most valuable band first. */
   bands: { label: string; count: number }[];
-  /** Candidates whose every occurrence is a test file. */
-  testOnly: number;
   /** Candidates whose every occurrence is in one file. */
   singleFile: number;
 }
@@ -47,25 +47,33 @@ const BANDS: readonly [string, number][] = [
 
 export function census(ranked: readonly Ranked[], cycles: number): Census {
   const bands = BANDS.map(([label]) => ({ label, count: 0 }));
-  let testOnly = 0;
+  let duplication = 0;
+  let testDuplication = 0;
   let singleFile = 0;
 
   for (const r of ranked) {
-    const band = BANDS.findIndex(([, floor]) => r.recoverableLines >= floor);
-    // `findIndex` cannot miss: the last band's floor is 0 and recoverableLines
-    // is clamped at 0. Guarded anyway so a future edit to BANDS that breaks
-    // that cannot silently drop candidates out of the census.
-    if (band !== -1) bands[band]!.count += 1;
-    if (r.cluster.occurrences.every((o) => isTestPath(o.filePath))) testOnly += 1;
+    if (isTestMajority(r.cluster)) {
+      testDuplication += 1;
+    } else {
+      duplication += 1;
+      // Banded over production candidates only, matching the section the
+      // histogram sits under. Mixing test scaffolding back in would restate
+      // the pile the split exists to separate.
+      const band = BANDS.findIndex(([, floor]) => r.recoverableLines >= floor);
+      // `findIndex` cannot miss: the last band's floor is 0 and recoverableLines
+      // is clamped at 0. Guarded anyway so a future edit to BANDS that breaks
+      // that cannot silently drop candidates out of the census.
+      if (band !== -1) bands[band]!.count += 1;
+    }
     if (new Set(r.cluster.occurrences.map((o) => o.filePath)).size === 1) singleFile += 1;
   }
 
   return {
-    duplication: ranked.length,
+    duplication,
+    testDuplication,
     cycles,
     // An all-zero band is noise in a table whose job is to be scanned.
     bands: bands.filter((b) => b.count > 0),
-    testOnly,
     singleFile,
   };
 }

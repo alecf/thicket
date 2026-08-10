@@ -82,9 +82,10 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [],
+  testDuplication: [],
   cycles: [],
   totalFindings: 0,
-  census: { duplication: 0, cycles: 0, bands: [], testOnly: 0, singleFile: 0 },
+  census: { duplication: 0, cycles: 0, bands: [], testDuplication: 0, singleFile: 0 },
 };
 
 describe("renderMarkdown", () => {
@@ -92,7 +93,7 @@ describe("renderMarkdown", () => {
     const out = renderMarkdown({
       ...base,
       totalFindings: 495,
-      census: { duplication: 494, cycles: 1, bands: [], testOnly: 0, singleFile: 0 },
+      census: { duplication: 494, cycles: 1, bands: [], testDuplication: 0, singleFile: 0 },
     });
     expect(out).toMatch(/of 495/);
     expect(out).toContain("495 of 495 findings are not shown above.");
@@ -232,7 +233,9 @@ describe("renderMarkdown", () => {
   it("emits fewer findings under a small budget and states the true omitted count", () => {
     const duplication = Array.from({ length: 20 }, (_, i) => ranked(`THK-DUP-${i}`, {}, 100 - i));
     const full = renderMarkdown({ ...base, duplication, totalFindings: 20 });
-    const tight = renderMarkdown({ ...base, duplication, totalFindings: 20, budgetTokens: 200 });
+    // Tight enough to bite, loose enough to fit the header, the Summary and
+    // the Omitted section, which are reserved before any finding is priced.
+    const tight = renderMarkdown({ ...base, duplication, totalFindings: 20, budgetTokens: 320 });
 
     expect(full).toMatch(/\| findings \| 20 of 20 shown \|/);
     expect(full).not.toMatch(/## Omitted/);
@@ -243,7 +246,7 @@ describe("renderMarkdown", () => {
     expect(tight).toContain(`| findings | ${emitted} of 20 shown |`);
     expect(tight).toContain(`${20 - emitted} of 20 findings are not shown above.`);
     // The whole report, omitted line included, must fit the budget.
-    expect(Math.ceil(tight.length / 4)).toBeLessThanOrEqual(200);
+    expect(Math.ceil(tight.length / 4)).toBeLessThanOrEqual(320);
   });
 
   it("keeps the header and summary even when the budget cannot fit one finding", () => {
@@ -258,6 +261,49 @@ describe("renderMarkdown", () => {
     expect(out).toContain("| findings | 0 of 1 shown |");
     expect(out).toContain("1 of 1 findings are not shown above.");
     expect(out).not.toContain("THK-DUP-1");
+  });
+
+  it("keeps test duplication in a section of its own, below production work", () => {
+    // 10 of the top 40 on a real application were test scaffolding -- 231
+    // copies of `{ info: vi.fn(), warn: vi.fn() }` and the like. No setting of
+    // the test weight fixed that without also discarding real findings, so the
+    // two kinds of work stopped competing for a slot instead.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [ranked("THK-DUP-src")],
+      testDuplication: [ranked("THK-DUP-mock")],
+      totalFindings: 2,
+      census: { duplication: 1, cycles: 0, bands: [], testDuplication: 1, singleFile: 0 },
+    });
+    expect(out).toContain("## Test duplication");
+    expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Test duplication"));
+    expect(out.indexOf("THK-DUP-src")).toBeLessThan(out.indexOf("THK-DUP-mock"));
+  });
+
+  it("spends a tight budget on production duplication before test duplication", () => {
+    // The ordering above is also the truncation order: under pressure the
+    // report keeps the work it exists to rank.
+    const out = renderMarkdown({
+      ...base,
+      duplication: Array.from({ length: 10 }, (_, i) => ranked(`THK-DUP-src${i}`, {}, 100 - i)),
+      testDuplication: [ranked("THK-DUP-mock")],
+      totalFindings: 11,
+      census: { duplication: 10, cycles: 0, bands: [], testDuplication: 1, singleFile: 0 },
+      budgetTokens: 400,
+    });
+    expect(out).toContain("THK-DUP-src0");
+    expect(out).not.toContain("THK-DUP-mock");
+  });
+
+  it("names the test section even when production duplication is empty", () => {
+    const out = renderMarkdown({
+      ...base,
+      testDuplication: [ranked("THK-DUP-mock")],
+      totalFindings: 2,
+      census: { duplication: 0, cycles: 0, bands: [], testDuplication: 2, singleFile: 0 },
+    });
+    expect(out).toContain("## Test duplication");
+    expect(out).not.toContain("## Duplication\n");
   });
 
   it("breaks the omitted tail down by category and by size", () => {
@@ -279,7 +325,7 @@ describe("renderMarkdown", () => {
           { label: "30–99", count: 1612 },
           { label: "1–3", count: 5598 },
         ],
-        testOnly: 9389,
+        testDuplication: 9389,
         singleFile: 9382,
       },
     });
@@ -289,8 +335,8 @@ describe("renderMarkdown", () => {
     expect(out).toContain("| module tangle | 2 | 0 |");
     expect(out).toContain("| 100+ | 210 |");
     expect(out).toContain("| 1–3 | 5598 |");
-    expect(out).toContain("9389 duplicate only between test files");
-    expect(out).toContain("9382 repeat inside a single file");
+    expect(out).toContain("| test duplication | 9389 | 0 |");
+    expect(out).toContain("9382 of those candidates repeat inside a single file");
   });
 
   it("counts shown cycles against the tangle row, not the duplication row", () => {
@@ -309,7 +355,7 @@ describe("renderMarkdown", () => {
         },
       ],
       totalFindings: 50,
-      census: { duplication: 47, cycles: 3, bands: [], testOnly: 0, singleFile: 0 },
+      census: { duplication: 47, cycles: 3, bands: [], testDuplication: 0, singleFile: 0 },
     });
     expect(out).toContain("| duplication | 47 | 1 |");
     expect(out).toContain("| module tangle | 3 | 1 |");
@@ -320,7 +366,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [ranked("THK-DUP-1")],
       totalFindings: 1,
-      census: { duplication: 1, cycles: 0, bands: [{ label: "10–29", count: 1 }], testOnly: 0, singleFile: 0 },
+      census: { duplication: 1, cycles: 0, bands: [{ label: "10–29", count: 1 }], testDuplication: 0, singleFile: 0 },
     });
     expect(out).not.toContain("## Omitted");
   });

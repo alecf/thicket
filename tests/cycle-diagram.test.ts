@@ -36,9 +36,10 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [],
+  testDuplication: [],
   cycles: [],
   totalFindings: 1,
-  census: { duplication: 0, cycles: 1, bands: [], testOnly: 0, singleFile: 0 },
+  census: { duplication: 0, cycles: 1, bands: [], testDuplication: 0, singleFile: 0 },
 };
 
 /** The mermaid source of the first diagram in a report, fence excluded. */

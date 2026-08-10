@@ -52,6 +52,7 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [ranked("THK-DUP-1")],
+  testDuplication: [],
   cycles: [
     {
       id: "THK-CYC-1",
@@ -64,7 +65,7 @@ const base: ReportInput = {
     },
   ],
   totalFindings: 2,
-  census: { duplication: 1, cycles: 1, bands: [{ label: "10–29", count: 1 }], testOnly: 0, singleFile: 0 },
+  census: { duplication: 1, cycles: 1, bands: [{ label: "10–29", count: 1 }], testDuplication: 0, singleFile: 0 },
 };
 
 /**

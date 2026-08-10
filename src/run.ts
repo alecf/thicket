@@ -12,7 +12,7 @@ import { findingId } from "./report/findings.js";
 import { canonicalKind } from "./report/kinds.js";
 import { census, type Census } from "./report/census.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
-import { rankClusters, subsume, type Ranked } from "./report/rank.js";
+import { isTestMajority, rankClusters, subsume, type Ranked } from "./report/rank.js";
 import { VERSION } from "./version.js";
 
 export interface RunOptions {
@@ -110,6 +110,22 @@ const DEFAULT_MAX_FINDINGS = 40;
  * cap stops one minified or generated line from flooding it.
  */
 const EXCERPT_LINES = 3;
+
+/**
+ * Slots the test-duplication section gets, as a share of the production
+ * section's.
+ *
+ * Small on purpose. Test duplication is real work -- 231 copies of a mock
+ * logger wants a helper -- but it is not the work this report exists to rank,
+ * and a handful of entries is enough to say "your test setup has an
+ * abstraction missing". Being wrong here costs a few slots in a secondary
+ * section rather than reordering the report.
+ */
+const TEST_FINDINGS_SHARE = 8;
+
+function testFindings(maxFindings: number): number {
+  return Math.max(1, Math.round(maxFindings / TEST_FINDINGS_SHARE));
+}
 const EXCERPT_COLUMNS = 100;
 
 /**
@@ -195,10 +211,20 @@ export async function runReport(
       };
     });
 
+    // Two sections with two budgets, rather than one ranking that has to
+    // arbitrate between them. Test scaffolding took 10 of the top 40 slots on a
+    // real application -- 231 copies of `{ info: vi.fn(), warn: vi.fn() }` and
+    // the like -- and no setting of the test weight fixed that without also
+    // discarding real findings: the score curve is smooth, so every threshold
+    // was an arbitrary point on it. Splitting the sections makes the question
+    // moot, because the two kinds of work no longer compete for a slot.
+    const production = ranked.filter((r) => !isTestMajority(r.cluster));
+    const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
+
     // Excerpts are resolved only for what the report will print: the lookup
     // needs the file texts, and a cluster can span a hundred files.
     const byPath = new Map(files.map((f) => [f.path, f.sourceFile.text]));
-    const emitted = ranked.slice(0, maxFindings).map((r) => {
+    const withExcerpt = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;
       const text = byPath.get(first.filePath);
       if (text === undefined) return r;
@@ -209,7 +235,9 @@ export async function runReport(
           maxColumns: EXCERPT_COLUMNS,
         }),
       };
-    });
+    };
+    const emitted = production.slice(0, maxFindings).map(withExcerpt);
+    const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(withExcerpt);
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
     const totalFindings = ranked.length + cycles.length;
 
@@ -232,6 +260,7 @@ export async function runReport(
       },
       scope,
       duplication: emitted,
+      testDuplication: emittedTests,
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
       census: census(ranked, cycles.length),
@@ -252,7 +281,7 @@ export async function runReport(
         moduleCount: input.moduleCount,
         metrics: input.metrics,
         scope,
-        duplication: emitted.map((r) => ({
+        duplication: [...emitted, ...emittedTests].map((r) => ({
           id: r.cluster.id,
           shapeHash: r.shapeHash,
           score: r.score,

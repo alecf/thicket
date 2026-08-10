@@ -89,3 +89,15 @@ export function monorepoConfigs(): string[] {
     resolve(monorepoRoot(), "packages/b/tsconfig.json"),
   ];
 }
+
+/**
+ * A fixture where the highest-scoring cluster in the codebase is test
+ * scaffolding: identical mock-logger setup in four `__tests__` files, against
+ * one production clone shared by two source files. On score alone the
+ * scaffolding wins, which is what made 10 of the top 40 findings on a real
+ * application test setup. The report must still lead with the production
+ * clone, because the two live in separate sections.
+ */
+export function testSplitConfig(): string {
+  return resolve(here, "fixtures/testsplit/tsconfig.json");
+}
