@@ -144,6 +144,15 @@ export function driftConfig(): string {
   return resolve(here, "fixtures/drift/tsconfig.json");
 }
 
+/**
+ * `app -> api -> app`, where every binding `app` takes from `api` is forwarded
+ * by `api/errors.ts` from `core`. The edge is routing, not dependency, and
+ * repointing the specifier deletes it without changing the program.
+ */
+export function passThroughConfig(): string {
+  return resolve(here, "fixtures/passthrough/tsconfig.json");
+}
+
 export function typeCutConfig(): string {
   return resolve(here, "fixtures/typecut/tsconfig.json");
 }

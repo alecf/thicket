@@ -6,6 +6,7 @@ import {
   emptyConfig,
   fixtureConfig,
   importsFixtureConfig,
+  passThroughConfig,
   tangleConfig,
   typeCutConfig,
   testSplitConfig,
@@ -369,5 +370,65 @@ describe("whether consolidating the copies would buy anything", () => {
     expect(json.duplication[1]!.occurrences).toHaveLength(30);
     expect(where(1)).toBe("project");
     expect(where(0)).toBe("specs");
+  });
+});
+
+describe("dissolving a cycle instead of cutting it", () => {
+  it("names the edge that is routing rather than dependency", async () => {
+    // The general form of the barrel problem, without special-casing barrels.
+    // `app -> api` exists only because `api/errors.ts` forwards what `app`
+    // imports from `core`, so the dependency is on `core` and the specifier is
+    // pointing at the wrong file. Repointing it removes the edge and changes
+    // nothing: a re-export is the same binding. On a real 12-module tangle
+    // four inbound edges to one module were entirely this.
+    const { json, markdown } = await runReport({
+      config: passThroughConfig(),
+      granularity: 2,
+      minNodes: 100,
+    });
+    const cycle = json.cycles[0]!;
+    expect(cycle.modules.sort()).toEqual(["api", "app"]);
+    expect(cycle.dissolves).toHaveLength(1);
+    const [d] = cycle.dissolves!;
+    expect({ from: d!.from, to: d!.to }).toEqual({ from: "app", to: "api" });
+    expect(d!.passThrough).toBe(2);
+    expect(d!.origin).toBe("packages/core/errors.ts");
+    expect(markdown).toContain("- **dissolve `app` → `api`:** all 2 imports pass through");
+    expect(markdown).toContain("`packages/core/errors.ts`");
+  });
+
+  it("does not dissolve a package's own entry point", async () => {
+    // `core/index.ts` forwards `core/errors.ts`, so every import through it is
+    // 100% pass-through -- and repointing at the internal file would reach past
+    // a boundary that exists on purpose. What makes the other case dissolvable
+    // is not that it is a barrel, but that what it forwards lives in ANOTHER
+    // module. Keeping the rule on that distinction is what stops this from
+    // becoming a code-style opinion about barrel files.
+    const { json } = await runReport({
+      config: passThroughConfig(),
+      granularity: 2,
+      minNodes: 100,
+    });
+    // `mid -> core` is 100% pass-through and sits in a real cycle, so the fix
+    // chooser genuinely considers it and must decline.
+    const midCore = json.cycles.find((c) => c.modules.includes("mid"))!;
+    expect(midCore.modules.sort()).toEqual(["core", "mid"]);
+    const edge = midCore.edges.find((e) => e.from === "mid" && e.to === "core")!;
+    expect(edge.passThrough).toBe(edge.weight);
+    expect(midCore.dissolves).toEqual([]);
+  });
+
+  it("suggests no cut once dissolving already breaks the cycle", async () => {
+    // A cut is a design decision and a dissolve is a find-and-replace. Once
+    // the free fix is enough, proposing the expensive one on top of it is
+    // asking for work that has already been done.
+    const { json } = await runReport({
+      config: passThroughConfig(),
+      granularity: 2,
+      minNodes: 100,
+    });
+    const cycle = json.cycles.find((c) => c.modules.includes("app"))!;
+    expect(cycle.cuts).toEqual([]);
+    expect(cycle.residual).toBe(1);
   });
 });

@@ -134,6 +134,8 @@ describe("buildModuleGraph", () => {
         weight: 2,
         files: ["a/src/index.ts"],
         erased: 1,
+        topTarget: { path: "shared/src/util.ts", weight: 2 },
+        passThrough: 0,
         typeOnly: false,
       },
       {
@@ -142,6 +144,8 @@ describe("buildModuleGraph", () => {
         weight: 2,
         files: ["b/src/index.ts"],
         erased: 1,
+        topTarget: { path: "shared/src/util.ts", weight: 2 },
+        passThrough: 0,
         typeOnly: false,
       },
     ]);
@@ -166,6 +170,11 @@ describe("buildModuleGraph", () => {
         weight: 1,
         files: ["packages/effect/register.ts"],
         erased: 1,
+        // A tie -- the side-effect import of `consts.ts` counts 1 and the
+        // type-only import of `types.ts` counts 1 -- broken by path, so the
+        // answer does not depend on which the file listed first.
+        topTarget: { path: "packages/model/consts.ts", weight: 1 },
+        passThrough: 0,
         typeOnly: false,
       },
       {
@@ -174,6 +183,8 @@ describe("buildModuleGraph", () => {
         weight: 1,
         files: ["packages/model/uses.ts"],
         erased: 0,
+        topTarget: { path: "packages/pure/describe.ts", weight: 1 },
+        passThrough: 0,
         typeOnly: false,
       },
       {
@@ -182,6 +193,8 @@ describe("buildModuleGraph", () => {
         weight: 1,
         files: ["packages/pure/describe.ts"],
         erased: 1,
+        topTarget: { path: "packages/model/types.ts", weight: 1 },
+        passThrough: 0,
         typeOnly: true,
       },
       // One value import beside one type-only import: still a real dependency.
@@ -191,9 +204,33 @@ describe("buildModuleGraph", () => {
         weight: 4,
         files: ["packages/view/render.ts"],
         erased: 2,
+        topTarget: { path: "packages/model/types.ts", weight: 3 },
+        passThrough: 0,
         typeOnly: false,
       },
     ]);
+  });
+
+  it("names the file most of an edge lands on, and how much of it", async () => {
+    // An edge is a bare number until you know whether it is one import or two
+    // hundred. On a real 12-module tangle `actions -> app` was 45 import sites
+    // ALL landing on one re-export file -- a one-specifier rewrite that
+    // deletes the edge -- while a 3-site edge was three unrelated hooks and a
+    // redesign. The cut chooser ranked the second above the first.
+    const project = await openProject(typeOnlyConfig());
+    const graph = buildModuleGraph(project, { granularity: 2 });
+    const viewToModel = graph.edges.find((e) => e.from === "view" && e.to === "model")!;
+    // 3 of the 4 bindings come from `types.ts`, one from `consts.ts`.
+    expect(viewToModel.topTarget).toEqual({ path: "packages/model/types.ts", weight: 3 });
+  });
+
+  it("never reports a top target heavier than the edge itself", async () => {
+    const project = await openProject(monorepoConfigs());
+    const graph = buildModuleGraph(project);
+    for (const e of graph.edges) {
+      expect(e.topTarget.weight).toBeGreaterThan(0);
+      expect(e.topTarget.weight).toBeLessThanOrEqual(e.weight);
+    }
   });
 
   it("does not erase an edge whose only unerased import binds no names", async () => {

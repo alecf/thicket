@@ -18,6 +18,8 @@ const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge
   weight,
   files: [`${from}/importer.ts`],
   erased: 0,
+  topTarget: { path: `${to}/index.ts`, weight },
+  passThrough: 0,
   typeOnly: false,
   ...over,
 });
@@ -470,6 +472,51 @@ describe("the cycle diagram", () => {
     // Every module reachable in the chart, none dropped at the boundary.
     const named = new Set(drawn.flatMap((l) => l.match(/m\d\d/g) ?? []));
     expect(named.size).toBe(20);
+  });
+});
+
+describe("dissolving an edge rather than cutting it", () => {
+  const routing = (over: Partial<TangleEdge> = {}): TangleEdge => ({
+    ...edge("actions", "app", 45),
+    topTarget: { path: "apps/web/app/api/errors.ts", weight: 45 },
+    passThrough: 45,
+    origin: "apps/web/lib/errors.ts",
+    ...over,
+  });
+
+  it("names what to repoint the specifier at", () => {
+    const out = render({ ...twoModule, dissolves: [routing()], cuts: [] });
+    expect(out).toContain(
+      "- **dissolve `actions` → `app`:** all 45 imports pass through" +
+        " `apps/web/app/api/errors.ts` to `apps/web/lib/errors.ts`.",
+    );
+  });
+
+  it("says how much of a partly-routing edge passes through", () => {
+    const out = render({ ...twoModule, dissolves: [routing({ weight: 81, passThrough: 72 })], cuts: [] });
+    expect(out).toContain("72 of 81 imports pass through");
+  });
+
+  it("puts dissolves above the cut, because one is free and the other is a decision", () => {
+    const out = render({ ...twoModule, dissolves: [routing()] });
+    expect(out.indexOf("**dissolve")).toBeLessThan(out.indexOf("**suggested cut"));
+  });
+
+  it("attributes the residual to everything listed, not to the cut alone", () => {
+    const withDissolve = render({ ...twoModule, dissolves: [routing()], residual: 4 });
+    expect(withDissolve).toContain("- **leaves:** after all of the above 4 of 2 modules");
+    // ...and says nothing of the sort when the cut is the only fix offered.
+    expect(render({ ...twoModule, residual: 4 })).toContain("- **leaves:** 4 of 2 modules");
+  });
+
+  it("agrees with itself on one further edge and several", () => {
+    const five = Array.from({ length: 5 }, (_, i) => routing({ from: `m${i}` }));
+    expect(render({ ...twoModule, dissolves: five, cuts: [] })).toContain(
+      "and 1 further edge that dissolves the same way",
+    );
+    expect(render({ ...twoModule, dissolves: [...five, routing({ from: "m9" })], cuts: [] })).toContain(
+      "and 2 further edges that dissolve the same way",
+    );
   });
 });
 

@@ -264,11 +264,17 @@ export async function runReport(
         },
         (p) => graph.moduleOf[p],
       );
-      const { cuts, residual } = suggestCuts(modules, inner, cycles.crossing.count);
+      const { dissolves, cuts, residual } = suggestFixes(
+        modules,
+        inner,
+        cycles.crossing.count,
+        graph.moduleOf,
+      );
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
         modules,
         edges: inner,
+        dissolves,
         cuts,
         residual,
         fileCycles: cycles,
@@ -511,12 +517,69 @@ function reweight<T extends Ranked>(
  * the component costs the reader a refactor and buys nothing, and `residual`
  * then reports the component unchanged.
  */
+/**
+ * Share of an edge that must be re-exported from outside the target before the
+ * edge counts as routing rather than dependency.
+ *
+ * Below 1.0 because a real re-export file is rarely pure: the one that carried
+ * four inbound edges of a 12-module tangle forwarded seven classes and defined
+ * an eighth. An edge that is 90% forwarded still collapses to a specifier
+ * rewrite plus one genuine move, which is a different order of work from a cut.
+ */
+const DISSOLVE_SHARE = 0.8;
+
+/**
+ * What to do about a tangle, cheapest first.
+ *
+ * Dissolves come before cuts because they are not the same kind of act. A cut
+ * is a design decision -- invert a dependency, move code, agree a layering. A
+ * dissolve is a find-and-replace: the imports crossing the edge are re-exported
+ * from somewhere else, so repointing the specifier at the origin removes the
+ * edge and changes nothing, a re-export being the same binding by definition.
+ * On a real 12-module tangle four inbound edges to one module were entirely
+ * this, and the agent that found it by hand called it the whole story of the
+ * SCC. A cut is then suggested only for what survives dissolution.
+ */
+function suggestFixes(
+  component: readonly string[],
+  inner: readonly ModuleEdge[],
+  crossingFileCycles: number,
+  moduleOf: Record<string, string>,
+): { dissolves: ModuleEdge[]; cuts: ModuleEdge[]; residual: number } {
+  // Routing edges: nearly everything on them is forwarded, and forwarded from
+  // outside the module being depended on -- a barrel re-exporting its own
+  // package's internals is not routing, it is that package's API surface.
+  const dissolves = inner
+    .filter((e) => {
+      if (e.weight === 0 || e.passThrough / e.weight < DISSOLVE_SHARE) return false;
+      const origin = e.origin === undefined ? undefined : moduleOf[e.origin];
+      return origin !== undefined && origin !== e.to;
+    })
+    .sort(
+      (a, b) =>
+        b.weight - a.weight || compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
+    );
+
+  const dissolved = new Set(dissolves.map((e) => `${e.from} -> ${e.to}`));
+  const surviving = inner.filter((e) => !dissolved.has(`${e.from} -> ${e.to}`));
+  const afterDissolve = largestScc(component, surviving);
+
+  const { cuts, residual } = suggestCuts(
+    component,
+    surviving,
+    crossingFileCycles,
+    afterDissolve,
+  );
+  return { dissolves, cuts, residual };
+}
+
 function suggestCuts(
   component: readonly string[],
   inner: readonly ModuleEdge[],
   crossingFileCycles: number,
+  startingFrom: number,
 ): { cuts: ModuleEdge[]; residual: number } {
-  const unchanged = { cuts: [], residual: component.length };
+  const unchanged = { cuts: [], residual: startingFrom };
   if (component.length > MAX_CUT_SEARCH_MODULES) return unchanged;
   // Nothing to cut when nothing is circular. An SCC with no file-level cycle
   // crossing its modules is a product of the grouping, so severing an edge
@@ -546,7 +609,9 @@ function suggestCuts(
   let best: { edge: ModuleEdge; residual: number } | undefined;
   for (const candidate of candidates) {
     const residual = largestSccWithout(component, inner, candidate);
-    if (residual >= component.length) continue;
+    // Measured against what dissolution already achieved, so a cut is only
+    // suggested when it buys something the free fix did not.
+    if (residual >= startingFrom) continue;
     // Strictly better only, so among equally dissolving cuts the cheapest
     // wins -- `candidates` is already in ascending cost order.
     if (best === undefined || residual < best.residual) best = { edge: candidate, residual };
@@ -563,10 +628,15 @@ function largestSccWithout(
   inner: readonly ModuleEdge[],
   omit: ModuleEdge,
 ): number {
+  return largestScc(
+    component,
+    inner.filter((e) => e !== omit),
+  );
+}
+
+/** Size of the largest SCC `component` still has over `edges`. */
+function largestScc(component: readonly string[], edges: readonly ModuleEdge[]): number {
   const adjacency = new Map<string, string[]>(component.map((m) => [m, []]));
-  for (const e of inner) {
-    if (e === omit) continue;
-    adjacency.get(e.from)!.push(e.to);
-  }
+  for (const e of edges) adjacency.get(e.from)!.push(e.to);
   return stronglyConnected(component, adjacency).reduce((max, c) => Math.max(max, c.length), 0);
 }

@@ -20,6 +20,8 @@ const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge
   weight,
   files: [`${from}/importer.ts`],
   erased: 0,
+  topTarget: { path: `${to}/index.ts`, weight },
+  passThrough: 0,
   typeOnly: false,
   ...over,
 });

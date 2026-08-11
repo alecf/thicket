@@ -22,6 +22,12 @@ export interface TangleEdge {
   files: string[];
   /** How many of `weight` are erased at compile time. */
   erased: number;
+  /** The single file most of this edge lands on, and how much of it. */
+  topTarget: { path: string; weight: number };
+  /** How many of `weight` the target merely forwards from somewhere else. */
+  passThrough: number;
+  /** Where it forwards them from. */
+  origin?: string;
   /** ALL of it erased, so not a runtime dependency at all. */
   typeOnly: boolean;
 }
@@ -36,6 +42,15 @@ export interface CycleFinding {
    * and the JSON sidecar are guaranteed to describe the same graph.
    */
   edges: TangleEdge[];
+  /**
+   * Edges that are routing rather than dependency: nearly everything crossing
+   * them is re-exported from outside `to`. Repointing those specifiers at the
+   * origin removes the edge with no semantic change, which is strictly cheaper
+   * than any cut — there is no design decision to make. Listed before cuts, and
+   * a cut is only suggested for what survives them. Optional so a caller
+   * assembling a finding by hand need not compute it.
+   */
+  dissolves?: TangleEdge[];
   cuts: TangleEdge[];
   /**
    * Modules still mutually dependent after the suggested cuts, i.e. the
@@ -690,6 +705,8 @@ function cycleBlock(cycle: CycleFinding): string[] {
   // never a chart with edges left out.
   lines.push(...(mermaidCycle(scoped) ?? memberFallback(scoped)));
   lines.push(...fileCycleLines(cycle));
+  // Dissolves first: they cost a find-and-replace, and a cut costs a decision.
+  lines.push(...dissolveLines(scoped));
   lines.push(...cutLines(scoped));
   lines.push("");
   return lines;
@@ -736,6 +753,7 @@ function relativize(cycle: CycleFinding, prefix: string): CycleFinding {
     ...cycle,
     modules: cycle.modules.map(strip),
     edges: cycle.edges.map(edge),
+    dissolves: cycle.dissolves?.map(edge),
     cuts: cycle.cuts.map(edge),
   };
 }
@@ -797,6 +815,46 @@ function fileCycleLines(cycle: CycleFinding): string[] {
  */
 const MAX_CUT_FILES_NAMED = 3;
 
+/**
+ * Edges named as dissolvable before the rest are counted. These are the cheap
+ * wins and a reader will act on all of them, but a wall of them is still a wall.
+ */
+const MAX_DISSOLVES_NAMED = 4;
+
+/**
+ * Edges that are routing rather than dependency, and what to repoint them at.
+ *
+ * Printed above the cut because it is a different kind of act: a cut is a
+ * design decision, a dissolve is a find-and-replace that changes nothing. A
+ * re-export is the same binding, so importing the origin directly is the same
+ * program.
+ */
+function dissolveLines(cycle: CycleFinding): string[] {
+  const dissolves = cycle.dissolves ?? [];
+  if (dissolves.length === 0) return [];
+
+  const shown = dissolves.slice(0, MAX_DISSOLVES_NAMED);
+  const lines = shown.map((e) => {
+    const all = e.passThrough >= e.weight;
+    const how = all ? `all ${e.weight}` : `${e.passThrough} of ${e.weight}`;
+    const via = `\`${e.topTarget.path}\``;
+    const to = e.origin === undefined ? "elsewhere" : `\`${e.origin}\``;
+    return (
+      `- **dissolve \`${e.from}\` → \`${e.to}\`:** ${how} imports pass through` +
+      ` ${via} to ${to}. Repointing the specifier removes the edge —` +
+      ` a re-export is the same binding, so nothing changes but the path.`
+    );
+  });
+  const rest = dissolves.length - shown.length;
+  if (rest > 0) {
+    lines.push(
+      `- **and ${rest} further edge${rest === 1 ? "" : "s"}` +
+        ` that dissolve${rest === 1 ? "s" : ""} the same way.**`,
+    );
+  }
+  return lines;
+}
+
 function cutLines(cycle: CycleFinding): string[] {
   if (cycle.cuts.length === 0) {
     // Nothing is circular, so there is nothing to cut. Saying "no single edge
@@ -820,11 +878,16 @@ function cutLines(cycle: CycleFinding): string[] {
 
   // What is left, always. A cut that detaches one leaf and a cut that
   // dissolves the tangle read identically without this line.
+  //
+  // "all of the above" when dissolves precede it, because the residual is
+  // measured after every fix listed -- a reader would otherwise attribute the
+  // whole remainder to the cut alone.
+  const after = (cycle.dissolves?.length ?? 0) > 0 ? " after all of the above" : "";
   out.push(
     cycle.residual <= 1
-      ? `- **leaves:** nothing — this breaks the cycle completely.`
-      : `- **leaves:** ${cycle.residual} of ${cycle.modules.length} modules still mutually` +
-        ` dependent.`,
+      ? `- **leaves:** nothing${after} — this breaks the cycle completely.`
+      : `- **leaves:**${after} ${cycle.residual} of ${cycle.modules.length} modules still` +
+        ` mutually dependent.`,
   );
   return out;
 }

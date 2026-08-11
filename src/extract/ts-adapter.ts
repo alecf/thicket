@@ -50,6 +50,20 @@ export interface ImportDetail {
    * a reader would be told a types file move breaks the cycle.
    */
   erasable: boolean;
+  /**
+   * How many of `symbols` the target does not define, but forwards from
+   * somewhere else.
+   *
+   * These are not a dependency on `target` at all — they are a dependency on
+   * whatever it re-exports, routed through it. Which means the edge they make
+   * can be DISSOLVED rather than cut: repoint the specifier at the origin and
+   * it disappears, with no semantic change, because a re-export is the same
+   * binding by definition. On a real 12-module tangle four inbound edges to
+   * one module were 100% this, and the fix was a find-and-replace.
+   */
+  passThrough: number;
+  /** Where most of those forwarded bindings actually come from, if any do. */
+  origin?: string;
 }
 
 export interface Project {
@@ -84,9 +98,13 @@ export interface Project {
  * Kinds are matched by enum VALUE. `SyntaxKind[k]` reverse-maps to range-marker
  * aliases for several kinds, so name matching silently misses cases.
  */
-function bindingCount(decl: Node): { count: number; erased: number } {
+function bindingCount(decl: Node): { count: number; erased: number; names: string[] } {
   let count = 0;
   let erased = 0;
+  // Names as the IMPORTING file sees them for a plain import, and as the
+  // exporting file publishes them for a re-export -- which is what has to be
+  // looked up in the target's export table.
+  const names: string[] = [];
   let named = false;
   // `import type { A }` / `export type { A }` puts the marker on the clause or
   // the declaration, where it is a flag rather than a child node, and it
@@ -100,14 +118,17 @@ function bindingCount(decl: Node): { count: number; erased: number } {
       forEachChildSafe(child, (binding) => {
         if (binding.kind === SyntaxKind.Identifier) {
           count += 1; // default import
+          names.push("default");
           if (clauseErased) erased += 1;
         } else if (binding.kind === SyntaxKind.NamespaceImport) {
           count += 1; // * as ns
+          names.push("*");
           if (clauseErased) erased += 1;
         } else if (binding.kind === SyntaxKind.NamedImports) {
           forEachChildSafe(binding, (spec) => {
             if (spec.kind !== SyntaxKind.ImportSpecifier) return;
             count += 1;
+            names.push(importedNameOf(spec));
             // `import { type A, B }` marks the specifier, not the clause.
             if (clauseErased || isTypeOnly(spec)) erased += 1;
           });
@@ -119,11 +140,13 @@ function bindingCount(decl: Node): { count: number; erased: number } {
       forEachChildSafe(child, (spec) => {
         if (spec.kind !== SyntaxKind.ExportSpecifier) return;
         count += 1;
+        names.push(importedNameOf(spec));
         if (wholeDeclErased || isTypeOnly(spec)) erased += 1;
       });
     } else if (child.kind === SyntaxKind.NamespaceExport) {
       named = true;
       count += 1; // `export * as ns from "./x.js"`
+      names.push("*");
       if (wholeDeclErased) erased += 1;
     }
   });
@@ -132,6 +155,7 @@ function bindingCount(decl: Node): { count: number; erased: number } {
   // is the other clause-less form and correctly stays at 0.
   if (!named && decl.kind === SyntaxKind.ExportDeclaration) {
     count = 1;
+    names.push("*");
     if (wholeDeclErased) erased = 1;
   }
   // Both numbers, not the "is it all erased" verdict: a partly erased edge is
@@ -139,7 +163,63 @@ function bindingCount(decl: Node): { count: number; erased: number } {
   // `import "./x.js"` comes back {0, 0} -- a real runtime dependency that must
   // not read as erasable for having nothing to erase, which is why every
   // consumer tests `symbols > 0` before comparing the two.
-  return { count, erased };
+  return { count, erased, names };
+}
+
+/** The most frequent entry, ties broken by name so the answer is stable. */
+function commonest(values: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best = "";
+  let bestCount = 0;
+  for (const [value, count] of [...counts].sort((a, b) => compareStrings(a[0], b[0]))) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+/**
+ * The name a specifier publishes locally: `B` in `{ A as B }`, `A` in `{ A }`.
+ * The LAST identifier, since only the aliased form has two.
+ */
+function localNameOf(spec: Node): string {
+  const identifiers: string[] = [];
+  forEachChildSafe(spec, (child) => {
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+  });
+  return identifiers[identifiers.length - 1] ?? "";
+}
+
+/**
+ * The name an import/export specifier reads out of the module it names.
+ *
+ * For `{ A as B }` that is `A`, not `B`: the local alias is this file's
+ * business, while the lookup happens in the exporting file's table. The AST
+ * gives `propertyName` then `name`, and only the two-identifier form is
+ * aliased -- so the FIRST identifier is always the exported name.
+ */
+function importedNameOf(spec: Node): string {
+  const identifiers: string[] = [];
+  forEachChildSafe(spec, (child) => {
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+  });
+  return identifiers[0] ?? "";
+}
+
+/**
+ * `getText()` behind a guard. It reads back through the source file, which
+ * throws for a synthesized node -- and a throw here would abort the whole
+ * import walk for one unreadable identifier.
+ */
+function nodeText(node: Node): string {
+  try {
+    return node.getText();
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -188,8 +268,8 @@ function reexportSpecifiers(sourceFile: SourceFileNode): { nodes: Node[]; exclus
  */
 function bindingCountsBySpecifier(
   sourceFile: SourceFileNode,
-): Map<Node, { count: number; erased: number }> {
-  const out = new Map<Node, { count: number; erased: number }>();
+): Map<Node, { count: number; erased: number; names: string[] }> {
+  const out = new Map<Node, { count: number; erased: number; names: string[] }>();
   walk(sourceFile, (node) => {
     if (node.kind !== SyntaxKind.ImportDeclaration && node.kind !== SyntaxKind.ExportDeclaration) {
       return;
@@ -388,15 +468,92 @@ export async function openProject(
     return byCanon.get(path.toLowerCase())?.path;
   }
 
+  /**
+   * Exported name -> the file it is forwarded from, for names this file
+   * publishes without defining.
+   *
+   * Covers the two forms that occur in practice:
+   * `export { A } from "./x"` and `import { A } from "./x"; export { A }`.
+   * A bare `export * from "./x"` names nothing, so it is recorded as a
+   * fallback origin used for any name the table does not otherwise explain.
+   *
+   * Memoized: a barrel is consulted once per importer, and there can be
+   * hundreds.
+   */
+  const originCache = new Map<string, { named: Map<string, string>; wildcard: string[] }>();
+  function exportOrigins(file: FileHandle): { named: Map<string, string>; wildcard: string[] } {
+    const cached = originCache.get(file.path);
+    if (cached) return cached;
+
+    const named = new Map<string, string>();
+    const wildcard: string[] = [];
+    // Local name -> file it was imported from, so `export { A }` further down
+    // can be resolved. Built first because declaration order does not bind.
+    const importedFrom = new Map<string, string>();
+
+    walk(file.sourceFile, (node) => {
+      if (node.kind !== SyntaxKind.ImportDeclaration) return;
+      let target: string | undefined;
+      forEachChildSafe(node, (child) => {
+        if (child.kind === SyntaxKind.StringLiteral) target = resolveImport(file, child);
+      });
+      if (target === undefined) return;
+      forEachChildSafe(node, (child) => {
+        if (child.kind !== SyntaxKind.ImportClause) return;
+        forEachChildSafe(child, (binding) => {
+          if (binding.kind !== SyntaxKind.NamedImports) return;
+          forEachChildSafe(binding, (spec) => {
+            if (spec.kind !== SyntaxKind.ImportSpecifier) return;
+            // The LOCAL name, which is what an `export { … }` clause refers to.
+            importedFrom.set(localNameOf(spec), target!);
+          });
+        });
+      });
+    });
+
+    walk(file.sourceFile, (node) => {
+      if (node.kind !== SyntaxKind.ExportDeclaration) return;
+      let target: string | undefined;
+      let clause = false;
+      forEachChildSafe(node, (child) => {
+        if (child.kind === SyntaxKind.StringLiteral) target = resolveImport(file, child);
+      });
+      forEachChildSafe(node, (child) => {
+        if (child.kind === SyntaxKind.NamedExports) {
+          clause = true;
+          forEachChildSafe(child, (spec) => {
+            if (spec.kind !== SyntaxKind.ExportSpecifier) return;
+            const published = localNameOf(spec);
+            // `export { A } from "./x"` states the origin outright;
+            // `export { A }` has to be traced back to how `A` got here.
+            const from = target ?? importedFrom.get(importedNameOf(spec));
+            if (from !== undefined && from !== file.path) named.set(published, from);
+          });
+        } else if (child.kind === SyntaxKind.NamespaceExport) {
+          clause = true;
+        }
+      });
+      // `export * from "./x"`: no names, so it explains anything unaccounted for.
+      if (!clause && target !== undefined && target !== file.path) wildcard.push(target);
+    });
+
+    const out = { named, wildcard };
+    originCache.set(file.path, out);
+    return out;
+  }
+
   function importDetailsOf(file: FileHandle): ImportDetail[] {
     const counts = bindingCountsBySpecifier(file.sourceFile);
-    const byTarget = new Map<string, { symbols: number; erased: number; erasable: boolean }>();
+    const byTarget = new Map<
+      string,
+      { symbols: number; erased: number; erasable: boolean; passThrough: number; origins: string[] }
+    >();
     for (const specifier of file.sourceFile.imports ?? []) {
       const target = resolveImport(file, specifier);
       if (!target || target === file.path) continue;
       // A specifier with no entry is a dynamic `import()` or a `require()`:
       // a real dependency that binds no names statically, and never erasable.
-      const detail = counts.get(specifier as Node) ?? { count: 0, erased: 0 };
+      const detail = counts.get(specifier as Node) ?? { count: 0, erased: 0, names: [] };
       const prior = byTarget.get(target);
       // The counts sum; erasability is vetoed. They are different questions:
       // a side-effect import contributes nothing to either count and must
@@ -406,14 +563,36 @@ export async function openProject(
       // erased/real/erased is 3 bindings of which 2 erase, and both numbers
       // survive -- deciding per declaration, or letting the last one win,
       // loses the middle import entirely.
+      // How much of this import is not really a dependency on `target`, but on
+      // what `target` forwards. Skipped for a namespace import, which takes the
+      // module as a whole and cannot be repointed at any one origin.
+      const handle = byRel.get(target);
+      const origins: string[] = [];
+      if (handle !== undefined) {
+        const table = exportOrigins(handle);
+        for (const name of detail.names) {
+          if (name === "*") continue;
+          const from = table.named.get(name) ?? (table.wildcard.length === 1 ? table.wildcard[0] : undefined);
+          if (from !== undefined) origins.push(from);
+        }
+      }
       byTarget.set(target, {
         symbols: (prior?.symbols ?? 0) + detail.count,
         erased: (prior?.erased ?? 0) + detail.erased,
         erasable: (prior?.erasable ?? true) && erasable,
+        passThrough: (prior?.passThrough ?? 0) + origins.length,
+        origins: [...(prior?.origins ?? []), ...origins],
       });
     }
     return [...byTarget.entries()]
-      .map(([target, d]) => ({ target, symbols: d.symbols, erased: d.erased, erasable: d.erasable }))
+      .map(([target, d]) => ({
+        target,
+        symbols: d.symbols,
+        erased: d.erased,
+        erasable: d.erasable,
+        passThrough: d.passThrough,
+        ...(d.origins.length > 0 ? { origin: commonest(d.origins) } : {}),
+      }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 

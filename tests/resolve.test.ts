@@ -102,10 +102,10 @@ describe("importDetailsOf", () => {
     // `import { type Point, ORIGIN } from "./util/shared.js"` -> 2
     // `import { scale } from "./gamma.js"`                    -> 1
     expect(project.importDetailsOf(alpha)).toEqual([
-      { target: "src/gamma.ts", symbols: 1, erased: 0, erasable: false },
+      { target: "src/gamma.ts", symbols: 1, erased: 0, erasable: false, passThrough: 0 },
       // `{ type Point, ORIGIN }` mixes an erased binding with a real one, so
       // the dependency survives compilation.
-      { target: "src/util/shared.ts", symbols: 2, erased: 1, erasable: false },
+      { target: "src/util/shared.ts", symbols: 2, erased: 1, erasable: false, passThrough: 0 },
     ]);
   });
 
@@ -119,8 +119,8 @@ describe("importDetailsOf", () => {
     //          `export * as sideNs` = 1.  Total 2 — the side-effect import
     //          alone would still be an edge, at weight 0.
     expect(project.importDetailsOf(main)).toEqual([
-      { target: "src/dep.ts", symbols: 7, erased: 2, erasable: false },
-      { target: "src/side.ts", symbols: 2, erased: 0, erasable: false },
+      { target: "src/dep.ts", symbols: 7, erased: 2, erasable: false, passThrough: 0 },
+      { target: "src/side.ts", symbols: 2, erased: 0, erasable: false, passThrough: 0 },
     ]);
   });
 
@@ -140,6 +140,7 @@ describe("importDetailsOf", () => {
       symbols: 3,
       erased: 2,
       erasable: false,
+      passThrough: 0,
     });
   });
 
@@ -154,7 +155,7 @@ describe("importDetailsOf", () => {
 
     // `import type { Shape }` and nothing else.
     expect(detail("packages/pure/describe.ts")).toEqual([
-      { target: "packages/model/types.ts", symbols: 1, erased: 1, erasable: true },
+      { target: "packages/model/types.ts", symbols: 1, erased: 1, erasable: true, passThrough: 0 },
     ]);
 
     // The same file imported three times, erased / real / erased. Deciding
@@ -162,13 +163,13 @@ describe("importDetailsOf", () => {
     // strength of the trailing `import type` line -- so the ordering here is
     // load-bearing, not incidental.
     expect(detail("packages/view/render.ts")).toEqual([
-      { target: "packages/model/consts.ts", symbols: 1, erased: 0, erasable: false },
-      { target: "packages/model/types.ts", symbols: 3, erased: 2, erasable: false },
+      { target: "packages/model/consts.ts", symbols: 1, erased: 0, erasable: false, passThrough: 0 },
+      { target: "packages/model/types.ts", symbols: 3, erased: 2, erasable: false, passThrough: 0 },
     ]);
 
     // A plain value import is never erasable.
     expect(detail("packages/model/uses.ts")).toEqual([
-      { target: "packages/pure/describe.ts", symbols: 1, erased: 0, erasable: false },
+      { target: "packages/pure/describe.ts", symbols: 1, erased: 0, erasable: false, passThrough: 0 },
     ]);
   });
 
