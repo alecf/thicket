@@ -188,6 +188,13 @@ Above the excerpt, each finding carries two facts about its **surroundings**:
 
   The line is **omitted entirely for a cluster of test files**, where it is a constant dressed as evidence: nothing imports a test file, so `nothing outside the cluster` holds for every such finding and distinguishes none of them.
 
+Findings are also weighted by **whether consolidating them would buy anything**. Copy count measures how much is duplicated; it says nothing about whether merging leaves the code better. Two clusters can look identical to the ranker and have opposite answers:
+
+- 19 observation classes differing only in the strings `loincCode`, `unit` and `junctionKey` hold. Same fields, different values — one concept with a parameter list, which a base class absorbs. Worth ~2200 lines.
+- 193 three-field projections spanning 89 key-sets, 62 appearing exactly once — `{ labOrderId: p.labOrderId, … }` beside `{ average: s.average, … }`. Different fields, so these are different objects that happen to share a syntax template, and the only abstraction available is a generic `pick` no future change can benefit from.
+
+Both are L1 clusters with almost no exactly-identical members, and the second one ranked **second in the report** while two agents asked to act on it independently declined. The discriminator is whether the copies' *field names* drift: same names with different values is one shape parameterized; different names is several shapes wearing one template. Renamed locals do not count — that is what an L1 match already means, and it is extractable. The penalty is graded by the share of field names that drift, and applies to a pool three times the section's size before the slice is taken, because the signal needs token streams the ranker cannot afford across eighteen thousand candidates.
+
 A fourth names **what differs between the copies**:
 
 - **`varies across copies:`** `loincCode` (18), `loincDisplay` (19), `unit` (13), `unitCode` (13)
@@ -247,6 +254,10 @@ The denominator counts hand-written TypeScript only — no `.d.ts`, no generated
 **`propagation cost`** — the density of the module dependency graph's transitive closure: of all *n²* ordered module pairs, the share where the first transitively depends on the second. It is the "change one thing, how much can be affected" number. A module inside a cycle reaches itself, which is why cycles push it up.
 
 **`dependency cycles` / `largest SCC`** — strongly connected components of the module graph with more than one member, via Tarjan. Each is reported with a **suggested cut**: not "there is a cycle" but "removing this edge breaks it", verified by re-running Tarjan on the graph without that edge. When no single edge suffices, the report says so rather than guessing.
+
+No cut is proposed for a tangle **no file-level cycle underlies**. An SCC of modules is a claim about directories; if no file in those modules imports its way back to itself across a boundary, severing an edge removes no cycle that exists. A real 7-module tangle was exactly this, and the cut it used to propose removed zero real cycles.
+
+**Type-only edges are never proposed as cuts.** They are erased at compile time, so cutting one changes nothing that runs. They used to be *preferred*, on the reasoning that moving a types file is the cheapest fix — which produced precisely the wrong recommendation on a real 12-module tangle: a two-symbol `types → models` cut that an agent executed in ten minutes and correctly reported as a no-op, because by the report's own definition that edge was never a runtime dependency. The tangle fixture reproduces this: a package attached to a clique by two `import type` edges is the *best available cut by dissolution* and worth nothing.
 
 The cut is chosen by **how much of the tangle it dissolves**, not by what it costs. Cheapest-edge-that-works reliably finds the least interesting cut — on a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted. Cost is only the tie-break among equally dissolving cuts, and it prefers a type-only edge first (erased at compile time, so the fix is usually moving a types file), then fewest files to edit, then fewest symbols.
 

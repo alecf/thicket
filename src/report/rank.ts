@@ -36,6 +36,13 @@ export interface Ranked {
    * nothing does. Attached alongside the excerpt, for emitted findings only.
    */
   varies?: Variation[];
+  /**
+   * How much of the copies' field vocabulary differs, which is the difference
+   * between one concept parameterized and several concepts sharing a syntax
+   * template. Attached by the re-ranking pass, which has already applied
+   * `driftWeight` to `score`.
+   */
+  fieldDrift?: { varying: number; total: number };
 }
 
 /**
@@ -222,6 +229,40 @@ function median(values: readonly number[]): number {
   // never a half-line the reader cannot find in the source.
   return sorted[Math.floor((sorted.length - 1) / 2)] ?? 0;
 }
+
+/**
+ * Weight a cluster keeps given how much of its field vocabulary drifts.
+ *
+ * Copy count measures how MUCH is duplicated; it says nothing about whether
+ * merging the copies leaves the code better. Two L1 clusters on a real
+ * application had almost no exactly-identical members and opposite verdicts:
+ *
+ * - 19 observation classes differing only in the strings `loincCode`, `unit`
+ *   and `junctionKey` hold. Same fields, different values -- one concept with a
+ *   parameter list. Two agents judged it worth doing, ~2200 lines.
+ * - 193 three-field projections spanning 89 key-sets, 62 appearing exactly
+ *   once. Different fields -- different objects that share a syntax template,
+ *   and the only abstraction available is a generic `pick` nothing can ever
+ *   benefit from. Two agents declined to do it, independently.
+ *
+ * Graded by the share of field names that drift rather than switched on any
+ * drift at all: one renamed key among ten is a near-copy, ten among ten is ten
+ * different objects. A weight and not a filter, for the same reason intra-file
+ * repetition is down-weighted rather than excluded -- a drifting key sometimes
+ * IS the thing to parameterize.
+ */
+export function driftWeight(drift: { varying: number; total: number }): number {
+  if (drift.total === 0) return 1;
+  const share = drift.varying / drift.total;
+  return 1 - (1 - FIELD_DRIFT_FLOOR) * share;
+}
+
+/**
+ * Weight of a cluster whose every field name differs between copies. Set so
+ * such a cluster can still be reported when nothing else competes, but never
+ * outranks duplication that actually consolidates.
+ */
+const FIELD_DRIFT_FLOOR = 0.25;
 
 /**
  * Drop a cluster when a larger one covers the same occurrences -- a fragment

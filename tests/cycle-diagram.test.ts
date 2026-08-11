@@ -472,3 +472,27 @@ describe("the cycle diagram", () => {
     expect(named.size).toBe(20);
   });
 });
+
+describe("what the report proposes doing about a tangle", () => {
+  const withCycles = (crossing: number): CycleFinding["fileCycles"] => ({
+    crossing: { count: crossing, largest: crossing > 0 ? 3 : 0, example: [] },
+    within: { count: 0, largest: 0, example: [] },
+  });
+
+  it("proposes nothing when no file-level cycle crosses the modules", () => {
+    // A cut cannot remove a cycle that does not exist. Printing one two lines
+    // under "nothing here is circular at runtime" invites an agent to spend a
+    // morning on a change that alters nothing that runs -- which is what
+    // happened on a real 7-module tangle.
+    const out = render({ ...twoModule, cuts: [], fileCycles: withCycles(0) });
+    expect(out).toContain("none cross these modules");
+    expect(out).not.toContain("- **suggested cut:**");
+    expect(out).not.toContain("no single edge breaks");
+  });
+
+  it("still says so when a real cycle exists and no single edge breaks it", () => {
+    const out = render({ ...twoModule, cuts: [], fileCycles: withCycles(4) });
+    expect(out).toContain("- **no single edge breaks this cycle**");
+    expect(out).toContain("whichever runtime edge you remove");
+  });
+});

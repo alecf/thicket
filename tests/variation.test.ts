@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { variations } from "../src/report/variation.js";
+import { fieldNameDrift, variations } from "../src/report/variation.js";
 
 /**
  * The token stream of `static readonly <prop> = <value>;`, in the shape
@@ -98,5 +98,73 @@ describe("variations", () => {
     );
     expect(variations(copies)).toHaveLength(6);
     expect(variations(copies)[0]).toEqual({ label: "p0", values: 2 });
+  });
+});
+
+describe("fieldNameDrift", () => {
+  const prop = (name: string, base: string) => [
+    "PropertyAssignment", "(", `Id:${name}`, ")", "(", "PropertyAccessExpression",
+    "(", `Id:${base}`, ")", "(", `Id:${name}`, ")", ")",
+  ];
+
+  it("reports every key varying when the copies are differently-shaped objects", () => {
+    // `{ labOrderId: p.labOrderId, ... }` and `{ average: s.average, ... }` are
+    // both three-field projections and are not copies of one another. On a real
+    // report 193 such expressions clustered as one finding with 89 distinct
+    // key-sets, 62 of them appearing exactly once -- consolidating them yields
+    // a generic no future change can benefit from.
+    const copies = [
+      [...prop("labOrderId", "p"), ...prop("memberId", "p")],
+      [...prop("average", "s"), ...prop("min", "s")],
+    ];
+    expect(fieldNameDrift(copies)).toEqual({ varying: 2, total: 2 });
+  });
+
+  it("reports no drift when the keys are constant and only values vary", () => {
+    // The 19 duplicated observation classes: `loincCode` is the same field in
+    // every copy, and what differs is the string it holds. That is one concept
+    // with a parameter list, and a base class absorbs it.
+    const copies = [
+      ["PropertyDeclaration", "(", "Id:loincCode", ")", "(", 'StringLiteral:"39156-5"', ")"],
+      ["PropertyDeclaration", "(", "Id:loincCode", ")", "(", 'StringLiteral:"41982-0"', ")"],
+    ];
+    expect(fieldNameDrift(copies)).toEqual({ varying: 0, total: 1 });
+  });
+
+  it("does not count a renamed local as a drifting field", () => {
+    // Same logic with different binding names is exactly what an L1 match
+    // means, and it is extractable. Only NAMES OF FIELDS say the copies are
+    // different things.
+    const copies = [
+      ["Block", "(", "VariableDeclaration", "(", "Id:dx", ")", ")"],
+      ["Block", "(", "VariableDeclaration", "(", "Id:deltaX", ")", ")"],
+    ];
+    expect(fieldNameDrift(copies)).toEqual({ varying: 0, total: 0 });
+  });
+
+  it("reports a partial drift as partial", () => {
+    const copies = [
+      [...prop("id", "x"), ...prop("alpha", "x")],
+      [...prop("id", "x"), ...prop("beta", "x")],
+    ];
+    expect(fieldNameDrift(copies)).toEqual({ varying: 1, total: 2 });
+  });
+
+  it("says nothing for a single copy or for streams that do not line up", () => {
+    expect(fieldNameDrift([prop("a", "x")])).toEqual({ varying: 0, total: 0 });
+    expect(fieldNameDrift([prop("a", "x"), ["PropertyAssignment"]])).toEqual({
+      varying: 0,
+      total: 0,
+    });
+  });
+
+  it("counts a method name as a field name", () => {
+    // `{ debug: vi.fn(), info: vi.fn() }` vs `{ setTag: …, setLevel: … }` are
+    // different mocks, not copies.
+    const copies = [
+      ["MethodDeclaration", "(", "Id:debug", ")"],
+      ["MethodDeclaration", "(", "Id:setTag", ")"],
+    ];
+    expect(fieldNameDrift(copies)).toEqual({ varying: 1, total: 1 });
   });
 });

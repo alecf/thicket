@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
 import {
   configTableConfig,
+  driftConfig,
   emptyConfig,
   fixtureConfig,
   importsFixtureConfig,
   tangleConfig,
+  typeCutConfig,
   testSplitConfig,
   typeOnlyConfig,
 } from "./helpers.js";
@@ -167,26 +169,21 @@ describe("runReport", () => {
     expect(markdown).not.toMatch(/^\//m);
   });
 
-  it("prefers the cut that dissolves the most tangle, then the cheapest", async () => {
-    // The old rule took the lowest-weight edge that broke the component at
-    // all, which reliably found the least interesting cut: on a real 7-module
-    // tangle it detached one leaf and left six knotted. Here both edges of the
-    // cycle dissolve it equally, so the tie-break decides -- and it must pick
-    // the type-only one, which is erased at compile time and costs a file
-    // move rather than a dependency inversion.
+  it("proposes no cut for a module cycle that no file cycle underlies", async () => {
+    // `model` and `pure` are mutually dependent as MODULES -- `model/uses.ts`
+    // imports `pure/describe.ts`, which imports `model/types.ts` -- while the
+    // files form a plain chain. Nothing is circular, so severing an edge
+    // removes no cycle that exists. The report used to propose one anyway, and
+    // an agent handed the equivalent finding on a real 7-module tangle spent
+    // its time establishing that the suggested change altered nothing.
     const { json } = await runReport({ config: typeOnlyConfig(), granularity: 2, minNodes: 100 });
     const cycle = json.cycles.find((c) => c.modules.includes("model") && c.modules.includes("pure"));
     expect(cycle).toBeDefined();
     expect(cycle!.modules.sort()).toEqual(["model", "pure"]);
-    expect(cycle!.cuts).toHaveLength(1);
-    expect({ from: cycle!.cuts[0]!.from, to: cycle!.cuts[0]!.to }).toEqual({
-      from: "pure",
-      to: "model",
-    });
-    expect(cycle!.cuts[0]!.typeOnly).toBe(true);
-    // ...and the residual is stated, so "one cut" cannot read as "solved"
-    // when it is not. Here it genuinely is solved.
-    expect(cycle!.residual).toBe(1);
+    expect(cycle!.fileCycles?.crossing.count).toBe(0);
+    expect(cycle!.cuts).toEqual([]);
+    // And the residual is the component unchanged, never a claim of progress.
+    expect(cycle!.residual).toBe(2);
   });
 
   it("takes the cut that dissolves most, not the cheapest one that works", async () => {
@@ -205,6 +202,32 @@ describe("runReport", () => {
     expect([cut.from, cut.to]).not.toContain("leaf");
     // Four modules down to two, rather than the three a leaf cut would leave.
     expect(cycle.residual).toBe(2);
+  });
+
+  it("never proposes a cut that is erased at compile time", async () => {
+    // `shape` sits in the SCC by two `import type` edges and nothing else, so
+    // detaching it is the best cut available BY DISSOLUTION -- four modules
+    // down to three, where every runtime edge leaves all four -- and it is
+    // worth nothing, because neither edge exists at runtime. The chooser used
+    // to PREFER type-only edges on the reasoning that moving a types file is
+    // cheap, which is how a real 12-module tangle got a suggested cut that an
+    // agent executed in ten minutes and correctly called a no-op.
+    const { json, markdown } = await runReport({
+      config: typeCutConfig(),
+      granularity: 2,
+      minNodes: 100,
+    });
+    const cycle = json.cycles[0]!;
+    expect(cycle.modules.sort()).toEqual(["alpha", "beta", "gamma", "shape"]);
+    // The cheap cut exists and is the most dissolving one on offer.
+    const shapeEdges = cycle.edges.filter((e) => e.from === "shape" || e.to === "shape");
+    expect(shapeEdges).toHaveLength(2);
+    expect(shapeEdges.every((e) => e.typeOnly)).toBe(true);
+    // It is not taken, and nothing is proposed in its place, because no
+    // runtime edge breaks the clique.
+    expect(cycle.cuts).toEqual([]);
+    expect(cycle.residual).toBe(4);
+    expect(markdown).toContain("whichever runtime edge you remove");
   });
 
   it("reports the residual honestly when a cut only detaches a leaf", async () => {
@@ -326,5 +349,25 @@ describe("the excerpt", () => {
     // The constants the finding says vary must be visible in the code it shows,
     // or the reader has been told what to look for and not shown where.
     expect(body.join("\n")).toContain("loincDisplay");
+  });
+});
+
+describe("whether consolidating the copies would buy anything", () => {
+  it("ranks a parameterized shape above differently-named ones with more copies", async () => {
+    // Copy count measures how MUCH is duplicated, not whether merging leaves
+    // the code better. The projections here outnumber the spec blocks and each
+    // one differs from the next in every key -- 10 different objects sharing a
+    // syntax template, whose only abstraction is a generic `pick` that no
+    // future change benefits from. The specs are one concept with a parameter
+    // list. On a real application the projection-shaped finding ranked SECOND
+    // in the report and two agents asked to act on it declined.
+    const { json } = await runReport({ config: driftConfig(), cache: false, minNodes: 12 });
+    const where = (i: number) =>
+      json.duplication[i]!.occurrences[0]!.filePath.split("/")[1];
+    // 30 projections against 4 classes: on copies, lines and raw score the
+    // projections win by 108 to 83, and they are the finding no one should do.
+    expect(json.duplication[1]!.occurrences).toHaveLength(30);
+    expect(where(1)).toBe("project");
+    expect(where(0)).toBe("specs");
   });
 });

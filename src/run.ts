@@ -15,9 +15,15 @@ import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
 import { findVariants } from "./report/variants.js";
-import { variations } from "./report/variation.js";
+import { fieldNameDrift, variations } from "./report/variation.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
-import { isTestMajority, rankClusters, subsume, type Ranked } from "./report/rank.js";
+import {
+  driftWeight,
+  isTestMajority,
+  rankClusters,
+  subsume,
+  type Ranked,
+} from "./report/rank.js";
 import { VERSION } from "./version.js";
 
 export interface RunOptions {
@@ -243,9 +249,9 @@ export async function runReport(
       // `graph.edges` is already sorted by (from, to), and filtering preserves
       // that, so the chart's arrow order is fixed by the graph.
       const inner = graph.edges.filter((e) => members.has(e.from) && members.has(e.to));
-      const { cuts, residual } = suggestCuts(modules, inner);
       // Whether anything here is circular at the file level, which is the
-      // difference between a defect and an artifact of how files were grouped.
+      // difference between a defect and an artifact of how files were grouped,
+      // and which decides whether a cut is worth proposing at all.
       // Same Tarjan, one granularity down, over the files of these modules only.
       const componentFiles = files
         .map((f) => f.path)
@@ -258,6 +264,7 @@ export async function runReport(
         },
         (p) => graph.moduleOf[p],
       );
+      const { cuts, residual } = suggestCuts(modules, inner, cycles.crossing.count);
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
         modules,
@@ -275,6 +282,29 @@ export async function runReport(
     // discarding real findings: the score curve is smooth, so every threshold
     // was an arbitrary point on it. Splitting the sections makes the question
     // moot, because the two kinds of work no longer compete for a slot.
+    // Fragments re-extracted rather than read from the cache, so a warm run
+    // compares exactly what a cold one does (AGENTS.md §5). Memoized per file
+    // because a 115-copy cluster would otherwise re-walk 115 ASTs, and two
+    // findings in one file would walk it twice.
+    const fragmentsByFile = new Map<string, ReturnType<typeof extractFragments>>();
+    const fragmentAt = (o: { filePath: string; start: number; end: number }) => {
+      let all = fragmentsByFile.get(o.filePath);
+      if (all === undefined) {
+        const handle = byRelPath.get(o.filePath);
+        all = handle === undefined ? [] : extractFragments(handle, { minNodes, minLines });
+        fragmentsByFile.set(o.filePath, all);
+      }
+      return all.find((f) => f.start === o.start && f.end === o.end);
+    };
+
+    /** L0 token streams of a cluster's copies, or undefined if any is missing. */
+    const streamsOf = (r: Ranked): string[][] | undefined => {
+      const out = r.cluster.occurrences
+        .slice(0, MAX_COPIES_COMPARED)
+        .map((o) => fragmentAt(o)?.tokensL0);
+      return out.some((s) => s === undefined) ? undefined : (out as string[][]);
+    };
+
     const production = ranked.filter((r) => !isTestMajority(r.cluster));
     const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
 
@@ -311,23 +341,10 @@ export async function runReport(
         }),
       };
     };
-    const emitted = production.slice(0, maxFindings).map(decorate);
-    const emittedTests = testDuplication.slice(0, testFindings(maxFindings)).map(decorate);
-
-    // Fragments re-extracted rather than read from the cache, so a warm run
-    // compares exactly what a cold one does (AGENTS.md §5). Memoized per file
-    // because a 115-copy cluster would otherwise re-walk 115 ASTs, and two
-    // findings in one file would walk it twice.
-    const fragmentsByFile = new Map<string, ReturnType<typeof extractFragments>>();
-    const fragmentAt = (o: { filePath: string; start: number; end: number }) => {
-      let all = fragmentsByFile.get(o.filePath);
-      if (all === undefined) {
-        const handle = byRelPath.get(o.filePath);
-        all = handle === undefined ? [] : extractFragments(handle, { minNodes, minLines });
-        fragmentsByFile.set(o.filePath, all);
-      }
-      return all.find((f) => f.start === o.start && f.end === o.end);
-    };
+    const emitted = reweight(production, maxFindings, streamsOf).map(decorate);
+    const emittedTests = reweight(testDuplication, testFindings(maxFindings), streamsOf).map(
+      decorate,
+    );
 
     // What varies between the copies -- the parameter list of the abstraction
     // the finding is asking for. Only emitted findings pay for it.
@@ -434,6 +451,47 @@ export async function runReport(
 }
 
 /**
+ * Candidates re-scored per emitted slot before the slice is taken.
+ *
+ * The field-drift signal needs token streams, and those come from re-extracting
+ * fragments -- affordable for a few dozen findings, not for the eighteen
+ * thousand the ranker sees. So the base ranking picks a pool this many times
+ * the section's size and the penalty reorders within it. Since the penalty only
+ * ever LOWERS a score, a candidate outside the pool would have to beat the
+ * pool's last survivor from below, which three times the slots makes remote.
+ */
+const RERANK_POOL = 3;
+
+/**
+ * Re-score a section's candidates by whether consolidating them would buy
+ * anything, then take the top `slots`.
+ *
+ * Copy count measures how much is duplicated. It does not measure whether
+ * merging the copies leaves the code better, and on a real application the
+ * second-ranked finding was 193 three-field projections spanning 89 distinct
+ * key-sets -- `{ labOrderId: p.labOrderId, … }` beside `{ average: s.average,
+ * … }` -- where the only available abstraction is a generic `pick` that no
+ * future change can benefit from. Two agents asked to act on it declined and
+ * said so. See `fieldNameDrift`.
+ */
+function reweight<T extends Ranked>(
+  candidates: readonly T[],
+  slots: number,
+  streamsOf: (r: Ranked) => string[][] | undefined,
+): T[] {
+  return candidates
+    .slice(0, slots * RERANK_POOL)
+    .map((r) => {
+      const streams = streamsOf(r);
+      if (streams === undefined) return r;
+      const drift = fieldNameDrift(streams);
+      return { ...r, fieldDrift: drift, score: r.score * driftWeight(drift) };
+    })
+    .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id))
+    .slice(0, slots);
+}
+
+/**
  * The single edge whose removal dissolves the most of the SCC, with what is
  * left after it.
  *
@@ -456,18 +514,34 @@ export async function runReport(
 function suggestCuts(
   component: readonly string[],
   inner: readonly ModuleEdge[],
+  crossingFileCycles: number,
 ): { cuts: ModuleEdge[]; residual: number } {
   const unchanged = { cuts: [], residual: component.length };
   if (component.length > MAX_CUT_SEARCH_MODULES) return unchanged;
+  // Nothing to cut when nothing is circular. An SCC with no file-level cycle
+  // crossing its modules is a product of the grouping, so severing an edge
+  // removes no cycle that exists -- and a "suggested cut" printed two lines
+  // under "nothing here is circular at runtime" invites work that changes
+  // nothing. Verified on a real 7-module tangle: zero crossing cycles, and the
+  // proposed cut removed zero of them.
+  if (crossingFileCycles === 0) return unchanged;
 
-  const candidates = [...inner].sort(
-    (a, b) =>
-      Number(b.typeOnly) - Number(a.typeOnly) ||
-      a.files.length - b.files.length ||
-      a.weight - b.weight ||
-      compareStrings(a.from, b.from) ||
-      compareStrings(a.to, b.to),
-  );
+  const candidates = [...inner]
+    // Type-only edges are erased at compile time, so cutting one changes
+    // nothing that runs. They were previously PREFERRED, on the reasoning that
+    // moving a types file is the cheapest fix -- which produced exactly the
+    // wrong recommendation on a real 12-module tangle: a 2-symbol `types →
+    // models` cut that an agent executed in ten minutes and correctly called a
+    // no-op, because by the report's own definition that edge was never a
+    // runtime dependency.
+    .filter((e) => !e.typeOnly)
+    .sort(
+      (a, b) =>
+        a.files.length - b.files.length ||
+        a.weight - b.weight ||
+        compareStrings(a.from, b.from) ||
+        compareStrings(a.to, b.to),
+    );
 
   let best: { edge: ModuleEdge; residual: number } | undefined;
   for (const candidate of candidates) {

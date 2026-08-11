@@ -799,9 +799,12 @@ const MAX_CUT_FILES_NAMED = 3;
 
 function cutLines(cycle: CycleFinding): string[] {
   if (cycle.cuts.length === 0) {
+    // Nothing is circular, so there is nothing to cut. Saying "no single edge
+    // breaks this cycle" here would assert a cycle the line above just denied.
+    if (cycle.fileCycles?.crossing.count === 0) return [];
     return [
       `- **no single edge breaks this cycle** — all ${cycle.modules.length} modules stay` +
-        ` mutually dependent whichever one you remove.`,
+        ` mutually dependent whichever runtime edge you remove.`,
     ];
   }
 

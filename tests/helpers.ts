@@ -130,6 +130,24 @@ export function configTableConfig(): string {
   return resolve(here, "fixtures/config/tsconfig.json");
 }
 
+/**
+ * A three-package clique no single edge can break, plus a package attached to
+ * it by type-only edges alone. Detaching that package is the best available cut
+ * by dissolution and is worthless: both its edges erase at compile time.
+ */
+/**
+ * Two duplication clusters of the same syntactic shape and opposite worth: ten
+ * three-field projections whose every key differs, and four constant blocks
+ * whose keys are identical and whose values differ.
+ */
+export function driftConfig(): string {
+  return resolve(here, "fixtures/drift/tsconfig.json");
+}
+
+export function typeCutConfig(): string {
+  return resolve(here, "fixtures/typecut/tsconfig.json");
+}
+
 export function tangleConfig(): string {
   return resolve(here, "fixtures/tangle/tsconfig.json");
 }
