@@ -30,12 +30,21 @@ beforeAll(async () => {
 
 /**
  * The chart syntax these tests pin was checked against mermaid's own parser
- * (`mermaid.parse`, 11.16.1) on the fixture chart, the golden report and a
- * 12-module chart from a real repository. mermaid is not a devDependency here
+ * (`mermaid.parse`, 11.16.1) on the fixture chart, the golden report and both
+ * charts of a real 5,798-file repository. mermaid is not a devDependency here
  * — it and jsdom are 177 MB and 100 packages against a CLI whose only runtime
- * dependency is `typescript` — so these assertions pin exact strings instead:
- * any future edit to the syntax surfaces as a diff a human has to approve
- * rather than as a chart that silently fails to render.
+ * dependency is `typescript` — so these assertions pin exact strings instead.
+ *
+ * That was not enough on its own, and the gap is worth stating. When the edge
+ * label gained a parenthesised count (`59 (4 type)`), the pinned strings were
+ * updated to match the new output and every test passed — while the chart no
+ * longer parsed, because an unquoted mermaid edge label ends at `(`. A string
+ * pin agrees with whatever the code currently emits, which is exactly the
+ * property you do not want from a syntax guard.
+ *
+ * So `describe("the chart parses")` asserts the INVARIANT the parser cares
+ * about — every label is quoted, and no label contains a raw `"` — rather than
+ * the bytes. That holds for labels nobody has thought of yet.
  */
 
 const base: ReportInput = {
@@ -101,7 +110,7 @@ describe("the cycle diagram", () => {
     // substring check would pass on a chart missing half its arrows.
     expect(diagram(render(twoModule))).toEqual([
       "flowchart LR",
-      "  src/alpha.ts -->|3| src/gamma.ts",
+      "  src/alpha.ts -->|\"3\"| src/gamma.ts",
       '  src/gamma.ts -. "cut · 1" .-> src/alpha.ts',
     ]);
   });
@@ -127,8 +136,8 @@ describe("the cycle diagram", () => {
     const uncut = { ...twoModule, cuts: [] };
     expect(diagram(render(uncut))).toEqual([
       "flowchart LR",
-      "  src/alpha.ts -->|3| src/gamma.ts",
-      "  src/gamma.ts -->|1| src/alpha.ts",
+      "  src/alpha.ts -->|\"3\"| src/gamma.ts",
+      "  src/gamma.ts -->|\"1\"| src/alpha.ts",
     ]);
   });
 
@@ -149,8 +158,8 @@ describe("the cycle diagram", () => {
       "flowchart LR",
       '  app/_id_/page.tsx["app/[id]/page.tsx"]',
       '  lib/util.ts["lib/util.ts"]',
-      "  app/_id_/page.tsx -->|2| lib/util.ts",
-      "  lib/util.ts -->|1| app/_id_/page.tsx",
+      "  app/_id_/page.tsx -->|\"2\"| lib/util.ts",
+      "  lib/util.ts -->|\"1\"| app/_id_/page.tsx",
     ]);
   });
 
@@ -208,8 +217,8 @@ describe("the cycle diagram", () => {
       "flowchart LR",
       '  a_b["a:b"]',
       '  a_b_2["a?b"]',
-      "  a_b -->|1| a_b_2",
-      "  a_b_2 -->|1| a_b",
+      "  a_b -->|\"1\"| a_b_2",
+      "  a_b_2 -->|\"1\"| a_b",
     ]);
   });
 
@@ -298,8 +307,8 @@ describe("the cycle diagram", () => {
     };
     expect(diagram(render(erased))).toEqual([
       "flowchart LR",
-      "  src/alpha.ts -->|3 type| src/gamma.ts",
-      "  src/gamma.ts -->|1| src/alpha.ts",
+      "  src/alpha.ts -->|\"3 type\"| src/gamma.ts",
+      "  src/gamma.ts -->|\"1\"| src/alpha.ts",
     ]);
   });
 
@@ -322,8 +331,8 @@ describe("the cycle diagram", () => {
     expect(out).toContain("### THK-CYC-p · SCC of 3 modules under `apps/mobile/`");
     expect(diagram(out)).toEqual([
       "flowchart LR",
-      "  hooks -->|127| lib",
-      "  lib -->|28| utils",
+      "  hooks -->|\"127\"| lib",
+      "  lib -->|\"28\"| utils",
       '  utils -. "cut · 3" .-> hooks',
     ]);
     // The cut names modules, so it is relative too, and the heading says so.
@@ -348,8 +357,8 @@ describe("the cycle diagram", () => {
     expect(out).toContain("under `packages/core/`");
     expect(diagram(out)).toEqual([
       "flowchart LR",
-      "  mobile-web/lib -->|1| mobile/lib",
-      "  mobile/lib -->|1| mobile-web/lib",
+      "  mobile-web/lib -->|\"1\"| mobile/lib",
+      "  mobile/lib -->|\"1\"| mobile-web/lib",
     ]);
   });
 
@@ -358,7 +367,7 @@ describe("the cycle diagram", () => {
     // where they are. Lifting it churns every node name to save nothing.
     const out = render(twoModule);
     expect(out).toContain("### THK-CYC-1 · SCC of 2 modules\n");
-    expect(diagram(out)).toContain("  src/alpha.ts -->|3| src/gamma.ts");
+    expect(diagram(out)).toContain("  src/alpha.ts -->|\"3\"| src/gamma.ts");
   });
 
   it("says when nothing in the tangle is circular at file level", () => {
@@ -424,8 +433,8 @@ describe("the cycle diagram", () => {
     };
     expect(diagram(render(mixed))).toEqual([
       "flowchart LR",
-      "  src/alpha.ts -->|5 (4 type)| src/gamma.ts",
-      "  src/gamma.ts -->|1| src/alpha.ts",
+      "  src/alpha.ts -->|\"5 (4 type)\"| src/gamma.ts",
+      "  src/gamma.ts -->|\"1\"| src/alpha.ts",
     ]);
   });
 
@@ -472,6 +481,78 @@ describe("the cycle diagram", () => {
     // Every module reachable in the chart, none dropped at the boundary.
     const named = new Set(drawn.flatMap((l) => l.match(/m\d\d/g) ?? []));
     expect(named.size).toBe(20);
+  });
+});
+
+describe("the chart parses", () => {
+  /**
+   * Characters that end a mermaid edge label early when it is not quoted.
+   *
+   * Measured against mermaid 11.16.1 rather than guessed: an unquoted label
+   * fails the parse on any of these, and a quoted one survives every one of
+   * them, failing only on a raw `"` -- which `#quot;` handles.
+   */
+  const BREAKS_A_BARE_LABEL = /[()[\]{}|"]/;
+
+  /** Every `A -->|label| B` and `A -. "label" .-> B` in a rendered chart. */
+  function labels(markdown: string): { text: string; quoted: boolean }[] {
+    const out: { text: string; quoted: boolean }[] = [];
+    for (const line of markdown.split("\n")) {
+      const piped = /-->\|(.*?)\|/.exec(line);
+      if (piped) {
+        const raw = piped[1]!;
+        const quoted = raw.startsWith('"') && raw.endsWith('"');
+        out.push({ text: quoted ? raw.slice(1, -1) : raw, quoted });
+      }
+      const dotted = /-\.\s*"(.*?)"\s*\.->/.exec(line);
+      if (dotted) out.push({ text: dotted[1]!, quoted: true });
+    }
+    return out;
+  }
+
+  it("quotes every edge label, whatever it contains", () => {
+    // The invariant, rather than another pinned string. `59 (4 type)` shipped
+    // broken because the label form gained parentheses and the tests pinned
+    // the new string without anything re-checking it against a parser: a
+    // string pin agrees with whatever the code now emits, which is exactly the
+    // property you do not want here.
+    const charts = [
+      render({ ...twoModule, modules: ["a", "b"], edges: [edge("a", "b", 59, { erased: 4 }), edge("b", "a", 1)], cuts: [] }),
+      render({ ...twoModule, modules: ["a", "b"], edges: [edge("a", "b", 12, { erased: 12, typeOnly: true }), edge("b", "a", 1)], cuts: [] }),
+      render(twoModule),
+    ];
+    let seen = 0;
+    for (const chart of charts) {
+      const found = labels(chart);
+      expect(found.length).toBeGreaterThan(0);
+      for (const { text, quoted } of found) {
+        seen += 1;
+        expect(quoted).toBe(true);
+        // Quoted survives everything except a raw quote.
+        expect(text).not.toContain('"');
+      }
+    }
+    // The loop must not be vacuous: 3 charts, 2 edges each.
+    expect(seen).toBe(6);
+  });
+
+  it("emits the mixed-edge label in a form that parses", () => {
+    // The exact string that broke: unquoted, the parentheses end the label.
+    const out = render({
+      ...twoModule,
+      modules: ["a", "b"],
+      edges: [edge("a", "b", 59, { erased: 4 }), edge("b", "a", 1)],
+      cuts: [],
+    });
+    expect(out).toContain('a -->|"59 (4 type)"| b');
+    expect(out).not.toContain("-->|59 (4 type)|");
+  });
+
+  it("would reject a label carrying a bare-label breaker unquoted", () => {
+    // Guards the guard: if the renderer ever stops quoting, this is the
+    // property that fails rather than a string comparison that adapts.
+    expect(BREAKS_A_BARE_LABEL.test("59 (4 type)")).toBe(true);
+    expect(BREAKS_A_BARE_LABEL.test("12 type")).toBe(false);
   });
 });
 

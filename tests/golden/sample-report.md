@@ -64,7 +64,7 @@ Arrows run importer → imported. The number is import sites — one per symbol 
 ```mermaid
 flowchart LR
   src/alpha.ts -. "cut · 1" .-> src/gamma.ts
-  src/gamma.ts -->|1| src/alpha.ts
+  src/gamma.ts -->|"1"| src/alpha.ts
 ```
 
 - **file cycles:** 1 crosses these modules (largest 2 files: `src/alpha.ts` ↔ `src/gamma.ts`).

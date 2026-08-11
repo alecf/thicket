@@ -956,8 +956,8 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
       // cycle: the one thing the reader is meant to do with this picture.
       const label = edgeLabel(e);
       return cuts.has(`${e.from} -> ${e.to}`)
-        ? `  ${from} -. "cut · ${label}" .-> ${to}`
-        : `  ${from} -->|${label}| ${to}`;
+        ? `  ${from} -. "${mermaidLabel(`cut · ${label}`)}" .-> ${to}`
+        : `  ${from} -->|"${mermaidLabel(label)}"| ${to}`;
     }),
   ];
 
@@ -1052,6 +1052,14 @@ function nodeIds(modules: readonly string[]): Map<string, string> {
  * Mermaid reads a bare `"` as the end of a label. `#quot;` is its own escape
  * for one, so a module whose name contains a quote renders instead of breaking
  * the rest of the chart.
+ *
+ * Applied to EVERY label, node and edge alike, because every label this report
+ * emits is quoted. Measured against mermaid 11.16.1: an unquoted edge label
+ * breaks the parse on any of `(`, `)`, `[`, `]`, `{`, `}`, `|` or `"`, while a
+ * quoted one survives all of them and breaks only on a raw `"`. Quoting
+ * unconditionally is therefore the whole rule, and it is why the `59 (4 type)`
+ * form shipped broken: the label gained parentheses and nothing re-checked it
+ * against a parser.
  */
 function mermaidLabel(module: string): string {
   return module.replaceAll('"', "#quot;");
