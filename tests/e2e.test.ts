@@ -332,6 +332,16 @@ describe("what varies between the copies", () => {
     // an L1 match already means, and it would bury the four that matter.
     expect(line).not.toContain("Observation");
   });
+
+  it("prints an exact count when every copy was compared", async () => {
+    // Four copies, all four compared, four distinct values -- the count is
+    // measured, not sampled, and marking it `≥4` would understate what the
+    // tool actually knows.
+    const { markdown } = await runReport({ config: configTableConfig(), cache: false });
+    const line = markdown.split("\n").find((l) => l.startsWith("- **varies across copies:**"));
+    expect(line).toContain("`loincCode` (4)");
+    expect(line).not.toContain("≥");
+  });
 });
 
 describe("the excerpt", () => {

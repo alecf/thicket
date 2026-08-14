@@ -14,6 +14,8 @@ const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
  */
 export interface ScanOptions {
   includeGenerated?: boolean;
+  /** See `OpenProjectOptions.bannerScan`. Must match what analysis used. */
+  bannerScan?: boolean;
   exclude?: readonly string[];
 }
 
@@ -100,7 +102,13 @@ export function scanSourceFiles(root: string, opts: ScanOptions = {}): string[] 
       } else if (entry.isFile() && SOURCE_EXT.test(name) && !name.endsWith(".d.ts")) {
         const rel = prefix === "" ? name : `${prefix}/${name}`;
         if (exclude.length > 0 && isExcludedByPattern(rel, exclude)) continue;
-        if (!opts.includeGenerated && hasGeneratedBanner(readHead(join(dir, name)))) continue;
+        if (
+          !opts.includeGenerated &&
+          opts.bannerScan !== false &&
+          hasGeneratedBanner(readHead(join(dir, name)))
+        ) {
+          continue;
+        }
         out.push(rel);
       }
     }

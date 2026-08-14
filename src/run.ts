@@ -42,6 +42,8 @@ export interface RunOptions {
   maxLocations?: number;
   /** Analyze generated/vendored directories too (see `GENERATED_DIR_SEGMENTS`). */
   includeGenerated?: boolean;
+  /** Detect generated files by their banner comment. On by default. */
+  bannerScan?: boolean;
   /**
    * Globs whose files are not analyzed, matched against repo-relative paths.
    * An instruction rather than a heuristic, so `includeGenerated` leaves it in
@@ -199,6 +201,7 @@ export async function runReport(
   const granularity = opts.granularity ?? "auto";
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
+  const bannerScan = opts.bannerScan ?? true;
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
   const exclude = [...(opts.exclude ?? [])].sort(compareStrings);
@@ -211,11 +214,12 @@ export async function runReport(
       minLines,
       granularity: String(granularity),
       includeGenerated,
+      bannerScan,
       exclude,
     }),
   ).slice(0, 8);
 
-  const project = await openProject(opts.config, { includeGenerated, exclude });
+  const project = await openProject(opts.config, { includeGenerated, bannerScan, exclude });
   // Opened against the project root rather than the cwd, so the cache belongs
   // to the codebase being analyzed and not to wherever the tool was invoked.
   // `openCache` answers null rather than throwing on anything it cannot use.
@@ -238,7 +242,7 @@ export async function runReport(
     const scope = analysisScope(
       project.root,
       files.map((f) => f.path),
-      { includeGenerated, exclude },
+      { includeGenerated, bannerScan, exclude },
     );
 
     const graph = buildModuleGraph(project, { granularity });
@@ -375,7 +379,17 @@ export async function runReport(
         .slice(0, MAX_COPIES_COMPARED)
         .map((o) => fragmentAt(o)?.tokensL0);
       if (streams.some((s) => s === undefined)) continue;
-      varies.set(r.cluster.id, variations(streams as string[][]));
+      const found = variations(streams as string[][]);
+      // `saturated` is a property of the SAMPLE: every compared copy differed.
+      // That only makes the count a floor when copies were actually left out
+      // -- comparing all four copies of a four-copy cluster and finding four
+      // values is an exact answer, and printing it as `≥4` would understate
+      // what we know.
+      const truncated = r.cluster.occurrences.length > MAX_COPIES_COMPARED;
+      varies.set(
+        r.cluster.id,
+        truncated ? found : found.map((v) => ({ ...v, saturated: false })),
+      );
     }
 
     // Near-variants, across both sections, for the findings actually printed.

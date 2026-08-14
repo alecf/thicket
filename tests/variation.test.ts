@@ -21,7 +21,7 @@ describe("variations", () => {
       property("loincCode", "41982-0"),
       property("loincCode", "73964-9"),
     ];
-    expect(variations(copies)).toEqual([{ label: "loincCode", values: 3 }]);
+    expect(variations(copies)).toEqual([{ label: "loincCode", values: 3, saturated: true }]);
   });
 
   it("counts distinct values, not copies", () => {
@@ -30,7 +30,7 @@ describe("variations", () => {
       property("unit", "kg"),
       property("unit", "kcal"),
     ];
-    expect(variations(copies)).toEqual([{ label: "unit", values: 2 }]);
+    expect(variations(copies)).toEqual([{ label: "unit", values: 2, saturated: false }]);
   });
 
   it("says nothing when the copies are identical", () => {
@@ -48,8 +48,8 @@ describe("variations", () => {
       [...property("loincCode", "2"), ...property("unit", "kcal")],
     ];
     expect(variations(copies)).toEqual([
-      { label: "loincCode", values: 2 },
-      { label: "unit", values: 2 },
+      { label: "loincCode", values: 2, saturated: true },
+      { label: "unit", values: 2, saturated: true },
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("variations", () => {
       ["PropertyDeclaration", "(", "Id:range", ")", "(", "Num:1", ")", "(", "Num:2", ")"],
       ["PropertyDeclaration", "(", "Id:range", ")", "(", "Num:3", ")", "(", "Num:4", ")"],
     ];
-    expect(variations(copies)).toEqual([{ label: "range", values: 2 }]);
+    expect(variations(copies)).toEqual([{ label: "range", values: 2, saturated: true }]);
   });
 
   it("says nothing when only identifiers differ", () => {
@@ -79,7 +79,7 @@ describe("variations", () => {
       ["Decl", "(", "Id:alpha", ")", "(", 'StringLiteral:"x"', ")"],
       ["Decl", "(", "Id:beta", ")", "(", 'StringLiteral:"y"', ")"],
     ];
-    expect(variations(copies)).toEqual([{ label: "an unnamed literal", values: 2 }]);
+    expect(variations(copies)).toEqual([{ label: "an unnamed literal", values: 2, saturated: true }]);
   });
 
   it("says nothing when the streams do not line up", () => {
@@ -97,7 +97,7 @@ describe("variations", () => {
       Array.from({ length: 10 }, (_, i) => property(`p${i}`, `v${n}${i}`)).flat(),
     );
     expect(variations(copies)).toHaveLength(6);
-    expect(variations(copies)[0]).toEqual({ label: "p0", values: 2 });
+    expect(variations(copies)[0]).toEqual({ label: "p0", values: 2, saturated: true });
   });
 });
 
@@ -166,5 +166,35 @@ describe("fieldNameDrift", () => {
       ["MethodDeclaration", "(", "Id:setTag", ")"],
     ];
     expect(fieldNameDrift(copies)).toEqual({ varying: 1, total: 1 });
+  });
+});
+
+describe("a count that hit the sampling cap", () => {
+  // `values` counts distinct values within the sampled copies, never across
+  // all of them. When every sampled copy differs the count saturates, and a
+  // bare number then reads as a measured total -- which inverts the reading.
+  // On a real report "103 copies, description (20)" said "a small enumerable
+  // parameter set, build a table"; the truth was 101 distinct descriptions,
+  // which says the opposite: it must stay a free parameter. An agent designed
+  // the wrong abstraction on the strength of that number.
+  it("is marked as a floor, not reported as a total", () => {
+    const copies = Array.from({ length: 4 }, (_, i) => ["Id:x", "=", `Str:v${i}`]);
+    const [v] = variations(copies);
+    expect(v).toBeDefined();
+    expect(v!.values).toBe(4);
+    // Every sampled copy differed, so the true count is only known to be ≥ 4.
+    expect(v!.saturated).toBe(true);
+  });
+
+  it("is not marked when the values genuinely repeat", () => {
+    const copies = [
+      ["Id:x", "=", "Str:a"],
+      ["Id:x", "=", "Str:b"],
+      ["Id:x", "=", "Str:a"],
+      ["Id:x", "=", "Str:b"],
+    ];
+    const [v] = variations(copies);
+    expect(v!.values).toBe(2);
+    expect(v!.saturated).toBe(false);
   });
 });

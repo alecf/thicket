@@ -113,6 +113,18 @@ describe("main", () => {
     expect(io.stdout()).toMatch(/1 matching --exclude/);
   });
 
+  it("--no-banner-scan turns off just that opinion, leaving the others", async () => {
+    // The banner sniff is an opinion -- "this text means a machine wrote it"
+    // -- and every opinion here has to be switchable on its own. Turning it
+    // off must NOT drag the directory rule back on with it.
+    const io = capture();
+    await main(["--config", generatedConfig(), "--no-banner-scan"]);
+    // The 4 hand-written files plus the 2 the banner rule was dropping.
+    expect(io.stdout()).toMatch(/6 files/);
+    expect(io.stdout()).toMatch(/2 in generated directories/);
+    expect(io.stdout()).not.toMatch(/banner comment/);
+  });
+
   it("--exclude survives --include-generated, because it is an instruction", async () => {
     const io = capture();
     await main([

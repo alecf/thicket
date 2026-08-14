@@ -384,6 +384,14 @@ export interface OpenProjectOptions {
    */
   includeGenerated?: boolean;
   /**
+   * Read each file's leading comment for a generator's banner. On by default.
+   *
+   * Its own switch because it is the most opinionated rule here -- it decides
+   * from prose that a machine wrote the file -- and every opinion this tool
+   * holds has to be turnable off without dragging the others with it.
+   */
+  bannerScan?: boolean;
+  /**
    * Globs, matched against repo-relative paths, whose files are not analyzed.
    * The escape hatch for generated code that declares nothing.
    */
@@ -465,7 +473,7 @@ export async function openProject(
       const sf = project.program.getSourceFile(name) as unknown as SourceFileNode | undefined;
       if (!sf) continue;
       // Costs nothing extra: the text is already in hand for the content hash.
-      if (!opts.includeGenerated && hasGeneratedBanner(sf.text)) {
+      if (!opts.includeGenerated && opts.bannerScan !== false && hasGeneratedBanner(sf.text)) {
         excluded.banner += 1;
         continue;
       }

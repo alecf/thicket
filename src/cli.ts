@@ -42,6 +42,7 @@ Usage: thicket [options]
   --granularity <g>      auto | file | <directory depth> (default auto)
   --include-generated    also analyze generated dirs and banner-marked files
   --exclude <glob>       skip files matching this glob; repeatable
+  --no-banner-scan       do not treat an "auto-generated" banner as generated
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -67,6 +68,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         granularity: { type: "string" },
         "include-generated": { type: "boolean" },
         exclude: { type: "string", multiple: true },
+        "banner-scan": { type: "boolean", default: true },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -161,6 +163,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       maxFindings: preset.maxFindings,
       granularity,
       includeGenerated: values["include-generated"] ?? false,
+      bannerScan: values["banner-scan"] ?? true,
       exclude: values.exclude ?? [],
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),

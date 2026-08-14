@@ -556,7 +556,12 @@ function contextLines(r: Ranked): string[] {
     // literal` reads as code that does not exist.
     const named = r.varies
       .map((v) => (/^[A-Za-z_$][\w$]*$/.test(v.label) ? `\`${v.label}\`` : v.label))
-      .map((label, i) => `${label} (${r.varies![i]!.values})`)
+      // `≥` when every compared copy differed: the count is a floor, and a
+      // bare number there reads as a measured total and inverts the reading.
+      .map((label, i) => {
+        const v = r.varies![i]!;
+        return `${label} (${v.saturated ? "≥" : ""}${v.values})`;
+      })
       .join(", ");
     lines.push(`- **varies across copies:** ${named}`);
   }
