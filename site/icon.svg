@@ -1,1 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#123"/><circle cx="32" cy="32" r="20" fill="#fc0"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#1a3123"/>
+
+  <!--
+    Depth order is the whole idea: the left jaw passes BEHIND the stem and the
+    right jaw in front, so the shears are closing around the stem rather than
+    sitting on top of a drawing of one. That splits the shears into two groups
+    with the stem between them; both groups carry the same transform.
+  -->
+
+  <!-- left jaw, behind the stem -->
+  <g transform="translate(256 300) scale(1.06) translate(-256 -300) rotate(-9 256 316)">
+    <path d="M 290.9 301 Q 222.7 211.9 183.8 110.1 Q 164 98 156.2 121.9 Q 174 232.8 221.1 331 Z"
+          fill="#e6edf5" stroke="#1a3123" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+
+  <!-- bramble stem, threaded between the jaws -->
+  <path d="M -10 240 C 78 272, 158 228, 236 182 C 314 136, 398 142, 522 172"
+        fill="none" stroke="#57ad3e" stroke-width="32" stroke-linecap="round"/>
+  <g fill="#8ad95e">
+    <path d="M 0 0 C 24 -38, 66 -56, 100 -46 C 90 -8, 46 20, 0 0 Z" transform="translate(128,264) rotate(170)"/>
+    <path d="M 0 0 C 24 -38, 66 -56, 100 -46 C 90 -8, 46 20, 0 0 Z" transform="translate(372,148) rotate(-16)"/>
+  </g>
+
+  <!-- right jaw, both handles, and the joint: in front of the stem -->
+  <g transform="translate(256 300) scale(1.06) translate(-256 -300) rotate(-9 256 316)">
+    <!-- back limb: dark handle (left) -->
+    <g fill="none" stroke="#a86d1c" stroke-linecap="round">
+      <path d="M 244 334 C 208 374, 180 402, 152 430" stroke-width="42"/>
+      <path d="M 192 390 L 154 428" stroke-width="48"/>
+      <path d="M 174 408 L 154 428" stroke-width="54"/>
+    </g>
+    <!--
+      The right jaw needs the keyline too now that it overlaps the left one.
+      Against the stem it is what says "in front"; against the left jaw it is
+      the only thing separating two near-identical greys.
+    -->
+    <path d="M 292.2 333 Q 339.8 243 358.3 139.6 Q 352 110 325.7 124.4 Q 287.3 218.5 219.8 299 Z"
+          fill="#b6c5d4" stroke="#1a3123" stroke-width="9" stroke-linejoin="round"/>
+
+    <!-- front limb: bright handle (right) -->
+    <g fill="none" stroke="#e8a63c" stroke-linecap="round">
+      <path d="M 268 334 C 306 374, 334 402, 362 430" stroke-width="42"/>
+      <path d="M 322 390 L 360 428" stroke-width="48"/>
+      <path d="M 342 408 L 360 428" stroke-width="54"/>
+    </g>
+
+    <!-- joint: the same keyline the left jaw carries, continued around it -->
+    <circle cx="256" cy="316" r="34" fill="#f5c25c" stroke="#1a3123" stroke-width="9"/>
+    <circle cx="256" cy="316" r="11" fill="#2a1f10"/>
+  </g>
+</svg>
