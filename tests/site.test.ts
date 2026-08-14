@@ -101,6 +101,22 @@ describe("the Markdown subset the site renders", () => {
     expect(markdownToHtml("[x](y.html)")).toContain('<a href="y.html">x</a>');
   });
 
+  it("restores a code span without injecting spaces around it", () => {
+    // The placeholder used to be space-padded, and the padding came back out
+    // on restore: every "`node:sqlite`." in the guide published as
+    // "node:sqlite ." — visible on the rendered page, invisible in the source.
+    const html = markdownToHtml("the built-in `node:sqlite`, and `--config` at each path.");
+    expect(html).toContain("<code>node:sqlite</code>,");
+    expect(html).toContain("<code>--config</code> at each");
+    expect(html).not.toMatch(/<\/code>\s[.,]/);
+  });
+
+  it("leaves no placeholder delimiter in the output", () => {
+    const html = markdownToHtml("a `span` and `another` one");
+    expect(html).not.toContain(String.fromCharCode(0));
+    expect(html).toContain("<code>span</code> and <code>another</code>");
+  });
+
   it("renders a blockquote as a blockquote", () => {
     // The scope warning is the only blockquote thicket emits, and it is the
     // one block a reader must not miss.

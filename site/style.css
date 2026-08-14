@@ -142,6 +142,14 @@ main {
   border-top: 1px solid var(--rule);
 }
 
+/* The guide separates its sections with `---`; without this the rule and the
+   heading's own border stack into a visible double line. */
+.prose hr + h2 {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
 .prose h3 {
   font-size: 1.08rem;
   margin: 2rem 0 0.5rem;
