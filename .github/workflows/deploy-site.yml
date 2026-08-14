@@ -1,0 +1,57 @@
+name: Deploy site to GitHub Pages
+
+# The site is generated from files that live outside `site/` -- the report
+# guide comes from `docs/`, the example report from `tests/golden/`, and the
+# guide's URL is asserted against `src/report/markdown.ts`. So a change to any
+# of those must redeploy, not just a change to the site directory.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/report-guide.md"
+      - "tests/golden/sample-report.md"
+      - "src/report/markdown.ts"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # The build itself needs nothing installed -- it is dependency-free Node.
+      # `npm ci` is here so the site tests can run, which is what stops a broken
+      # page from deploying.
+      - run: npm ci
+      - run: npm run site:build
+      - run: npx vitest run tests/site.test.ts
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

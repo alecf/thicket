@@ -7,3 +7,4 @@ node_modules/
 *.tsbuildinfo
 .thicket/
 .DS_Store
+site/dist/

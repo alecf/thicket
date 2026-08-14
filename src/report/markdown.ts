@@ -119,6 +119,15 @@ export interface ReportInput {
  * denser than 4 chars, so this errs toward over-counting, which is the safe
  * direction for a ceiling.
  */
+/**
+ * Where the field-by-field guide lives.
+ *
+ * Deliberately unversioned. A URL carrying the tool version would go stale in
+ * every report ever written the moment the version moved, and the guide states
+ * which version it documents at the top instead.
+ */
+const GUIDE_URL = "https://alecf.github.io/thicket/report-guide.md";
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -300,6 +309,13 @@ function headerLines(input: ReportInput, shown: number): string[] {
     `thicket ${input.version} · config ${input.configHash} · ` +
       `${input.fileCount} files / ${input.lineCount} LOC · ` +
       `granularity: ${input.granularity} (${input.moduleCount} modules)`,
+    "",
+    // The report's primary reader is a model that was handed this file and
+    // told to clean something up, with no other context. One line makes it
+    // self-describing: every field, and the question of whether a finding is
+    // worth acting on at all, is explained at a stable URL. Pure Markdown at
+    // the other end, so fetching it costs nothing to parse.
+    `**How to read this report:** ${GUIDE_URL}`,
     "",
     "## Summary",
     "",

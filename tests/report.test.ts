@@ -128,6 +128,18 @@ describe("renderMarkdown", () => {
     expect(out).toContain("495 of 495 findings are not shown above.");
   });
 
+  it("links the field guide once, above everything else", () => {
+    // The report's primary reader is a model handed this file and told to
+    // clean something up. Without this line it has to infer what `L1` or
+    // `passThrough` mean from context, and two agents given an earlier report
+    // guessed wrong about what the edge numbers counted.
+    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    expect(out).toContain("**How to read this report:** https://alecf.github.io/thicket/report-guide.md");
+    // Once per report, not once per section or per finding.
+    expect(out.split("How to read this report").length - 1).toBe(1);
+    expect(out.indexOf("How to read this report")).toBeLessThan(out.indexOf("## Summary"));
+  });
+
   it("says nothing about scope when the program covered the tree", () => {
     expect(renderMarkdown(base)).not.toMatch(/outside this program/);
   });

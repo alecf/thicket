@@ -23,6 +23,32 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # Mirrors the build half of deploy-site.yml, so a page that will not build is
+  # a red PR rather than a failed deploy after merge. `npm test` above already
+  # runs tests/site.test.ts, which builds the site -- this job additionally
+  # proves the standalone `npm run site:build` entry point works on a clean
+  # checkout, which is the command the deploy workflow actually invokes.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run site:build
+      - name: Check the published pages exist and are not empty
+        run: |
+          set -euo pipefail
+          for f in index.html report-guide.html report-guide.md example.html icon.svg .nojekyll; do
+            test -f "site/dist/$f" || { echo "missing site/dist/$f"; exit 1; }
+          done
+          # The guide is what every report links to; an empty one would deploy
+          # silently and break the only integration the report promises.
+          test -s site/dist/report-guide.md
+          diff -q docs/report-guide.md site/dist/report-guide.md
+
   # thicket's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide
   # whether a refactor made progress, so environment-dependent output registers

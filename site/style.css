@@ -1,0 +1,312 @@
+/*
+ * Palette is defined once here as tokens. The accent is provisional until the
+ * icon is chosen; changing these four values re-themes the whole site.
+ */
+:root {
+  --ink: #14201a;
+  --ink-soft: #4a5a52;
+  --paper: #fbfaf6;
+  --paper-raised: #ffffff;
+  --rule: #dfe3dd;
+  --accent: #2f6b4f;
+  --accent-soft: #eaf2ec;
+  --amber: #b8791a;
+  --code-bg: #f2f4f0;
+  --measure: 44rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #e6ece8;
+    --ink-soft: #9aa8a0;
+    --paper: #10160f;
+    --paper-raised: #171f18;
+    --rule: #2a352c;
+    --accent: #7fc79c;
+    --accent-soft: #1a2a20;
+    --amber: #e0a94a;
+    --code-bg: #1a221b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.65 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+code,
+pre,
+kbd {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* ---- chrome ---------------------------------------------------------- */
+
+header.site {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-raised);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 650;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+header.site nav {
+  display: flex;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+}
+
+header.site nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.94rem;
+}
+
+header.site nav a:hover,
+header.site nav a[aria-current="page"] {
+  color: var(--accent);
+}
+
+header.site .gh {
+  margin-left: auto;
+  font-size: 0.94rem;
+  text-decoration: none;
+}
+
+footer.site {
+  border-top: 1px solid var(--rule);
+  margin-top: 5rem;
+  padding: 2rem 1.5rem 4rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+footer.site p {
+  max-width: var(--measure);
+  margin: 0 auto 0.4rem;
+}
+
+main {
+  padding: 0 1.5rem;
+}
+
+/* ---- prose ----------------------------------------------------------- */
+
+.prose {
+  max-width: var(--measure);
+  margin: 3rem auto 0;
+}
+
+.prose h1 {
+  font-size: 2.1rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+
+.prose h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+  margin: 2.75rem 0 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+}
+
+.prose h3 {
+  font-size: 1.08rem;
+  margin: 2rem 0 0.5rem;
+}
+
+.prose h4 {
+  font-size: 0.98rem;
+  margin: 1.5rem 0 0.4rem;
+  color: var(--ink-soft);
+}
+
+.prose p,
+.prose li {
+  overflow-wrap: break-word;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.3rem;
+}
+
+.prose li {
+  margin: 0.3rem 0;
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2.5rem 0;
+}
+
+.prose blockquote {
+  margin: 1.25rem 0;
+  padding: 0.6rem 1.1rem;
+  border-left: 3px solid var(--amber);
+  background: var(--accent-soft);
+  border-radius: 0 6px 6px 0;
+}
+
+.prose blockquote p {
+  margin: 0.35rem 0;
+}
+
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+pre.mermaid {
+  background: var(--paper-raised);
+  text-align: center;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  margin: 1.25rem 0;
+  font-size: 0.93rem;
+}
+
+th,
+td {
+  border: 1px solid var(--rule);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* ---- landing --------------------------------------------------------- */
+
+.hero {
+  max-width: var(--measure);
+  margin: 4.5rem auto 0;
+}
+
+.hero .mark {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 1.25rem;
+}
+
+.hero h1 {
+  font-size: 2.6rem;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.75rem;
+}
+
+.hero .lede {
+  font-size: 1.16rem;
+  color: var(--ink-soft);
+  margin: 0 0 1.75rem;
+}
+
+.cta {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.cta a {
+  display: inline-block;
+  padding: 0.55rem 1.05rem;
+  border-radius: 7px;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 550;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+}
+
+.cta a.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+
+.cards {
+  max-width: var(--measure);
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.card {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+  background: var(--paper-raised);
+}
+
+.card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.93rem;
+}

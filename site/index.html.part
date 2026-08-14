@@ -1,0 +1,84 @@
+<section class="hero">
+  <img class="mark" src="icon.svg" alt="" width="88" height="88">
+  <h1>Find what is tangled.</h1>
+  <p class="lede">
+    <strong>thicket</strong> analyzes a TypeScript codebase and emits a deterministic plaintext
+    report of where it repeats itself and where its modules depend on each other in circles.
+    It reports candidates. Something else does the judging and the editing.
+  </p>
+  <div class="cta">
+    <a class="primary" href="report-guide.html">How to read a report</a>
+    <a href="example.html">See an example</a>
+    <a href="https://github.com/alecf/thicket">GitHub</a>
+  </div>
+</section>
+
+<section class="prose">
+  <h2 id="quick-start">Quick start</h2>
+  <pre><code class="language-bash">npm install
+npm run build
+
+node dist/cli.js --config tsconfig.json &gt; thicket.md</code></pre>
+  <p>
+    Node 24 or newer, because the cache uses the built-in <code>node:sqlite</code>. Point
+    <code>--config</code> at each <code>tsconfig.json</code> you want covered; the report says
+    plainly which files it did <em>not</em> reach and what argument would reach them.
+  </p>
+
+  <h2 id="for-agents">Built to be handed to an agent</h2>
+  <p>
+    Every report opens with a link to a
+    <a href="report-guide.md">field-by-field guide in raw Markdown</a>. Point a coding agent at
+    <code>thicket.md</code> and tell it to clean something up: it can fetch that URL and learn
+    what each section means, what the numbers count, and — the part that matters — how to tell
+    a finding worth acting on from one that merely scored well.
+  </p>
+
+  <h2 id="what-it-reports">What it reports</h2>
+</section>
+
+<section class="cards">
+  <div class="card">
+    <h3>Duplication</h3>
+    <p>
+      Clusters of repeated code, ranked by the lines a successful extraction would actually
+      delete — with the constants that parameterize each shape, and where the abstraction may
+      already exist.
+    </p>
+  </div>
+  <div class="card">
+    <h3>Module tangles</h3>
+    <p>
+      Dependency cycles, drawn as a chart, with the one fact that decides how much they matter:
+      whether any real file-level cycle underlies them, or whether they are an artifact of how
+      files were grouped.
+    </p>
+  </div>
+  <div class="card">
+    <h3>Cheap fixes first</h3>
+    <p>
+      An edge whose imports are re-exported from elsewhere is routing, not dependency. thicket
+      names those separately, because repointing a specifier is a find-and-replace and cutting a
+      dependency is a decision.
+    </p>
+  </div>
+  <div class="card">
+    <h3>Byte-identical runs</h3>
+    <p>
+      The report is a pure function of source, config and version, so diffing report N against
+      N+1 tells you whether a refactor actually landed. No timestamps, no absolute paths, no
+      locale-dependent ordering.
+    </p>
+  </div>
+</section>
+
+<section class="prose">
+  <h2 id="what-it-does-not-do">What it does not do</h2>
+  <p>
+    It does not edit code, and it does not claim a finding is worth fixing. A great deal of
+    duplication should be left alone: if the copies differ in the <em>names</em> of their fields
+    rather than the <em>values</em>, consolidating them buys a generic that no future change
+    will benefit from. The report is ranked with that in mind and the guide says how to check,
+    but the judgement is yours.
+  </p>
+</section>
