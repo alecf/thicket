@@ -111,10 +111,11 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [],
+  typeDuplication: [],
   testDuplication: [],
   cycles: [],
   totalFindings: 0,
-  census: { duplication: 0, cycles: 0, bands: [], testDuplication: 0, singleFile: 0 },
+  census: { duplication: 0, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
 };
 
 describe("renderMarkdown", () => {
@@ -122,7 +123,7 @@ describe("renderMarkdown", () => {
     const out = renderMarkdown({
       ...base,
       totalFindings: 495,
-      census: { duplication: 494, cycles: 1, bands: [], testDuplication: 0, singleFile: 0 },
+      census: { duplication: 494, cycles: 1, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
     });
     expect(out).toMatch(/of 495/);
     expect(out).toContain("495 of 495 findings are not shown above.");
@@ -608,7 +609,7 @@ describe("renderMarkdown", () => {
       duplication: [ranked("THK-DUP-src")],
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 2,
-      census: { duplication: 1, cycles: 0, bands: [], testDuplication: 1, singleFile: 0 },
+      census: { duplication: 1, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 1, singleFile: 0 },
     });
     expect(out).toContain("## Duplication in tests");
     expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Duplication in tests"));
@@ -623,7 +624,7 @@ describe("renderMarkdown", () => {
       duplication: Array.from({ length: 10 }, (_, i) => ranked(`THK-DUP-src${i}`, {}, 100 - i)),
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 11,
-      census: { duplication: 10, cycles: 0, bands: [], testDuplication: 1, singleFile: 0 },
+      census: { duplication: 10, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 1, singleFile: 0 },
       budgetTokens: 400,
     });
     expect(out).toContain("THK-DUP-src0");
@@ -635,7 +636,7 @@ describe("renderMarkdown", () => {
       ...base,
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 2,
-      census: { duplication: 0, cycles: 0, bands: [], testDuplication: 2, singleFile: 0 },
+      census: { duplication: 0, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 2, singleFile: 0 },
     });
     expect(out).toContain("## Duplication in tests");
     expect(out).not.toContain("## Duplication\n");
@@ -695,7 +696,7 @@ describe("renderMarkdown", () => {
         },
       ],
       totalFindings: 50,
-      census: { duplication: 47, cycles: 3, bands: [], testDuplication: 0, singleFile: 0 },
+      census: { duplication: 47, cycles: 3, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
     });
     expect(out).toContain("| duplication | 47 | 1 |");
     expect(out).toContain("| module tangle | 3 | 1 |");

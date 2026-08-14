@@ -69,6 +69,17 @@ export function emptyConfig(): string {
  * cut detaches the leaf and shrinks a 5-module tangle to 4 -- a cut that does
  * not break anything.
  */
+/**
+ * Four files each carrying the same interface and type alias under different
+ * names, beside a much larger duplicated function. The type findings are worth
+ * a third as many recoverable lines as the code one, so they lose every
+ * contest scored on volume -- which is the whole reason they need a section of
+ * their own.
+ */
+export function typeShapeConfig(): string {
+  return resolve(here, "fixtures/typeshape/tsconfig.json");
+}
+
 export function meshConfig(): string {
   return resolve(here, "fixtures/mesh/tsconfig.json");
 }

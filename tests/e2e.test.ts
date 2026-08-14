@@ -3,6 +3,7 @@ import { runReport } from "../src/run.js";
 import {
   configTableConfig,
   meshConfig,
+  typeShapeConfig,
   driftConfig,
   emptyConfig,
   fixtureConfig,
@@ -480,5 +481,47 @@ describe("dissolving a cycle instead of cutting it", () => {
     const cycle = json.cycles.find((c) => c.modules.includes("app"))!;
     expect(cycle.cuts).toEqual([]);
     expect(cycle.residual).toBe(1);
+  });
+});
+
+describe("duplicated types", () => {
+  // A duplicated interface is low-volume by nature: four copies of a five-line
+  // shape is 13 recoverable lines against a duplicated function's 43. Scored
+  // on volume it can never win, so on a real application 33 groups of
+  // structurally identical type declarations -- `SimpleLogger`/`OpsLogger`/
+  // `SlackLogger` among them -- were invisible at every depth setting. That is
+  // not a ranking to tune; it is two incomparable kinds of work in one
+  // contest, which this file's rules say to split rather than weight.
+  it("gets its own section, so volume cannot crowd it out", async () => {
+    const { markdown, json } = await runReport({
+      config: typeShapeConfig(),
+      maxFindings: 1,
+      cache: false,
+    });
+    // One slot for code duplication, and the type findings still appear.
+    expect(json.duplication).toHaveLength(1);
+    expect(markdown).toContain("## Duplicated types");
+    expect(json.typeDuplication.length).toBeGreaterThan(0);
+  });
+
+  it("routes type declarations out of the code section", async () => {
+    // A three-member type alias is smaller than the default fragment floor, so
+    // the floor is lowered here: the question is which section a finding lands
+    // in, not which sizes are worth reporting.
+    const { json } = await runReport({ config: typeShapeConfig(), minNodes: 6, cache: false });
+    const kinds = (rs: { kind: string }[]) => rs.map((r) => r.kind);
+    expect(kinds(json.typeDuplication)).toContain("InterfaceDeclaration");
+    expect(kinds(json.typeDuplication)).toContain("TypeAliasDeclaration");
+    // And the code duplication stays where it was.
+    expect(kinds(json.duplication)).toContain("FunctionDeclaration");
+    expect(kinds(json.duplication)).not.toContain("InterfaceDeclaration");
+  });
+
+  it("counts a type literal in a type position as a type", async () => {
+    // `TypeLiteral` is the body of `type X = { ... }`. It is erased exactly as
+    // an interface is, and grouping it with object literals would put the same
+    // duplication in two different sections depending on how it was declared.
+    const { json } = await runReport({ config: typeShapeConfig(), minNodes: 6, cache: false });
+    expect(json.typeDuplication.map((r) => r.kind)).toContain("TypeLiteral");
   });
 });

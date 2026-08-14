@@ -73,6 +73,7 @@ const base: ReportInput = {
   },
   scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
   duplication: [ranked("THK-DUP-1")],
+  typeDuplication: [],
   testDuplication: [],
   cycles: [
     {

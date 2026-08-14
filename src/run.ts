@@ -10,7 +10,7 @@ import { compareStrings } from "./order.js";
 import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
-import { canonicalKind } from "./report/kinds.js";
+import { canonicalKind, isTypeKind } from "./report/kinds.js";
 import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
@@ -70,6 +70,8 @@ export interface ReportJson {
   scope: Scope;
   /** How many files each exclusion rule dropped from inside that program. */
   excluded: ExcludedCounts;
+  /** The type-duplication section, same shape as `duplication`. */
+  typeDuplication: ReportJson["duplication"];
   duplication: {
     /** THK-DUP finding id; identical to the one the Markdown prints. */
     id: string;
@@ -166,6 +168,20 @@ const TEST_FINDINGS_SHARE = 8;
 
 function testFindings(maxFindings: number): number {
   return Math.max(1, Math.round(maxFindings / TEST_FINDINGS_SHARE));
+}
+
+/**
+ * Slots the type-duplication section gets, as a share of the code section's.
+ *
+ * Larger than the test section's share. A duplicated type is usually a whole
+ * concept declared twice rather than a body of code repeated, so a handful of
+ * them is a substantial finding -- and there are far fewer of them to list: on
+ * a real application, 33 groups against 4468 code candidates.
+ */
+const TYPE_FINDINGS_SHARE = 4;
+
+function typeFindings(maxFindings: number): number {
+  return Math.max(1, Math.round(maxFindings / TYPE_FINDINGS_SHARE));
 }
 const EXCERPT_COLUMNS = 100;
 
@@ -345,8 +361,13 @@ export async function runReport(
       return out.some((s) => s === undefined) ? undefined : (out as string[][]);
     };
 
-    const production = ranked.filter((r) => !isTestMajority(r.cluster));
+    // Test-majority is checked first, so `## Duplication in tests` keeps
+    // exactly the meaning it had: everything whose work is in the test suite,
+    // whether it is a type or not.
     const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
+    const rest = ranked.filter((r) => !isTestMajority(r.cluster));
+    const typeDuplication = rest.filter((r) => isTypeKind(r.cluster.kind));
+    const production = rest.filter((r) => !isTypeKind(r.cluster.kind));
 
     // Excerpts and surroundings are resolved only for what the report will
     // print: both need whole-project lookups, and a cluster can span a hundred
@@ -382,6 +403,9 @@ export async function runReport(
       };
     };
     const emitted = reweight(production, maxFindings, streamsOf).map(decorate);
+    const emittedTypes = reweight(typeDuplication, typeFindings(maxFindings), streamsOf).map(
+      decorate,
+    );
     const emittedTests = reweight(testDuplication, testFindings(maxFindings), streamsOf).map(
       decorate,
     );
@@ -389,7 +413,7 @@ export async function runReport(
     // What varies between the copies -- the parameter list of the abstraction
     // the finding is asking for. Only emitted findings pay for it.
     const varies = new Map<string, ReturnType<typeof variations>>();
-    for (const r of [...emitted, ...emittedTests]) {
+    for (const r of [...emitted, ...emittedTypes, ...emittedTests]) {
       const streams = r.cluster.occurrences
         .slice(0, MAX_COPIES_COMPARED)
         .map((o) => fragmentAt(o)?.tokensL0);
@@ -409,7 +433,7 @@ export async function runReport(
 
     // Near-variants, across both sections, for the findings actually printed.
     const variants = findVariants(
-      [...emitted, ...emittedTests].flatMap((r) => {
+      [...emitted, ...emittedTypes, ...emittedTests].flatMap((r) => {
         const first = r.cluster.occurrences[0]!;
         const fragment = fragmentAt(first);
         return fragment === undefined
@@ -453,6 +477,7 @@ export async function runReport(
       scope,
       excluded: project.excluded,
       duplication: emitted.map(withVariants),
+      typeDuplication: emittedTypes.map(withVariants),
       testDuplication: emittedTests.map(withVariants),
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
@@ -462,6 +487,22 @@ export async function runReport(
     };
 
     const { markdown, shown } = renderReport(input);
+
+    const asJson = (r: (typeof emitted)[number]): ReportJson["duplication"][number] => ({
+      id: r.cluster.id,
+      shapeHash: r.shapeHash,
+      score: r.score,
+      tag: r.tag,
+      level: r.cluster.level,
+      kind: canonicalKind(r.cluster.kind),
+      nodeCount: r.cluster.nodeCount,
+      occurrences: r.cluster.occurrences.map((o) => ({
+        filePath: o.filePath,
+        line: o.line,
+        start: o.start,
+        end: o.end,
+      })),
+    });
 
     return {
       markdown,
@@ -474,22 +515,11 @@ export async function runReport(
         moduleCount: input.moduleCount,
         metrics: input.metrics,
         scope,
-      excluded: project.excluded,
-        duplication: [...emitted, ...emittedTests].map((r) => ({
-          id: r.cluster.id,
-          shapeHash: r.shapeHash,
-          score: r.score,
-          tag: r.tag,
-          level: r.cluster.level,
-          kind: canonicalKind(r.cluster.kind),
-          nodeCount: r.cluster.nodeCount,
-          occurrences: r.cluster.occurrences.map((o) => ({
-            filePath: o.filePath,
-            line: o.line,
-            start: o.start,
-            end: o.end,
-          })),
-        })),
+        excluded: project.excluded,
+        // Split exactly as the Markdown is, so a consumer of the sidecar sees
+        // the same three sections rather than having to re-derive them.
+        duplication: [...emitted, ...emittedTests].map(asJson),
+        typeDuplication: emittedTypes.map(asJson),
         cycles: input.cycles,
         totalFindings,
         census: input.census,

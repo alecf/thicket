@@ -107,6 +107,14 @@ export interface ReportInput {
   excluded?: ExcludedCounts;
   duplication: Ranked[];
   /**
+   * Duplication in the type system -- interfaces, type aliases, the type
+   * nodes inside them. Its own section for the same reason the test one has
+   * one: a type declaration is small by nature, so it loses every contest
+   * scored on recoverable lines, and consolidating three near-identical
+   * interfaces is worth more than the line count says.
+   */
+  typeDuplication: Ranked[];
+  /**
    * Duplication whose copies are mostly test files, kept in a section of its
    * own so it cannot displace production findings (see `isTestMajority`).
    */
@@ -189,6 +197,12 @@ const SECTION_PREAMBLE: Record<string, string> = {
     " marks an edge erased at compile time and so not a runtime dependency at" +
     " all.",
   "## Duplication": LEVEL_LEGEND,
+  "## Duplicated types":
+    "Duplication in the type system: interfaces, type aliases, and the shapes"
+    + " inside them. Listed apart from code duplication because a type"
+    + " declaration is small even when what it repeats is a whole concept, so"
+    + " it loses any ranking decided on how many lines an extraction removes."
+    + " " + LEVEL_LEGEND,
   "## Duplication in tests": LEVEL_LEGEND,
 };
 
@@ -224,6 +238,10 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
       section: "## Duplication",
       lines: duplicationBlock(r, input.maxFilesPerFinding),
     })),
+    ...input.typeDuplication.map((r) => ({
+      section: "## Duplicated types",
+      lines: duplicationBlock(r, input.maxFilesPerFinding),
+    })),
     ...input.cycles.map((c) => ({ section: "## Module tangle", lines: cycleBlock(c) })),
     // Last, so a token budget spends itself on production work first. Test
     // duplication is real -- 231 copies of a mock logger wants a helper -- but
@@ -254,6 +272,7 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   lines.push(
     ...omittedSection(input, {
       duplication: shownIn("## Duplication"),
+      typeDuplication: shownIn("## Duplicated types"),
       testDuplication: shownIn("## Duplication in tests"),
       cycles: shownIn("## Module tangle"),
     }),
@@ -280,6 +299,7 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
     ...headerLines(input, input.totalFindings),
     ...omittedSection(input, {
       duplication: input.census.duplication,
+      typeDuplication: input.census.typeDuplication,
       testDuplication: input.census.testDuplication,
       cycles: input.census.cycles,
     }),
@@ -431,15 +451,17 @@ function percent(part: number, whole: number): string {
  */
 function omittedSection(
   input: ReportInput,
-  shown: { duplication: number; testDuplication: number; cycles: number },
+  shown: { duplication: number; typeDuplication: number; testDuplication: number; cycles: number },
 ): string[] {
-  const printed = shown.duplication + shown.testDuplication + shown.cycles;
+  const printed =
+    shown.duplication + shown.typeDuplication + shown.testDuplication + shown.cycles;
   const omitted = input.totalFindings - printed;
   if (omitted <= 0) return [];
   const c = input.census;
 
   const rows: [string, number, number][] = [
     ["duplication", c.duplication, shown.duplication],
+    ["duplicated types", c.typeDuplication, shown.typeDuplication],
     ["duplication in tests", c.testDuplication, shown.testDuplication],
     ["module tangle", c.cycles, shown.cycles],
   ];

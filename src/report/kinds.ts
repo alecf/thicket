@@ -49,3 +49,56 @@ function buildAliases(): Map<string, string> {
 export function canonicalKind(kind: string): string {
   return ALIASES.get(kind) ?? kind;
 }
+
+/**
+ * Kinds that exist only in the type system, by canonical name.
+ *
+ * Enumerated by enum VALUE and canonicalized, never matched on names directly:
+ * `SyntaxKind[SyntaxKind.TypePredicate]` reverse-maps to `"FirstTypeNode"` and
+ * `SyntaxKind[SyntaxKind.ImportType]` to `"LastTypeNode"`, so a name-keyed set
+ * would silently miss both ends of the range (PRD §2.4).
+ *
+ * `FirstTypeNode..LastTypeNode` is TypeScript's own range for type nodes, so
+ * it covers a kind added in a future release without an edit here. The two
+ * declarations and the member signatures sit outside that range and are listed
+ * explicitly. `EnumDeclaration` is deliberately absent: an enum emits an
+ * object at runtime, so duplicated enums are duplicated code.
+ */
+const TYPE_KIND_NAMES: ReadonlySet<string> = buildTypeKinds();
+
+function buildTypeKinds(): Set<string> {
+  const values: number[] = [
+    SyntaxKind.InterfaceDeclaration,
+    SyntaxKind.TypeAliasDeclaration,
+    SyntaxKind.PropertySignature,
+    SyntaxKind.MethodSignature,
+    SyntaxKind.IndexSignature,
+    SyntaxKind.CallSignature,
+    SyntaxKind.ConstructSignature,
+    SyntaxKind.TypeParameter,
+    SyntaxKind.HeritageClause,
+  ];
+  for (let k = SyntaxKind.FirstTypeNode; k <= SyntaxKind.LastTypeNode; k++) values.push(k);
+
+  const out = new Set<string>();
+  for (const value of values) {
+    const name = SyntaxKind[value];
+    if (typeof name === "string") out.add(canonicalKind(name));
+  }
+  return out;
+}
+
+/**
+ * True when a finding is duplication in the type system rather than in code.
+ *
+ * Reported separately rather than scored against code duplication. A type
+ * declaration is small by nature -- four copies of a five-line interface is 13
+ * recoverable lines where a duplicated function is 43 -- so it loses every
+ * contest decided on volume, and on a real application 33 groups of
+ * structurally identical declarations were invisible at every depth setting.
+ * Consolidating them is worth more than the line count says, because what
+ * repeats is a concept and not a body of code.
+ */
+export function isTypeKind(kind: string): boolean {
+  return TYPE_KIND_NAMES.has(canonicalKind(kind));
+}

@@ -1,3 +1,4 @@
+import { isTypeKind } from "./kinds.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
 /**
@@ -18,6 +19,8 @@ import { isTestMajority, type Ranked } from "./rank.js";
 export interface Census {
   /** Production-majority duplication candidates found, before any truncation. */
   duplication: number;
+  /** Type-system duplication candidates, the report's own section for them. */
+  typeDuplication: number;
   /** Test-majority duplication candidates, the report's second section. */
   testDuplication: number;
   /** Cycle findings found, before any truncation. */
@@ -48,12 +51,17 @@ const BANDS: readonly [string, number][] = [
 export function census(ranked: readonly Ranked[], cycles: number): Census {
   const bands = BANDS.map(([label]) => ({ label, count: 0 }));
   let duplication = 0;
+  let typeDuplication = 0;
   let testDuplication = 0;
   let singleFile = 0;
 
   for (const r of ranked) {
+    // Same order the report splits on, so the census counts what each section
+    // would actually hold rather than a fourth categorization of its own.
     if (isTestMajority(r.cluster)) {
       testDuplication += 1;
+    } else if (isTypeKind(r.cluster.kind)) {
+      typeDuplication += 1;
     } else {
       duplication += 1;
       // Banded over production candidates only, matching the section the
@@ -70,6 +78,7 @@ export function census(ranked: readonly Ranked[], cycles: number): Census {
 
   return {
     duplication,
+    typeDuplication,
     testDuplication,
     cycles,
     // An all-zero band is noise in a table whose job is to be scanned.
