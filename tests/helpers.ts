@@ -63,6 +63,16 @@ export function emptyConfig(): string {
  * exclusion must be by path segment, and a substring match passes the first
  * half of this fixture while silently deleting the second.
  */
+/**
+ * Four files in a complete mesh plus a leaf hanging off one of them. Every
+ * single-edge cut leaves the mesh strongly connected, so the best available
+ * cut detaches the leaf and shrinks a 5-module tangle to 4 -- a cut that does
+ * not break anything.
+ */
+export function meshConfig(): string {
+  return resolve(here, "fixtures/mesh/tsconfig.json");
+}
+
 export function generatedRoot(): string {
   return resolve(here, "fixtures/generated");
 }

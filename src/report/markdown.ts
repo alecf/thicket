@@ -62,6 +62,17 @@ export interface CycleFinding {
    */
   residual: number;
   /**
+   * The smallest tangle any single edge cut could leave, when none cleared the
+   * bar for being worth suggesting.
+   *
+   * Kept rather than discarded because it is the difference between "nothing
+   * you remove helps" and "the best you can do removes one module of nine" --
+   * two very different things to tell someone, and the search computed it
+   * either way. An agent handed the bare refusal recomputed exactly this by
+   * hand before it could decide the tangle was irreducible.
+   */
+  bestRejectedResidual?: number;
+  /**
    * Whether anything in the component is circular at FILE level, which decides
    * whether this finding is a defect or an artifact of how files were grouped.
    * Optional so a caller assembling a finding by hand need not compute it.
@@ -176,17 +187,25 @@ const SECTION_PREAMBLE: Record<string, string> = {
     "Arrows run importer → imported. The number is import sites — one per" +
     " symbol per importing file, `export … from` re-exports included; `type`" +
     " marks an edge erased at compile time and so not a runtime dependency at" +
-    " all. The dotted arrow is the suggested cut.",
+    " all.",
   "## Duplication": LEVEL_LEGEND,
   "## Duplication in tests": LEVEL_LEGEND,
 };
 
-function sectionHeader(section: string): string[] {
+/**
+ * Appended only when a chart in the section actually has one. A legend that
+ * explains a dotted arrow no arrow is drawn as reads, on a section whose only
+ * verdict is "no single edge is worth cutting", as a promise the report then
+ * fails to keep.
+ */
+const CUT_LEGEND = " The dotted arrow is the suggested cut.";
+
+function sectionHeader(section: string, extra = ""): string[] {
   const preamble = SECTION_PREAMBLE[section];
   // Blank line after the heading: without it the first body line becomes a
   // lazy continuation of nothing in some parsers and a paragraph glued to
   // the heading in others.
-  return preamble === undefined ? [section, ""] : [section, "", preamble, ""];
+  return preamble === undefined ? [section, ""] : [section, "", preamble + extra, ""];
 }
 
 export function renderMarkdown(input: ReportInput): string {
@@ -218,12 +237,16 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   const emitted = selectWithinBudget(input, blocks);
   const shown = emitted.length;
 
+  // Only promise the dotted arrow when a chart actually draws one.
+  const anyCut = input.cycles.some((c) => c.cuts.length > 0);
   const lines = [...headerLines(input, shown)];
   let section: string | undefined;
   for (const block of emitted) {
     if (block.section !== section) {
       section = block.section;
-      lines.push(...sectionHeader(section));
+      lines.push(
+        ...sectionHeader(section, section === "## Module tangle" && anyCut ? CUT_LEGEND : ""),
+      );
     }
     lines.push(...block.lines);
   }
@@ -267,7 +290,9 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
   let section: string | undefined;
   for (const block of blocks) {
     const text = (
-      block.section === section ? block.lines : [...sectionHeader(block.section), ...block.lines]
+      block.section === section
+        ? block.lines
+        : [...sectionHeader(block.section, CUT_LEGEND), ...block.lines]
     ).join("\n");
     const cost = estimateTokens(text) + 1; // +1 for the joining newline
     if (used + cost > input.budgetTokens) break;
@@ -906,6 +931,17 @@ function cutLines(cycle: CycleFinding): string[] {
     // Nothing is circular, so there is nothing to cut. Saying "no single edge
     // breaks this cycle" here would assert a cycle the line above just denied.
     if (cycle.fileCycles?.crossing.count === 0) return [];
+    const best = cycle.bestRejectedResidual;
+    // Two different facts, and they need different sentences. Claiming nothing
+    // helps, when one edge does shrink the tangle by a module, is the kind of
+    // overstatement a reader checks once and then stops trusting.
+    if (best !== undefined && best < cycle.modules.length) {
+      return [
+        `- **no single edge is worth cutting** — the best available removes` +
+          ` ${cycle.modules.length - best} of ${cycle.modules.length} modules and leaves` +
+          ` the other ${best} mutually dependent.`,
+      ];
+    }
     return [
       `- **no single edge breaks this cycle** — all ${cycle.modules.length} modules stay` +
         ` mutually dependent whichever runtime edge you remove.`,

@@ -177,6 +177,20 @@ const EXCERPT_COLUMNS = 100;
 const MAX_CUT_SEARCH_MODULES = 32;
 
 /**
+ * The most of a tangle a suggested cut may leave standing.
+ *
+ * A cut exists to break the tangle, not to shave a module off it. Refusing the
+ * pointless cuts -- type-only edges, SCCs no file cycle underlies -- left a
+ * gap: the chooser rejected the bad candidate and then reached for the next
+ * one, rather than concluding it had nothing to say. On a real 9-module tangle
+ * every available cut left 8 of the 9 mutually dependent, and the report
+ * printed one anyway, directly above the line admitting it changed almost
+ * nothing. Two thirds is the bar; a cut that eliminates the cycle outright is
+ * always worth printing, however small the tangle it came from.
+ */
+const MAX_RESIDUAL_SHARE = 2 / 3;
+
+/**
  * Copies compared when working out what varies between them.
  *
  * A bound on work, not on truth: the answer is which constants differ, and a
@@ -283,7 +297,7 @@ export async function runReport(
         },
         (p) => graph.moduleOf[p],
       );
-      const { dissolves, cuts, residual } = suggestFixes(
+      const { dissolves, cuts, residual, bestRejectedResidual } = suggestFixes(
         modules,
         inner,
         cycles.crossing.count,
@@ -296,6 +310,7 @@ export async function runReport(
         dissolves,
         cuts,
         residual,
+        bestRejectedResidual,
         fileCycles: cycles,
       };
     });
@@ -576,7 +591,7 @@ function suggestFixes(
   inner: readonly ModuleEdge[],
   crossingFileCycles: number,
   moduleOf: Record<string, string>,
-): { dissolves: ModuleEdge[]; cuts: ModuleEdge[]; residual: number } {
+): { dissolves: ModuleEdge[]; cuts: ModuleEdge[]; residual: number; bestRejectedResidual?: number } {
   // Routing edges: nearly everything on them is forwarded, and forwarded from
   // outside the module being depended on -- a barrel re-exporting its own
   // package's internals is not routing, it is that package's API surface.
@@ -595,13 +610,13 @@ function suggestFixes(
   const surviving = inner.filter((e) => !dissolved.has(`${e.from} -> ${e.to}`));
   const afterDissolve = largestScc(component, surviving);
 
-  const { cuts, residual } = suggestCuts(
+  const { cuts, residual, bestRejectedResidual } = suggestCuts(
     component,
     surviving,
     crossingFileCycles,
     afterDissolve,
   );
-  return { dissolves, cuts, residual };
+  return { dissolves, cuts, residual, bestRejectedResidual };
 }
 
 function suggestCuts(
@@ -609,7 +624,7 @@ function suggestCuts(
   inner: readonly ModuleEdge[],
   crossingFileCycles: number,
   startingFrom: number,
-): { cuts: ModuleEdge[]; residual: number } {
+): { cuts: ModuleEdge[]; residual: number; bestRejectedResidual?: number } {
   const unchanged = { cuts: [], residual: startingFrom };
   if (component.length > MAX_CUT_SEARCH_MODULES) return unchanged;
   // Nothing to cut when nothing is circular. An SCC with no file-level cycle
@@ -638,11 +653,20 @@ function suggestCuts(
     );
 
   let best: { edge: ModuleEdge; residual: number } | undefined;
+  let bestRejected: number | undefined;
   for (const candidate of candidates) {
     const residual = largestSccWithout(component, inner, candidate);
     // Measured against what dissolution already achieved, so a cut is only
     // suggested when it buys something the free fix did not.
     if (residual >= startingFrom) continue;
+    // And it has to buy enough to be worth the reader's time. `residual <= 1`
+    // means no cycle is left at all, which is worth printing at any size.
+    if (residual > 1 && residual > startingFrom * MAX_RESIDUAL_SHARE) {
+      // Not suggested, but worth remembering: "the best you can do removes one
+      // module of nine" is a different answer from "nothing helps".
+      bestRejected = Math.min(bestRejected ?? Infinity, residual);
+      continue;
+    }
     // Strictly better only, so among equally dissolving cuts the cheapest
     // wins -- `candidates` is already in ascending cost order.
     if (best === undefined || residual < best.residual) best = { edge: candidate, residual };
@@ -650,7 +674,8 @@ function suggestCuts(
     if (residual <= 1) break;
   }
 
-  return best === undefined ? unchanged : { cuts: [best.edge], residual: best.residual };
+  if (best === undefined) return { ...unchanged, bestRejectedResidual: bestRejected };
+  return { cuts: [best.edge], residual: best.residual };
 }
 
 /** Size of the largest SCC of `component` once `omit` is removed. */

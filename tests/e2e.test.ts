@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
 import {
   configTableConfig,
+  meshConfig,
   driftConfig,
   emptyConfig,
   fixtureConfig,
@@ -247,6 +248,45 @@ describe("runReport", () => {
       if (cycle.cuts.length === 0) expect(cycle.residual).toBe(cycle.modules.length);
       else expect(cycle.residual).toBeLessThan(cycle.modules.length);
     }
+  });
+
+  it("refuses a cut that shaves the tangle instead of breaking it", async () => {
+    // Four files in a complete mesh, plus a leaf. No single edge inside the
+    // mesh disconnects it, so the best cut available detaches the leaf: five
+    // modules down to four, with the mesh untouched. That is not a fix, and
+    // offering it is the failure mode the type-only refusal exposed -- the
+    // chooser correctly rejected the pointless edge and then reached for the
+    // next candidate instead of concluding there is nothing to suggest. On a
+    // real 9-module tangle every available cut left 8.
+    const { json } = await runReport({
+      config: meshConfig(),
+      granularity: "file",
+      minNodes: 100,
+      cache: false,
+    });
+    const cycle = json.cycles[0]!;
+    expect(cycle.modules.length).toBe(5);
+    expect(cycle.cuts).toEqual([]);
+    // And says so, rather than printing a cut line with nothing under it.
+    expect(cycle.residual).toBe(5);
+    // The best it could do is remembered, because "nothing helps" and "the
+    // best available removes one of five" are different answers and only one
+    // of them is true here.
+    expect(cycle.bestRejectedResidual).toBe(4);
+  });
+
+  it("does not explain a dotted arrow it never draws", async () => {
+    const mesh = await runReport({
+      config: meshConfig(),
+      granularity: "file",
+      minNodes: 100,
+      cache: false,
+    });
+    expect(mesh.markdown).toContain("## Module tangle");
+    expect(mesh.markdown).not.toContain("dotted arrow");
+    // And still explains it where a cut is actually suggested.
+    const tangle = await runReport({ config: tangleConfig(), granularity: 2, minNodes: 100 });
+    expect(tangle.markdown).toContain("dotted arrow");
   });
 
   it("only suggests cuts it has verified break the cycle", async () => {
