@@ -63,6 +63,9 @@ export function emptyConfig(): string {
  * exclusion must be by path segment, and a substring match passes the first
  * half of this fixture while silently deleting the second.
  */
+export function generatedRoot(): string {
+  return resolve(here, "fixtures/generated");
+}
 export function generatedConfig(): string {
   return resolve(here, "fixtures/generated/tsconfig.json");
 }

@@ -1,6 +1,6 @@
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
 import { analysisScope, type Scope } from "./extract/scope.js";
-import { openProject } from "./extract/ts-adapter.js";
+import { openProject, type ExcludedCounts } from "./extract/ts-adapter.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
@@ -43,6 +43,12 @@ export interface RunOptions {
   /** Analyze generated/vendored directories too (see `GENERATED_DIR_SEGMENTS`). */
   includeGenerated?: boolean;
   /**
+   * Globs whose files are not analyzed, matched against repo-relative paths.
+   * An instruction rather than a heuristic, so `includeGenerated` leaves it in
+   * force.
+   */
+  exclude?: readonly string[];
+  /**
    * Reuse `.thicket/cache.db` under the project root to skip re-walking files
    * whose content has not changed. On by default. It changes how long the run
    * takes and nothing else — the report is identical either way.
@@ -60,6 +66,8 @@ export interface ReportJson {
   metrics: ReportInput["metrics"];
   /** What the program covered of the tree on disk, and what it missed. */
   scope: Scope;
+  /** How many files each exclusion rule dropped from inside that program. */
+  excluded: ExcludedCounts;
   duplication: {
     /** THK-DUP finding id; identical to the one the Markdown prints. */
     id: string;
@@ -191,6 +199,9 @@ export async function runReport(
   const granularity = opts.granularity ?? "auto";
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
+  // Sorted so that two runs passing the same patterns in a different order
+  // share a cache rather than silently invalidating each other (AGENTS.md §1).
+  const exclude = [...(opts.exclude ?? [])].sort(compareStrings);
   // Every knob that can change the finding set belongs in the hash: two
   // reports with the same configHash must have been produced the same way.
   const configHash = hash(
@@ -200,10 +211,11 @@ export async function runReport(
       minLines,
       granularity: String(granularity),
       includeGenerated,
+      exclude,
     }),
   ).slice(0, 8);
 
-  const project = await openProject(opts.config, { includeGenerated });
+  const project = await openProject(opts.config, { includeGenerated, exclude });
   // Opened against the project root rather than the cwd, so the cache belongs
   // to the codebase being analyzed and not to wherever the tool was invoked.
   // `openCache` answers null rather than throwing on anything it cannot use.
@@ -221,9 +233,12 @@ export async function runReport(
       totalBytes += file.sourceFile.text.length;
     }
 
+    // The same rules on both sides. A denominator that counts what analysis
+    // deliberately skipped invents a gap no --config can close.
     const scope = analysisScope(
       project.root,
       files.map((f) => f.path),
+      { includeGenerated, exclude },
     );
 
     const graph = buildModuleGraph(project, { granularity });
@@ -407,6 +422,7 @@ export async function runReport(
         largestScc: components.reduce((max, c) => Math.max(max, c.length), 0),
       },
       scope,
+      excluded: project.excluded,
       duplication: emitted.map(withVariants),
       testDuplication: emittedTests.map(withVariants),
       cycles: cycles.slice(0, maxFindings),
@@ -429,6 +445,7 @@ export async function runReport(
         moduleCount: input.moduleCount,
         metrics: input.metrics,
         scope,
+      excluded: project.excluded,
         duplication: [...emitted, ...emittedTests].map((r) => ({
           id: r.cluster.id,
           shapeHash: r.shapeHash,

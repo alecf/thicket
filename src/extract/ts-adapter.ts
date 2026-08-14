@@ -4,7 +4,7 @@ import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/sync";
 import { hash, initHash } from "../hash.js";
 import { compareStrings } from "../order.js";
-import { isGeneratedPath } from "./exclude.js";
+import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
 import { forEachChildSafe, walk } from "./traverse.js";
 import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
@@ -69,6 +69,11 @@ export interface ImportDetail {
 export interface Project {
   /** Absolute, POSIX-separated. Every `FileHandle.path` is relative to this. */
   root: string;
+  /**
+   * How many files each exclusion rule dropped. Reported, never silent: a run
+   * that analyzed too little has to be visible in its own output.
+   */
+  excluded: ExcludedCounts;
   files(): FileHandle[];
   getSourceFile(relPath: string): SourceFileNode | undefined;
   resolveImport(from: FileHandle, specifier: unknown): string | undefined;
@@ -372,11 +377,24 @@ function referencedConfigPath(raw: string): string | undefined {
 
 export interface OpenProjectOptions {
   /**
-   * Analyze generated/vendored directories too. Off by default: emitted code
-   * is duplication by construction and crowds out real findings. See
-   * `GENERATED_DIR_SEGMENTS`.
+   * Analyze generated/vendored code too. Off by default: emitted code is
+   * duplication by construction and crowds out real findings. Turns off both
+   * heuristics — `GENERATED_DIR_SEGMENTS` and the banner sniff — but never
+   * `exclude`, which is an instruction rather than a guess.
    */
   includeGenerated?: boolean;
+  /**
+   * Globs, matched against repo-relative paths, whose files are not analyzed.
+   * The escape hatch for generated code that declares nothing.
+   */
+  exclude?: readonly string[];
+}
+
+/** What `openProject` dropped, by the rule that dropped it. */
+export interface ExcludedCounts {
+  directory: number;
+  banner: number;
+  pattern: number;
 }
 
 export async function openProject(
@@ -398,6 +416,8 @@ export async function openProject(
   // A file present in several tsconfig projects is returned once per project.
   // Dedupe on absolute path; the unit of analysis is the FILE, not (project,file).
   const seen = new Set<string>();
+  const excludePatterns = opts.exclude ?? [];
+  const excluded: ExcludedCounts = { directory: 0, banner: 0, pattern: 0 };
   const files: FileHandle[] = [];
   const byRel = new Map<string, FileHandle>();
   // `Path` values from the checker are CASE-CANONICALIZED (lowercased) while
@@ -433,9 +453,22 @@ export async function openProject(
       // Segment-matched against the REPO-RELATIVE path: a checkout that lives
       // under a directory called `build` would otherwise exclude itself.
       const relPath = toPosix(relative(root, name));
-      if (!opts.includeGenerated && isGeneratedPath(relPath)) continue;
+      // Cheapest first, and path-only rules before any that need the text.
+      if (!opts.includeGenerated && isGeneratedPath(relPath)) {
+        excluded.directory += 1;
+        continue;
+      }
+      if (excludePatterns.length > 0 && isExcludedByPattern(relPath, excludePatterns)) {
+        excluded.pattern += 1;
+        continue;
+      }
       const sf = project.program.getSourceFile(name) as unknown as SourceFileNode | undefined;
       if (!sf) continue;
+      // Costs nothing extra: the text is already in hand for the content hash.
+      if (!opts.includeGenerated && hasGeneratedBanner(sf.text)) {
+        excluded.banner += 1;
+        continue;
+      }
       const handle: FileHandle = {
         path: relPath,
         absPath: name,
@@ -609,6 +642,7 @@ export async function openProject(
 
   return {
     root,
+    excluded,
     files: () => files,
     getSourceFile: (relPath) => byRel.get(relPath)?.sourceFile,
     resolveImport,

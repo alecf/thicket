@@ -40,7 +40,8 @@ Usage: thicket [options]
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
   --max-locations <n>    cap the files each finding names (default: name them all)
   --granularity <g>      auto | file | <directory depth> (default auto)
-  --include-generated    also analyze dist/, build/, .next/ and friends
+  --include-generated    also analyze generated dirs and banner-marked files
+  --exclude <glob>       skip files matching this glob; repeatable
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -65,6 +66,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         "max-locations": { type: "string" },
         granularity: { type: "string" },
         "include-generated": { type: "boolean" },
+        exclude: { type: "string", multiple: true },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -159,6 +161,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       maxFindings: preset.maxFindings,
       granularity,
       includeGenerated: values["include-generated"] ?? false,
+      exclude: values.exclude ?? [],
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
       ...(maxLocations === undefined ? {} : { maxLocations }),

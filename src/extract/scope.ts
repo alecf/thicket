@@ -1,12 +1,47 @@
-import { existsSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { compareStrings } from "../order.js";
-import { GENERATED_DIR_SEGMENTS } from "./exclude.js";
+import { GENERATED_DIR_SEGMENTS, hasGeneratedBanner, isExcludedByPattern } from "./exclude.js";
 
 const GENERATED = new Set(GENERATED_DIR_SEGMENTS);
 const SOURCE_EXT = /\.(ts|tsx|mts|cts)$/;
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
+
+/**
+ * The exclusion rules, which the scan must apply exactly as analysis does.
+ * Passing them separately is what keeps the two sides from disagreeing.
+ */
+export interface ScanOptions {
+  includeGenerated?: boolean;
+  exclude?: readonly string[];
+}
+
+/** How much of a file to read when looking for a generator's banner. */
+const HEAD_BYTES = 4096;
+
+/**
+ * The first `HEAD_BYTES` of a file, as text.
+ *
+ * A bounded read rather than `readFileSync`: this runs once per source file on
+ * disk, and the banner is always at the top. Slurping whole files here would
+ * make the coverage figure cost as much as the analysis it describes.
+ */
+function readHead(absPath: string): string {
+  let fd;
+  try {
+    fd = openSync(absPath, "r");
+    const buf = Buffer.alloc(HEAD_BYTES);
+    const read = readSync(fd, buf, 0, HEAD_BYTES, 0);
+    return buf.subarray(0, read).toString("utf8");
+  } catch {
+    // Unreadable is a permissions problem, not a generated file. Treating it
+    // as source errs toward counting it, matching the walk above.
+    return "";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
 
 /** One directory of source the program never saw, and the config that owns it. */
 export interface ScopeGap {
@@ -43,8 +78,9 @@ export interface Scope {
  *    One worktree doubles every file in the repo.
  *  - **`node_modules`** is not first-party source.
  */
-export function scanSourceFiles(root: string): string[] {
+export function scanSourceFiles(root: string, opts: ScanOptions = {}): string[] {
   const out: string[] = [];
+  const exclude = opts.exclude ?? [];
 
   const walk = (dir: string, prefix: string): void => {
     let entries;
@@ -62,7 +98,10 @@ export function scanSourceFiles(root: string): string[] {
         if (name === "node_modules" || name.startsWith(".") || GENERATED.has(name)) continue;
         walk(join(dir, name), prefix === "" ? name : `${prefix}/${name}`);
       } else if (entry.isFile() && SOURCE_EXT.test(name) && !name.endsWith(".d.ts")) {
-        out.push(prefix === "" ? name : `${prefix}/${name}`);
+        const rel = prefix === "" ? name : `${prefix}/${name}`;
+        if (exclude.length > 0 && isExcludedByPattern(rel, exclude)) continue;
+        if (!opts.includeGenerated && hasGeneratedBanner(readHead(join(dir, name)))) continue;
+        out.push(rel);
       }
     }
   };
@@ -88,8 +127,12 @@ export function scanSourceFiles(root: string): string[] {
  * deliberately scoped the run — and it avoids reporting on a parent repository
  * that merely happens to contain the project.
  */
-export function analysisScope(root: string, analyzedPaths: readonly string[]): Scope {
-  const onDiskPaths = scanSourceFiles(root);
+export function analysisScope(
+  root: string,
+  analyzedPaths: readonly string[],
+  opts: ScanOptions = {},
+): Scope {
+  const onDiskPaths = scanSourceFiles(root, opts);
   const analyzed = new Set(analyzedPaths.map(toPosix));
 
   const missing = onDiskPaths.filter((p) => !analyzed.has(p));

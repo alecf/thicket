@@ -1,6 +1,47 @@
 import { describe, expect, it } from "vitest";
 import { analysisScope, scanSourceFiles } from "../src/extract/scope.js";
-import { partialRoot } from "./helpers.js";
+import { generatedRoot, partialRoot } from "./helpers.js";
+
+describe("the denominator excludes what analysis excludes", () => {
+  // Both sides must apply the same rules. When the banner sniff started
+  // dropping 3408 machine-emitted files from analysis but the scan still
+  // counted them on disk, the report blamed the package they lived in for
+  // being outside the program and printed the --config that was ALREADY
+  // passed. A gap no flag can close is worse than no gap at all -- and this
+  // one accused the user of a mistake they had not made.
+  it("does not count banner-marked generated files on disk", () => {
+    const found = scanSourceFiles(generatedRoot());
+    expect(found).not.toContain("src/table.gen.ts");
+    expect(found).not.toContain("src/widgets/badge.ts");
+    expect(found).toContain("src/outbound.ts");
+  });
+
+  it("calls a run complete when the only unanalyzed files are generated", () => {
+    const analyzed = [
+      "src/distance/measure.ts",
+      "src/handwritten.ts",
+      "src/mentions.ts",
+      "src/outbound.ts",
+    ];
+    const scope = analysisScope(generatedRoot(), analyzed);
+    expect(scope.onDisk).toBe(4);
+    expect(scope.complete).toBe(true);
+    expect(scope.gaps).toEqual([]);
+  });
+
+  it("counts them when they are being analyzed", () => {
+    // Under --include-generated the two sides have to agree the other way,
+    // or coverage exceeds 100% and the gap goes negative.
+    const found = scanSourceFiles(generatedRoot(), { includeGenerated: true });
+    expect(found).toContain("src/table.gen.ts");
+    expect(found).toContain("src/widgets/badge.ts");
+  });
+
+  it("honours --exclude on both sides too", () => {
+    const found = scanSourceFiles(generatedRoot(), { exclude: ["**/distance/**"] });
+    expect(found).not.toContain("src/distance/measure.ts");
+  });
+});
 
 describe("scanSourceFiles", () => {
   it("finds hand-written TypeScript and nothing else", () => {

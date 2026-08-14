@@ -96,7 +96,7 @@ Pointed at this repository's own test fixture, `node dist/cli.js --config tests/
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config 97d8d00b · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config a2fe5476 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
