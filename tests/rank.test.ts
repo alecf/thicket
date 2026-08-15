@@ -371,6 +371,57 @@ describe("subsume", () => {
     ]);
   });
 
+  it("does not hang an L1 child's locations off an L0 finding", () => {
+    // `contains` lets an L0 parent swallow an L1 child, which is right for
+    // deduplication -- the coarser match subsumes the finer one. It is wrong
+    // for `alsoAt`, because the field is printed under a heading the reader
+    // reads at the FINDING's level. On a real report an L0 cluster of
+    // `{ info: vi.fn(), warn: vi.fn(), ... }` pointed at two Zod schemas,
+    // `z.object({ questionId: z.string(), ... })`, which match only at L1 --
+    // "four keys whose values are calls", a syntax template shared by every
+    // four-field object in TypeScript. An agent spent three tool calls
+    // disproving a bug before it could trust the rest of the block.
+    const parent = cluster({
+      id: "parent",
+      level: "L0",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 12 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const looseChild = cluster({
+      id: "loose",
+      level: "L1",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 11 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        occ("src/unrelated.ts", 0, 250, 4, 12),
+      ],
+    });
+    const [kept] = subsume([parent, looseChild]);
+    // Still deduplicated -- only one finding survives.
+    expect(subsume([parent, looseChild]).map((c) => c.id)).toEqual(["parent"]);
+    // But its locations are not advertised as the same shape.
+    expect(kept?.alsoAt).toBeUndefined();
+  });
+
+  it("still keeps them when the levels match", () => {
+    const parent = cluster({
+      id: "parent",
+      level: "L1",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 12 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      level: "L1",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 11 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        occ("src/setup.ts", 0, 250, 7, 15),
+      ],
+    });
+    expect(subsume([parent, child])[0]?.alsoAt?.map((o) => o.filePath)).toEqual(["src/setup.ts"]);
+  });
+
   it("names the shallowest path first, because that is where shared code lives", () => {
     // Only a few of these get named, and the one worth naming is the one that
     // might already BE the extraction. On a real report alphabetical order

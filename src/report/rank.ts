@@ -285,7 +285,19 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
       kept.push(candidate);
       continue;
     }
-    const outside = candidate.occurrences.filter((c) => !insideAny(parent, c));
+    // Only when the child matched at the SAME level. `contains` deliberately
+    // lets an L0 parent swallow an L1 child -- the coarser match subsumes the
+    // finer one, which is right for deduplication. It is wrong here, because
+    // this field is printed under a heading a reader interprets at the
+    // FINDING's level: an L0 cluster of `{ info: vi.fn(), warn: vi.fn(), … }`
+    // pointed at two Zod schemas that match it only at L1, where "four keys
+    // whose values are calls" is a template shared by every four-field object
+    // in TypeScript. An agent spent three tool calls disproving a bug before
+    // it could trust the rest of the block.
+    const outside =
+      candidate.level === parent.level
+        ? candidate.occurrences.filter((c) => !insideAny(parent, c))
+        : [];
     if (outside.length > 0) {
       const prior = elsewhere.get(parent.id);
       if (prior) prior.push(...outside);
