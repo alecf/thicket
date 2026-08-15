@@ -54,6 +54,19 @@ export interface CycleFinding {
   dissolves?: TangleEdge[];
   cuts: TangleEdge[];
   /**
+   * Modules still mutually dependent once `import type` edges are erased --
+   * the size of this tangle in the graph that actually ships.
+   *
+   * A second number rather than a correction to the first: both graphs are
+   * complexity. A runtime cycle can fail at module-init time; a cycle in the
+   * type system is a knot a reader has to hold in their head, and untangling
+   * it into shared types has real value. What a reader cannot do is DERIVE
+   * this from the chart -- an edge printed `1352 (241 type)` still exists at
+   * runtime, so per-edge counts do not compose into an erased graph. On a real
+   * application the same component was 9 modules with all edges and 7 without.
+   */
+  runtimeModules?: number;
+  /**
    * Modules still mutually dependent after the suggested cuts, i.e. the
    * largest SCC that survives. Equal to `modules.length` when nothing was
    * found. Stating it is what stops "suggested cuts (1)" reading as "apply
@@ -331,6 +344,18 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
  * construct that actually means "label and value", and it survives being
  * pasted anywhere Markdown is rendered.
  */
+/**
+ * The erased-graph size for the largest tangle, appended to the headline
+ * metric. Same rule as the per-finding label: silent when erasure changes
+ * nothing, so the number means something wherever it appears.
+ */
+function summaryRuntimeLabel(input: ReportInput): string {
+  const largest = input.cycles.find((c) => c.modules.length === input.metrics.largestScc);
+  const runtime = largest?.runtimeModules;
+  if (runtime === undefined || runtime >= input.metrics.largestScc) return "";
+  return runtime <= 1 ? ", none at runtime" : `, ${runtime} at runtime`;
+}
+
 function headerLines(input: ReportInput, shown: number): string[] {
   const metrics: [string, string][] = [
     [
@@ -346,7 +371,8 @@ function headerLines(input: ReportInput, shown: number): string[] {
     ["propagation cost", input.metrics.propagationCost.toFixed(2)],
     [
       "dependency cycles",
-      `${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules)`,
+      `${input.metrics.cycleCount} (largest SCC: ${input.metrics.largestScc} modules` +
+        `${summaryRuntimeLabel(input)})`,
     ],
     ["findings", `${shown} of ${input.totalFindings} shown`],
   ];
@@ -793,7 +819,10 @@ function cycleBlock(cycle: CycleFinding): string[] {
   const prefix = commonModulePrefix(cycle.modules);
   const scoped = prefix === "" ? cycle : relativize(cycle, prefix);
   const under = prefix === "" ? "" : ` under \`${prefix}\``;
-  const lines = [`### ${cycle.id} · SCC of ${cycle.modules.length} modules${under}`, ""];
+  const lines = [
+    `### ${cycle.id} · SCC of ${cycle.modules.length} modules${under}${runtimeLabel(cycle)}`,
+    "",
+  ];
   // The chart when it fits, the member list when it does not — never both, and
   // never a chart with edges left out.
   lines.push(...(mermaidCycle(scoped) ?? memberFallback(scoped)));
@@ -946,6 +975,19 @@ function dissolveLines(cycle: CycleFinding): string[] {
     );
   }
   return lines;
+}
+
+/**
+ * The erased-graph size, printed only when erasure changes the answer. Saying
+ * "9 modules, 9 at runtime" on every ordinary tangle would be noise, and noise
+ * on a heading is what stops the interesting case being noticed.
+ */
+function runtimeLabel(cycle: CycleFinding): string {
+  const runtime = cycle.runtimeModules;
+  if (runtime === undefined || runtime >= cycle.modules.length) return "";
+  // A tangle with no runtime cycle at all is the case most worth naming: it is
+  // entirely conceptual, and nothing in it can fail at module-init time.
+  return runtime <= 1 ? " · nothing at runtime" : ` · ${runtime} at runtime`;
 }
 
 function cutLines(cycle: CycleFinding): string[] {

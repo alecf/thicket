@@ -565,3 +565,70 @@ describe("cutting a cycle that exists only in the type system", () => {
     expect(cycle.cuts[0]!.typeOnly).toBe(false);
   });
 });
+
+describe("the runtime tangle and the type tangle are different graphs", () => {
+  // `import type` is erased, so the two graphs can be very different objects:
+  // on a real application the same component was 9 modules with all edges and
+  // 7 once type-only edges were dropped. A reader cannot derive the second
+  // from the printed chart -- an edge labelled `1352 (241 type)` still exists
+  // at runtime, so partial per-edge counts do not compose -- and both numbers
+  // matter. A runtime cycle can fail at module-init time; a type cycle is a
+  // knot someone has to hold in their head. Neither is the "real" one.
+  it("reports how much of a tangle survives erasure", async () => {
+    const { json } = await runReport({
+      config: typeCutConfig(),
+      granularity: 2,
+      minNodes: 100,
+      cache: false,
+    });
+    const cycle = json.cycles[0]!;
+    expect(cycle.modules).toHaveLength(4);
+    // `shape` hangs off the clique by two type-only edges, so it is not in the
+    // runtime cycle at all.
+    expect(cycle.runtimeModules).toBe(3);
+  });
+
+  it("says so in the heading", async () => {
+    const { markdown } = await runReport({
+      config: typeCutConfig(),
+      granularity: 2,
+      minNodes: 100,
+      cache: false,
+    });
+    expect(markdown).toMatch(/SCC of 4 modules.*3 at runtime/);
+  });
+
+  it("calls a purely conceptual cycle what it is", async () => {
+    const { json, markdown } = await runReport({
+      config: typeCycleConfig(),
+      granularity: 2,
+      minNodes: 100,
+      cache: false,
+    });
+    const cycle = json.cycles.find((c) => c.modules.includes("ta"))!;
+    expect(cycle.runtimeModules).toBe(1);
+    expect(markdown).toMatch(/SCC of 2 modules.*nothing at runtime/);
+  });
+
+  it("carries the same fact into the summary metric", async () => {
+    const { markdown } = await runReport({
+      config: typeCutConfig(),
+      granularity: 2,
+      minNodes: 100,
+      cache: false,
+    });
+    expect(markdown).toMatch(/largest SCC: 4 modules, 3 at runtime/);
+  });
+
+  it("stays quiet when erasure changes nothing", async () => {
+    // The ordinary case: every edge runs, so a second number would be noise.
+    const { markdown, json } = await runReport({
+      config: tangleConfig(),
+      granularity: 2,
+      minNodes: 100,
+      cache: false,
+    });
+    expect(json.cycles[0]!.runtimeModules).toBe(json.cycles[0]!.modules.length);
+    expect(markdown).not.toContain("at runtime");
+  });
+});

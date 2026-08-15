@@ -322,6 +322,13 @@ export async function runReport(
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
         modules,
+        // The same Tarjan run on the graph that ships. Cheap -- the edges are
+        // already in hand and already labelled -- and it is not derivable from
+        // what the chart prints.
+        runtimeModules: largestScc(
+          modules,
+          inner.filter((e) => !e.typeOnly),
+        ),
         edges: inner,
         dissolves,
         cuts,
