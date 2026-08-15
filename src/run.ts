@@ -45,6 +45,16 @@ export interface RunOptions {
   /** Detect generated files by their banner comment. On by default. */
   bannerScan?: boolean;
   /**
+   * Which half of the codebase to analyze.
+   *
+   * `include` (default) reports both: a duplicated interface and a duplicated
+   * function are both complexity, and a cycle in the type system is a knot a
+   * reader still has to hold in their head. `exclude` restricts to what ships
+   * -- the graph that can fail at module-init time. `only` is the pass for
+   * conceptual structure: three near-identical interfaces that should be one.
+   */
+  types?: TypesMode;
+  /**
    * Globs whose files are not analyzed, matched against repo-relative paths.
    * An instruction rather than a heuristic, so `includeGenerated` leaves it in
    * force.
@@ -57,6 +67,9 @@ export interface RunOptions {
    */
   cache?: boolean;
 }
+
+/** See `RunOptions.types`. */
+export type TypesMode = "include" | "exclude" | "only";
 
 export interface ReportJson {
   version: string;
@@ -232,6 +245,7 @@ export async function runReport(
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
+  const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
   const exclude = [...(opts.exclude ?? [])].sort(compareStrings);
@@ -246,6 +260,7 @@ export async function runReport(
       includeGenerated,
       bannerScan,
       exclude,
+      types,
     }),
   ).slice(0, 8);
 
@@ -275,7 +290,7 @@ export async function runReport(
       { includeGenerated, bannerScan, exclude },
     );
 
-    const graph = buildModuleGraph(project, { granularity });
+    const graph = buildModuleGraph(project, { granularity, types });
     const clusters = subsume(await findDuplication(project, { minNodes, minLines, cache }));
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
     // but not what the report speaks. Swap in the THK-DUP finding id for the
@@ -373,8 +388,10 @@ export async function runReport(
     // whether it is a type or not.
     const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
     const rest = ranked.filter((r) => !isTestMajority(r.cluster));
-    const typeDuplication = rest.filter((r) => isTypeKind(r.cluster.kind));
-    const production = rest.filter((r) => !isTypeKind(r.cluster.kind));
+    const typeDuplication =
+      types === "exclude" ? [] : rest.filter((r) => isTypeKind(r.cluster.kind));
+    const production =
+      types === "only" ? [] : rest.filter((r) => !isTypeKind(r.cluster.kind));
 
     // Excerpts and surroundings are resolved only for what the report will
     // print: both need whole-project lookups, and a cluster can span a hundred
@@ -483,6 +500,7 @@ export async function runReport(
       },
       scope,
       excluded: project.excluded,
+      ...(types === "include" ? {} : { types }),
       duplication: emitted.map(withVariants),
       typeDuplication: emittedTypes.map(withVariants),
       testDuplication: emittedTests.map(withVariants),

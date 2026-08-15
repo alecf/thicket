@@ -137,6 +137,16 @@ describe("main", () => {
     expect(io.stdout()).toMatch(/7 files/);
   });
 
+  it("rejects an unknown --types mode instead of quietly analyzing everything", async () => {
+    // A typo'd mode that fell back to the default would be indistinguishable
+    // from asking for the default, and every number in the report would be
+    // drawn from a half the reader did not choose.
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--types", "typs"])).not.toBe(0);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/--types must be include, exclude, or only/);
+  });
+
   it("analyzes a solution-style config rather than reporting it empty", async () => {
     const io = capture();
     expect(await main(["--config", solutionConfig()])).toBe(0);

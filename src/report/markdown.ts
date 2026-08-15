@@ -118,6 +118,12 @@ export interface ReportInput {
   scope: Scope;
   /** What each exclusion rule dropped; omitted only by older callers. */
   excluded?: ExcludedCounts;
+  /**
+   * Set only when the run was restricted to one half of the codebase. Stated
+   * in the header, because every number below is drawn from that half and a
+   * reader comparing two reports has no other way to tell.
+   */
+  types?: "exclude" | "only";
   duplication: Ranked[];
   /**
    * Duplication in the type system -- interfaces, type aliases, the type
@@ -382,7 +388,8 @@ function headerLines(input: ReportInput, shown: number): string[] {
     "",
     `thicket ${input.version} · config ${input.configHash} · ` +
       `${input.fileCount} files / ${input.lineCount} LOC · ` +
-      `granularity: ${input.granularity} (${input.moduleCount} modules)`,
+      `granularity: ${input.granularity} (${input.moduleCount} modules)` +
+      (input.types === undefined ? "" : ` · types: ${input.types}`),
     "",
     // The report's primary reader is a model that was handed this file and
     // told to clean something up, with no other context. One line makes it

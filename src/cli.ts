@@ -43,6 +43,8 @@ Usage: thicket [options]
   --include-generated    also analyze generated dirs and banner-marked files
   --exclude <glob>       skip files matching this glob; repeatable
   --no-banner-scan       do not treat an "auto-generated" banner as generated
+  --types <mode>         include | exclude | only (default include) — whether
+                         type declarations and type-only imports are analyzed
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -69,6 +71,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         "include-generated": { type: "boolean" },
         exclude: { type: "string", multiple: true },
         "banner-scan": { type: "boolean", default: true },
+        types: { type: "string" },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -142,6 +145,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
+  // Rejected rather than silently defaulted: a typo'd mode that quietly
+  // analyzed everything would be indistinguishable from asking for everything.
+  const types = values.types ?? "include";
+  if (types !== "include" && types !== "exclude" && types !== "only") {
+    process.stderr.write(`thicket: --types must be include, exclude, or only; got ${types}\n`);
+    return 1;
+  }
+
   const granularity = parseGranularity(values.granularity);
   if (granularity === undefined) {
     process.stderr.write(
@@ -164,6 +175,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       granularity,
       includeGenerated: values["include-generated"] ?? false,
       bannerScan: values["banner-scan"] ?? true,
+      types,
       exclude: values.exclude ?? [],
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),

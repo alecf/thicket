@@ -76,6 +76,12 @@ export interface ModuleGraph {
 }
 
 export interface GraphOptions {
+  /**
+   * Which dependencies form the graph. `exclude` leaves only what survives
+   * compilation; `only` leaves the conceptual structure. See
+   * `RunOptions.types`.
+   */
+  types?: "include" | "exclude" | "only";
   /** `auto` selects per PRD §7.1; a number forces that directory depth. */
   granularity?: "auto" | "file" | number;
 }
@@ -181,7 +187,14 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
   }
 
   const modules = [...new Set(Object.values(moduleOf))].sort(compareStrings);
+  // `include` (the default) keeps both halves. The other two restrict the
+  // graph rather than annotate it, so every downstream number -- propagation
+  // cost, SCCs, suggested cuts -- describes the half that was asked for.
+  const wanted = opts.types ?? "include";
   const edges: ModuleEdge[] = [...weights.entries()]
+    .filter(([, edge]) =>
+      wanted === "include" ? true : wanted === "exclude" ? !edge.typeOnly : edge.typeOnly,
+    )
     .map(([key, edge]) => {
       const [from, to] = key.split(KEY_SEP) as [string, string];
       return {

@@ -632,3 +632,54 @@ describe("the runtime tangle and the type tangle are different graphs", () => {
     expect(markdown).not.toContain("at runtime");
   });
 });
+
+describe("the --types setting", () => {
+  const run = (types: "include" | "exclude" | "only", config: string, extra = {}) =>
+    runReport({ config, cache: false, types, ...extra });
+
+  it("includes both by default", async () => {
+    const { json } = await runReport({ config: typeShapeConfig(), minNodes: 6, cache: false });
+    expect(json.duplication.length).toBeGreaterThan(0);
+    expect(json.typeDuplication.length).toBeGreaterThan(0);
+  });
+
+  it("exclude drops type duplication and type-only edges", async () => {
+    const { json } = await run("exclude", typeShapeConfig(), { minNodes: 6 });
+    expect(json.typeDuplication).toEqual([]);
+    expect(json.duplication.length).toBeGreaterThan(0);
+
+    // A cycle held together by types alone is not a cycle in this mode.
+    const cyc = await run("exclude", typeCycleConfig(), { granularity: 2, minNodes: 100 });
+    expect(cyc.json.cycles.find((c) => c.modules.includes("ta"))).toBeUndefined();
+  });
+
+  it("only keeps type duplication and drops the code section", async () => {
+    const { json } = await run("only", typeShapeConfig(), { minNodes: 6 });
+    expect(json.duplication).toEqual([]);
+    expect(json.typeDuplication.length).toBeGreaterThan(0);
+  });
+
+  it("is part of the config hash, so a warm cache cannot serve the wrong one", async () => {
+    const a = await run("include", typeShapeConfig(), { minNodes: 6 });
+    const b = await run("exclude", typeShapeConfig(), { minNodes: 6 });
+    expect(a.json.configHash).not.toBe(b.json.configHash);
+  });
+
+  it("agrees with the runtime figure the default mode prints", async () => {
+    // Two independent paths to the same number: `include` erases type edges
+    // when measuring `runtimeModules`, `exclude` never builds them. If they
+    // disagree, one of them is wrong and the report contradicts itself.
+    const both = await run("include", typeCutConfig(), { granularity: 2, minNodes: 100 });
+    const runtimeOnly = await run("exclude", typeCutConfig(), { granularity: 2, minNodes: 100 });
+    const largest = (j: { cycles: { modules: string[] }[] }) =>
+      j.cycles.reduce((max, c) => Math.max(max, c.modules.length), 0);
+    expect(both.json.cycles[0]!.runtimeModules).toBe(largest(runtimeOnly.json));
+  });
+
+  it("states the mode in the report when it is not the default", async () => {
+    const { markdown } = await run("only", typeShapeConfig(), { minNodes: 6 });
+    expect(markdown).toContain("types: only");
+    const plain = await runReport({ config: typeShapeConfig(), minNodes: 6, cache: false });
+    expect(plain.markdown).not.toContain("types:");
+  });
+});
