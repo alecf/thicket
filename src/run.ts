@@ -666,16 +666,20 @@ function suggestCuts(
   if (crossingFileCycles === 0) return unchanged;
 
   const candidates = [...inner]
-    // Type-only edges are erased at compile time, so cutting one changes
-    // nothing that runs. They were previously PREFERRED, on the reasoning that
-    // moving a types file is the cheapest fix -- which produced exactly the
-    // wrong recommendation on a real 12-module tangle: a 2-symbol `types →
-    // models` cut that an agent executed in ten minutes and correctly called a
-    // no-op, because by the report's own definition that edge was never a
-    // runtime dependency.
-    .filter((e) => !e.typeOnly)
+    // Type-only edges are DEMOTED, not excluded. They were once preferred, on
+    // the reasoning that moving a types file is the cheapest fix, and that
+    // produced a 2-symbol cut an agent executed in ten minutes and correctly
+    // called a no-op -- so they were banned outright. That over-corrected: the
+    // defect in that recommendation was that it shaved one module off a tangle
+    // and left the rest, which `MAX_RESIDUAL_SHARE` now catches on its own for
+    // runtime and type cuts alike. A cycle in the type system is real
+    // complexity -- a reader cannot understand either module without the other
+    // -- and breaking one completely is worth proposing, labelled for what it
+    // is. The demotion stays because only a runtime cycle can fail at
+    // module-init time, so a runtime edge wins any tie.
     .sort(
       (a, b) =>
+        Number(a.typeOnly) - Number(b.typeOnly) ||
         a.files.length - b.files.length ||
         a.weight - b.weight ||
         compareStrings(a.from, b.from) ||

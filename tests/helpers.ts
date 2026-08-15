@@ -76,6 +76,14 @@ export function emptyConfig(): string {
  * contest scored on volume -- which is the whole reason they need a section of
  * their own.
  */
+/**
+ * Two independent 2-module cycles: one held together by `import type` alone,
+ * one where a runtime edge and a type edge each break it.
+ */
+export function typeCycleConfig(): string {
+  return resolve(here, "fixtures/typecycle/tsconfig.json");
+}
+
 export function typeShapeConfig(): string {
   return resolve(here, "fixtures/typeshape/tsconfig.json");
 }

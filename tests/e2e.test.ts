@@ -3,6 +3,7 @@ import { runReport } from "../src/run.js";
 import {
   configTableConfig,
   meshConfig,
+  typeCycleConfig,
   typeShapeConfig,
   driftConfig,
   emptyConfig,
@@ -207,14 +208,16 @@ describe("runReport", () => {
     expect(cycle.residual).toBe(2);
   });
 
-  it("never proposes a cut that is erased at compile time", async () => {
+  it("refuses a cheap type-only cut that only detaches a leaf", async () => {
     // `shape` sits in the SCC by two `import type` edges and nothing else, so
-    // detaching it is the best cut available BY DISSOLUTION -- four modules
-    // down to three, where every runtime edge leaves all four -- and it is
-    // worth nothing, because neither edge exists at runtime. The chooser used
-    // to PREFER type-only edges on the reasoning that moving a types file is
-    // cheap, which is how a real 12-module tangle got a suggested cut that an
-    // agent executed in ten minutes and correctly called a no-op.
+    // detaching it is the cheapest cut on offer -- and it leaves the alpha/
+    // beta/gamma clique exactly as knotted. This case is why type-only cuts
+    // were banned outright, after an agent executed one like it in ten minutes
+    // and correctly called it a no-op. The ban was aimed at the wrong
+    // property: what makes this worthless is that it shaves one module off a
+    // four-module tangle, which the residual bar rejects whether the edge is
+    // erased or not. A type-only cut that BREAKS a cycle is now proposed --
+    // see the type-cycle cases below.
     const { json, markdown } = await runReport({
       config: typeCutConfig(),
       granularity: 2,
@@ -222,15 +225,15 @@ describe("runReport", () => {
     });
     const cycle = json.cycles[0]!;
     expect(cycle.modules.sort()).toEqual(["alpha", "beta", "gamma", "shape"]);
-    // The cheap cut exists and is the most dissolving one on offer.
+    // The cheap cut exists, is type-only, and is the most dissolving on offer.
     const shapeEdges = cycle.edges.filter((e) => e.from === "shape" || e.to === "shape");
     expect(shapeEdges).toHaveLength(2);
     expect(shapeEdges.every((e) => e.typeOnly)).toBe(true);
-    // It is not taken, and nothing is proposed in its place, because no
-    // runtime edge breaks the clique.
     expect(cycle.cuts).toEqual([]);
     expect(cycle.residual).toBe(4);
-    expect(markdown).toContain("whichever runtime edge you remove");
+    // Refused for shaving, and the report says so with the number it rejected.
+    expect(cycle.bestRejectedResidual).toBe(3);
+    expect(markdown).toContain("the best available removes 1 of 4 modules");
   });
 
   it("reports the residual honestly when a cut only detaches a leaf", async () => {
@@ -523,5 +526,42 @@ describe("duplicated types", () => {
     // duplication in two different sections depending on how it was declared.
     const { json } = await runReport({ config: typeShapeConfig(), minNodes: 6, cache: false });
     expect(json.typeDuplication.map((r) => r.kind)).toContain("TypeLiteral");
+  });
+});
+
+describe("cutting a cycle that exists only in the type system", () => {
+  const load = () =>
+    runReport({ config: typeCycleConfig(), granularity: 2, minNodes: 100, cache: false });
+  const find = (json: { cycles: { modules: string[] }[] }, m: string) =>
+    json.cycles.find((c) => c.modules.includes(m))!;
+
+  it("proposes the cut, and labels it as erased", async () => {
+    // `ta` and `tb` reference each other's types and nothing else. Refusing
+    // this outright was an over-correction: the rule existed because a
+    // type-only cut once shaved one module off a tangle and changed nothing --
+    // which the residual bar now catches on its own, for runtime and type cuts
+    // alike. A conceptual cycle is real complexity, and breaking it completely
+    // is worth saying.
+    const { json } = await load();
+    const cycle = find(json, "ta");
+    expect(cycle.cuts).toHaveLength(1);
+    expect(cycle.cuts[0]!.typeOnly).toBe(true);
+    expect(cycle.residual).toBe(1);
+  });
+
+  it("says in the report that the cut is type-only", async () => {
+    const { markdown } = await load();
+    expect(markdown).toMatch(/suggested cut:.*type-only symbol/);
+  });
+
+  it("still prefers a runtime edge when one breaks the cycle just as well", async () => {
+    // `ra -> rb` runs; `rb -> ra` is erased. Both cuts break the cycle
+    // completely, so the tie goes to the real one: only a runtime cycle can
+    // fail at module-init time.
+    const { json } = await load();
+    const cycle = find(json, "ra");
+    expect(cycle.cuts).toHaveLength(1);
+    expect([cycle.cuts[0]!.from, cycle.cuts[0]!.to]).toEqual(["ra", "rb"]);
+    expect(cycle.cuts[0]!.typeOnly).toBe(false);
   });
 });
