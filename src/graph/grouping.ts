@@ -38,3 +38,29 @@ export function groupByDepth(paths: readonly string[], depth: number): Record<st
   }
   return out;
 }
+
+/**
+ * Group each file under the directory it actually lives in, at whatever depth
+ * that is.
+ *
+ * `groupByDepth` picks one depth N and treats every directory at that depth as
+ * a module, erasing all structure below it. On a real application at depth 4
+ * that made `src/lib` (1586 files) and `src/stores` (4 files) peers, while
+ * `src/lib/services` (328 files) did not exist as a module at all -- and the
+ * 22-file runtime cycle inside `src/lib` was invisible, because a cycle that
+ * never leaves a module is not a cycle between modules.
+ *
+ * Depth is not a property of a codebase. A tangle seven directories down is
+ * the same tangle as one two directories down, and nothing should treat them
+ * differently. The common prefix is still stripped, for the same reason
+ * `groupByDepth` strips it: otherwise every module in a monorepo is named
+ * `packages/…`.
+ */
+export function groupByDirectory(paths: readonly string[]): Record<string, string> {
+  const prefix = commonPrefix(paths);
+  const out: Record<string, string> = {};
+  for (const p of paths) {
+    out[p] = dirParts(p).slice(prefix.length).join("/") || "<root>";
+  }
+  return out;
+}

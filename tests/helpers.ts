@@ -88,6 +88,11 @@ export function typeShapeConfig(): string {
   return resolve(here, "fixtures/typeshape/tsconfig.json");
 }
 
+/** Four files at four different directory depths, one importing the next. */
+export function nestedConfig(): string {
+  return resolve(here, "fixtures/nested/tsconfig.json");
+}
+
 export function meshConfig(): string {
   return resolve(here, "fixtures/mesh/tsconfig.json");
 }

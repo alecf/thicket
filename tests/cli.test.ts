@@ -8,6 +8,7 @@ import {
   emptyConfig,
   fixtureConfig,
   fixtureRoot,
+  nestedConfig,
   generatedConfig,
   solutionConfig,
 } from "./helpers.js";
@@ -135,6 +136,29 @@ describe("main", () => {
       "**/distance/**",
     ]);
     expect(io.stdout()).toMatch(/7 files/);
+  });
+
+  it("--granularity dir names modules at their own depth", async () => {
+    // Four files at four depths. A fixed depth folds the deeper ones into the
+    // shallower one; `dir` must not. Asserting only that the run succeeds, or
+    // only the module COUNT against one other setting, passes with the feature
+    // deleted -- which is how this test failed its own mutation the first time.
+    const io = capture();
+    expect(await main(["--config", nestedConfig(), "--granularity", "dir"])).toBe(0);
+    expect(io.stdout()).toMatch(/granularity: dir \(4 modules\)/);
+
+    vi.restoreAllMocks();
+    const shallow = capture();
+    await main(["--config", nestedConfig(), "--granularity", "1"]);
+    // Depth 1 collapses three directories into one module. That difference is
+    // the whole feature.
+    expect(shallow.stdout()).toMatch(/granularity: dir:1 \(2 modules\)/);
+  });
+
+  it("still rejects a granularity that is neither a mode nor a depth", async () => {
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--granularity", "folder"])).not.toBe(0);
+    expect(io.stderr()).toMatch(/auto, dir, file, or a directory depth/);
   });
 
   it("rejects an unknown --types mode instead of quietly analyzing everything", async () => {

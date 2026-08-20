@@ -39,7 +39,8 @@ Usage: thicket [options]
   --min-lines <n>        override the depth preset's minimum fragment size, in lines
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
   --max-locations <n>    cap the files each finding names (default: name them all)
-  --granularity <g>      auto | file | <directory depth> (default auto)
+  --granularity <g>      auto | dir | file | <depth> (default auto)
+                         dir = every directory is a module, at its own depth
   --include-generated    also analyze generated dirs and banner-marked files
   --exclude <glob>       skip files matching this glob; repeatable
   --no-banner-scan       do not treat an "auto-generated" banner as generated
@@ -156,7 +157,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   const granularity = parseGranularity(values.granularity);
   if (granularity === undefined) {
     process.stderr.write(
-      `thicket: --granularity must be auto, file, or a directory depth; got ${values.granularity}\n`,
+      `thicket: --granularity must be auto, dir, file, or a directory depth; ` +
+        `got ${values.granularity}\n`,
     );
     return 1;
   }
@@ -271,9 +273,12 @@ function parseNumber(raw: string | undefined, flag: string): number | undefined 
   return n;
 }
 
-function parseGranularity(raw: string | undefined): "auto" | "file" | number | undefined {
+function parseGranularity(
+  raw: string | undefined,
+): "auto" | "file" | "dir" | number | undefined {
   if (raw === undefined || raw === "auto") return "auto";
   if (raw === "file") return "file";
+  if (raw === "dir") return "dir";
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }

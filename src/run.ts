@@ -31,7 +31,7 @@ export interface RunOptions {
   minNodes?: number;
   /** Smallest fragment worth reporting, in lines. See `ExtractOptions`. */
   minLines?: number;
-  granularity?: "auto" | "file" | number;
+  granularity?: "auto" | "file" | "dir" | number;
   budgetTokens?: number;
   /** Cap on findings emitted per section, before the token budget applies. */
   maxFindings?: number;

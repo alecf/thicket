@@ -1,7 +1,7 @@
 import type { Project } from "../extract/ts-adapter.js";
 import { compareStrings } from "../order.js";
 import { selectGranularity } from "./granularity.js";
-import { groupByDepth } from "./grouping.js";
+import { groupByDepth, groupByDirectory } from "./grouping.js";
 
 export interface ModuleEdge {
   from: string;
@@ -82,8 +82,12 @@ export interface GraphOptions {
    * `RunOptions.types`.
    */
   types?: "include" | "exclude" | "only";
-  /** `auto` selects per PRD §7.1; a number forces that directory depth. */
-  granularity?: "auto" | "file" | number;
+  /**
+   * `dir` makes every directory a module at its own depth -- no collapsing.
+   * `auto` selects per PRD §7.1; a number forces one fixed directory depth,
+   * which erases every directory below it.
+   */
+  granularity?: "auto" | "file" | "dir" | number;
 }
 
 /**
@@ -130,6 +134,9 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
   if (g === "file") {
     moduleOf = Object.fromEntries(paths.map((p) => [p, p]));
     label = "file";
+  } else if (g === "dir") {
+    moduleOf = groupByDirectory(paths);
+    label = "dir";
   } else if (typeof g === "number") {
     moduleOf = groupByDepth(paths, g);
     label = `dir:${g}`;
