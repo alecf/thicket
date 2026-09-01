@@ -88,7 +88,14 @@ const base: ReportInput = {
     },
   ],
   totalFindings: 2,
-  census: { duplication: 1, cycles: 1, bands: [{ label: "10–29", count: 1 }], testDuplication: 0, singleFile: 0 },
+  census: {
+    duplication: 1,
+    cycles: 1,
+    bands: [{ label: "10–29", count: 1 }],
+    typeDuplication: 0,
+    testDuplication: 0,
+    singleFile: 0,
+  },
 };
 
 /**

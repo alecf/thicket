@@ -532,7 +532,10 @@ describe("duplicated types", () => {
 describe("cutting a cycle that exists only in the type system", () => {
   const load = () =>
     runReport({ config: typeCycleConfig(), granularity: 2, minNodes: 100, cache: false });
-  const find = (json: { cycles: { modules: string[] }[] }, m: string) =>
+  // Generic in the cycle type rather than restating it: a hand-written
+  // `{ modules: string[] }` here silently erases every other field, which is
+  // how `cuts` and `residual` below stopped type-checking.
+  const find = <C extends { modules: string[] }>(json: { cycles: C[] }, m: string) =>
     json.cycles.find((c) => c.modules.includes(m))!;
 
   it("proposes the cut, and labels it as erased", async () => {

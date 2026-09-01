@@ -661,6 +661,7 @@ describe("renderMarkdown", () => {
           { label: "30–99", count: 1612 },
           { label: "1–3", count: 5598 },
         ],
+        typeDuplication: 173,
         testDuplication: 9389,
         singleFile: 9382,
       },
@@ -671,6 +672,7 @@ describe("renderMarkdown", () => {
     expect(out).toContain("| module tangle | 2 | 0 |");
     expect(out).toContain("| 100+ | 210 |");
     expect(out).toContain("| 1–3 | 5598 |");
+    expect(out).toContain("| duplicated types | 173 | 0 |");
     expect(out).toContain("| duplication in tests | 9389 | 0 |");
     // Worded so it cannot be read as one particular file whose name is being
     // withheld: this is a per-candidate property holding across thousands.
@@ -707,7 +709,14 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [ranked("THK-DUP-1")],
       totalFindings: 1,
-      census: { duplication: 1, cycles: 0, bands: [{ label: "10–29", count: 1 }], testDuplication: 0, singleFile: 0 },
+      census: {
+        duplication: 1,
+        cycles: 0,
+        bands: [{ label: "10–29", count: 1 }],
+        typeDuplication: 0,
+        testDuplication: 0,
+        singleFile: 0,
+      },
     });
     expect(out).not.toContain("## Omitted");
   });
