@@ -140,6 +140,18 @@ export function testSplitConfig(): string {
 }
 
 /**
+ * The one fixture that populates every census category at once: a production
+ * clone, a duplicated interface and type alias, identical scaffolding in three
+ * test files, and a two-module runtime cycle. The census claims to partition
+ * the candidate pile, and a partition cannot be checked against a fixture that
+ * leaves categories empty -- when `typeDuplication` was added to `Census` and
+ * left out of the sum, the sum still balanced everywhere it was asserted.
+ */
+export function censusConfig(): string {
+  return resolve(here, "fixtures/census/tsconfig.json");
+}
+
+/**
  * Three packages arranged so that every type-only case is distinguishable:
  * `pure -> model` is erased entirely, `view -> model` mixes one type-only
  * import with one value import, and `model -> pure` is plain value. The first

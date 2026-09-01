@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
 import {
+  censusConfig,
   configTableConfig,
   meshConfig,
   typeCycleConfig,
@@ -156,15 +157,24 @@ describe("runReport", () => {
     // The census is what the report says the unprinted tail consists of. If it
     // does not add up to the stated total, the summary is describing a
     // different pile than the one the findings came off.
-    // Run against the fixture that actually has both kinds, so the test
-    // half of this sum is not always zero.
-    const { json } = await runReport({ config: testSplitConfig(), minNodes: 8, minLines: 2 });
+    //
+    // The four counts partition every candidate, so all four belong in the
+    // sum. Leaving one out is invisible: `typeDuplication` was added to
+    // `Census` and omitted here, and the sum went on balancing because the
+    // fixture had no type findings. So this runs against the one fixture that
+    // populates every category, and requires each term to be non-zero -- a
+    // zero term is a term that was never tested.
+    const { json } = await runReport({ config: censusConfig(), minNodes: 8, minLines: 2 });
     const { census } = json;
-    expect(census.duplication + census.testDuplication + census.cycles).toBe(json.totalFindings);
+    expect(
+      census.duplication + census.typeDuplication + census.testDuplication + census.cycles,
+    ).toBe(json.totalFindings);
     const banded = census.bands.reduce((sum, b) => sum + b.count, 0);
     expect(banded).toBe(census.duplication);
     expect(census.duplication).toBeGreaterThan(0);
+    expect(census.typeDuplication).toBeGreaterThan(0);
     expect(census.testDuplication).toBeGreaterThan(0);
+    expect(census.cycles).toBeGreaterThan(0);
   });
 
   it("emits no absolute paths", async () => {
