@@ -29,7 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # `enablement: true` provisions Pages from the workflow itself. Without
+      # it the action only *reads* the Pages config and fails with a bare
+      # "Not Found" when nobody has clicked Settings -> Pages -> GitHub Actions,
+      # which is how every run of this workflow failed for its first week.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/setup-node@v4
         with:
           node-version: 24
