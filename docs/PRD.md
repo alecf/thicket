@@ -46,7 +46,7 @@ But `typescript@next` (`7.1.0-dev.20260808.1`) ships a curated API:
 
 | Export | Provides |
 |---|---|
-| `typescript/unstable/sync` | `API`, `Snapshot`, `Project`, `Program`, **`Checker`**, `Emitter` |
+| `typescript/unstable/async` | `API`, `Snapshot`, `Project`, `Program`, **`Checker`**, `Emitter` |
 | `typescript/unstable/ast` | `SyntaxKind`, node types, scanner, visitor, factory |
 
 The AST is lazily materialized from a binary buffer over JSON-RPC to the `tsgo` Go binary. The checker is complete enough for everything here: `getResolvedSignature`, `getSymbolAtLocation`, `getTypeAtLocation`, `getReferencedSymbolsForNode`, `getConstantValue`, `isTypeAssignableTo`, `getExportsOfModule`.
@@ -143,8 +143,8 @@ Both repos: tests are 17–21% of files but only **14% of duplicated mass**. 78�
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language | **TypeScript on Node ≥24** | §2.3 |
-| TS frontend | **`typescript@next` → `typescript/unstable/sync`** | Only path to real types; §2.1 |
+| Language | **TypeScript on Bun ≥1.4** | §2.3; runs live, no build step |
+| TS frontend | **`typescript@next` → `typescript/unstable/async`** | Only path to real types; §2.1. The `sync` variant reads POSIX fds off child stdio, which Bun does not expose |
 | Cache | **`node:sqlite`** (built-in, SQLite 3.53.1) | Zero native deps; relational |
 | Hashing | **xxhash64 / FNV-1a** (not SHA-256) | ~3× faster; collision risk irrelevant here |
 | Near-miss detection | **MinHash + LSH**, fixed seeds | Deterministic, 564 ms over 3.9k shapes |

@@ -74,6 +74,18 @@ describe("import resolution", () => {
       /belongs to no opened project/,
     );
   });
+
+  it("throws rather than reporting zero imports for a specifier nobody resolved", async () => {
+    // The same guard one level down. Specifiers are resolved in a batch before
+    // any walk starts, because the checker is asynchronous and `resolveImport`
+    // is called from inside synchronous walks. A node that misses that pass
+    // cannot be resolved later -- and answering `undefined` would report a
+    // live import as absent, which is the same clean-looking lie as above.
+    const project = await openProject(fixtureConfig());
+    const alpha = project.files().find((f) => f.path === "src/alpha.ts")!;
+    const strayNode = { kind: -1, pos: 0, end: 0 };
+    expect(() => project.resolveImport(alpha, strayNode)).toThrow(/not among its imports/);
+  });
 });
 
 /**

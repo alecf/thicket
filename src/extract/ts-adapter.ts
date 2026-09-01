@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/unstable/ast";
-import { API } from "typescript/unstable/sync";
+import { API } from "typescript/unstable/async";
 import { hash, initHash } from "../hash.js";
 import { compareStrings } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
@@ -10,9 +10,18 @@ import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 
+/** One symbol, as much of it as we read. */
+interface Sym {
+  declarations?: readonly { path?: string }[];
+}
+
 /** The subset of the checker we depend on. Kept structural on purpose. */
 interface Checker {
-  getSymbolAtLocation(node: unknown): { declarations?: readonly { path?: string }[] } | undefined;
+  // The array overload is declared FIRST on purpose: `unknown` accepts an
+  // array, so with the single-node signature ahead of it every batch call
+  // resolves to the scalar overload and the result type is a lie.
+  getSymbolAtLocation(nodes: readonly unknown[]): Promise<(Sym | undefined)[]>;
+  getSymbolAtLocation(node: unknown): Promise<Sym | undefined>;
 }
 
 /** One resolved import target and how many distinct names it binds. */
@@ -90,7 +99,7 @@ export interface Project {
    * hand. Following the hop is only sound when the file really is a stand-in.
    */
   reexportsOf(file: FileHandle): string[];
-  close(): void;
+  close(): Promise<void>;
 }
 
 /**
@@ -335,18 +344,21 @@ const MAX_REFERENCE_DEPTH = 10;
  * back at its solution root) and are cut by the visited set, keyed on the
  * case-folded path because tsconfig paths reach us with host casing.
  */
-function expandReferences(
+async function expandReferences(
   api: InstanceType<typeof API>,
   initial: readonly string[],
-): { snapshot: ReturnType<InstanceType<typeof API>["updateSnapshot"]>; configs: string[] } {
+): Promise<{
+  snapshot: Awaited<ReturnType<InstanceType<typeof API>["updateSnapshot"]>>;
+  configs: string[];
+}> {
   const open = [...initial];
   const visited = new Set(open.map((c) => c.toLowerCase()));
-  let snapshot = api.updateSnapshot({ openProjects: open });
+  let snapshot = await api.updateSnapshot({ openProjects: open });
 
   for (let depth = 0; depth < MAX_REFERENCE_DEPTH; depth++) {
     const added: string[] = [];
     for (const project of snapshot.getProjects()) {
-      if (project.program.getSourceFileNames().length > 0) continue;
+      if ((await project.program.getSourceFileNames()).length > 0) continue;
       for (const ref of project.parsedCommandLine.projectReferences ?? []) {
         const path = referencedConfigPath(ref.path);
         if (path === undefined || visited.has(path.toLowerCase())) continue;
@@ -357,7 +369,7 @@ function expandReferences(
     if (added.length === 0) break;
     added.sort(compareStrings); // deterministic open order
     open.push(...added);
-    snapshot = api.updateSnapshot({ openProjects: open });
+    snapshot = await api.updateSnapshot({ openProjects: open });
   }
   return { snapshot, configs: open };
 }
@@ -415,7 +427,7 @@ export async function openProject(
   );
 
   const api = new API({ cwd: commonRootDir(list) });
-  const { snapshot, configs: opened } = expandReferences(api, list);
+  const { snapshot, configs: opened } = await expandReferences(api, list);
   // Rooted at the ancestor of everything actually opened: a reference may sit
   // outside the requested config's directory, and a file above the root would
   // get a `../`-prefixed path, breaking the repo-relative-path contract.
@@ -440,7 +452,7 @@ export async function openProject(
 
   for (const project of snapshot.getProjects()) {
     const checker = project.checker as unknown as Checker;
-    for (const name of project.program.getSourceFileNames()) {
+    for (const name of await project.program.getSourceFileNames()) {
       // `.json` is excluded because `resolveJsonModule` puts every imported
       // data file into the program and the API parses it into a real
       // Array/ObjectLiteral AST. On one application a 126,000-line LOINC code
@@ -470,7 +482,9 @@ export async function openProject(
         excluded.pattern += 1;
         continue;
       }
-      const sf = project.program.getSourceFile(name) as unknown as SourceFileNode | undefined;
+      const sf = (await project.program.getSourceFile(name)) as unknown as
+        | SourceFileNode
+        | undefined;
       if (!sf) continue;
       // Costs nothing extra: the text is already in hand for the content hash.
       if (!opts.includeGenerated && opts.bannerScan !== false && hasGeneratedBanner(sf.text)) {
@@ -492,19 +506,58 @@ export async function openProject(
 
   files.sort((a, b) => compareStrings(a.path, b.path));
 
+  /**
+   * Module specifier node -> the file its symbol declares, resolved up front.
+   *
+   * The checker is asynchronous, and `resolveImport` is called from inside
+   * synchronous AST walks -- so every specifier is resolved here, once, before
+   * anything can ask. `sourceFile.imports` is the whole set the API itself
+   * identified as module specifiers, which is a superset of what the four call
+   * sites pass; a node missing from this map is therefore a bug rather than an
+   * unresolvable import, and is treated as one below.
+   *
+   * Batched per file, which is also why this is not merely a workaround: one
+   * round trip per file replaces one per specifier.
+   */
+  const declPathOf = new Map<unknown, string | undefined>();
+  for (const file of files) {
+    const checker = checkerOf.get(file.absPath);
+    if (!checker) continue; // impossible; resolveImport reports it loudly
+    const specifiers = [...(file.sourceFile.imports ?? [])];
+    if (specifiers.length === 0) continue;
+    let symbols: (Sym | undefined)[];
+    try {
+      symbols = await checker.getSymbolAtLocation(specifiers);
+    } catch {
+      // One unresolvable specifier (missing module, bad path) must not cost
+      // the file every other edge, so the batch degrades to one call each.
+      symbols = [];
+      for (const specifier of specifiers) {
+        try {
+          symbols.push(await checker.getSymbolAtLocation(specifier));
+        } catch {
+          symbols.push(undefined);
+        }
+      }
+    }
+    specifiers.forEach((specifier, i) => {
+      declPathOf.set(specifier, symbols[i]?.declarations?.[0]?.path);
+    });
+  }
+
   function resolveImport(from: FileHandle, specifier: unknown): string | undefined {
-    const checker = checkerOf.get(from.absPath);
-    if (!checker) {
+    if (!checkerOf.has(from.absPath)) {
       // Never silently return undefined here: an unowned file would look like
       // a file with no imports rather than a bug.
       throw new Error(`no checker for ${from.path}; it belongs to no opened project`);
     }
-    let path: string | undefined;
-    try {
-      path = checker.getSymbolAtLocation(specifier)?.declarations?.[0]?.path;
-    } catch {
-      return undefined; // unresolvable specifier (missing module, bad path)
+    if (!declPathOf.has(specifier)) {
+      // Same reasoning one level down: a specifier nobody pre-resolved reads
+      // as an unresolvable import, which is how "this repo has no imports"
+      // gets reported as a fact about the repo.
+      throw new Error(`unresolved specifier in ${from.path}; it is not among its imports`);
     }
+    const path = declPathOf.get(specifier);
     if (!path) return undefined;
     return byCanon.get(path.toLowerCase())?.path;
   }

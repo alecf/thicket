@@ -25,15 +25,17 @@ prototypes/      research scripts (NOT the implementation — see prototypes/REA
 ## Commands
 
 ```bash
-npm install
-npm run build          # tsc -p tsconfig.json
-npm run typecheck      # tsc -p tsconfig.test.json -- the ONLY thing that reads test-file types
-npm test               # vitest run
-npm run test:watch
-npx vitest run tests/path/to/one.test.ts   # single file
+bun install
+bun run thicket --config <tsconfig>   # runs src/cli.ts live; no build step
+bun run build          # tsc -p tsconfig.json -- emits dist/, which the `thicket` bin points at
+bun run typecheck      # tsc -p tsconfig.test.json -- the ONLY thing that reads test-file types
+bun run test           # vitest run
+bun run test:watch
+bunx vitest run tests/path/to/one.test.ts   # single file
 ```
 
-Node ≥24 is required — the cache uses the built-in `node:sqlite`.
+Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; `dist/`
+still runs under Node ≥24 for anyone who installs the bin.
 
 ## Non-negotiables
 
@@ -52,6 +54,13 @@ The report must be a pure function of `(source content, config, thicket version)
 
 `typescript/unstable/*` is a dev-build API on a path literally named `unstable`. Everything downstream consumes the `SourceModel` interface (PRD §4.1) so that when 7.1 stabilizes, one file changes. The `typescript` dependency is **pinned exactly**, not caret-ranged.
 
+The seal earned its keep when the runtime moved to Bun. `typescript/unstable/sync` cannot run there at all: it spawns the `tsgo` server and does blocking RPC over `child.stdout._handle.fd`, a Node internal Bun does not expose, and its client refuses the alternative (`"Socket connections are not yet supported in the sync client"`). The fix was `typescript/unstable/async`, which talks over the child's *streams* — six awaits in `ts-adapter.ts` and nothing else in the repository changed. The sync API is auto-generated from the async one, so the two are the same surface with `Promise` wrappers, and AST materialization makes no client calls at all: a source file arrives as one payload and the tree materializes locally, which is why `walk`, `forEachChildSafe` and fragment extraction stayed synchronous.
+
+Two consequences worth keeping:
+
+- **`resolveImport` must stay synchronous.** It is called from inside AST walks, so making it `async` is the one change that *would* go viral. Every module specifier is instead resolved up front, one batched `getSymbolAtLocation(nodes[])` per file — which is also strictly fewer round trips than the sync API made. A specifier that arrives at `resolveImport` unresolved is a bug, not a missing module, and it throws rather than answering `undefined`.
+- **Declare the batch overload first.** `unknown` accepts an array, so with the single-node signature ahead of it every batch call silently resolves to the scalar overload and the result type is a lie.
+
 ### 3. Four API hazards, each of which fails silently
 
 These produced plausible-but-wrong output rather than errors, which is what makes them dangerous. Each is sealed in the adapter and each has a regression test. Do not remove the guards.
@@ -64,6 +73,7 @@ These produced plausible-but-wrong output rather than errors, which is what make
 | Directory depth collapses in monorepos | Every path starts `packages/`, so depth-1 grouping yields one module |
 | `SyntaxKind[k]` returns range-marker aliases | `NumericLiteral` reverse-maps to `"FirstLiteralToken"`, `VariableStatement` to `"FirstStatement"` — so matching on kind *names* silently misses cases. Match by enum value. |
 | A foreign project's checker throws on an unowned node | Not `undefined` — a blanket `catch` turns it into "this repo has no imports" |
+| The API holds an open connection to its `tsgo` child | Nothing — the report is printed, correct and complete, and then the process never exits. `run.ts` closes it in a `finally`; `tests/process-exit.test.ts` is the only test that spawns a real subprocess, because an in-process `main()` call cannot see this |
 | A side-effect `import "./x.js"` binds no names | So "every binding on this edge is erased" is *vacuously true* for it, and a live module-init dependency is reported as type-only — telling a reader a cycle breaks by moving a types file. Erasability is vetoed per import, never derived from `erased === weight`. |
 
 A fifth, in fuzzy matching: a fragment and its own ancestor overlap at ~0.99 similarity and are **not** duplication. Exact hashing is immune; MinHash is not.

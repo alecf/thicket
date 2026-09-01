@@ -14,30 +14,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npm run typecheck
-      - run: npm test
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run typecheck
+      - run: bun run test
 
   # Mirrors the build half of deploy-site.yml, so a page that will not build is
-  # a red PR rather than a failed deploy after merge. `npm test` above already
+  # a red PR rather than a failed deploy after merge. `bun run test` above already
   # runs tests/site.test.ts, which builds the site -- this job additionally
-  # proves the standalone `npm run site:build` entry point works on a clean
+  # proves the standalone `bun run site:build` entry point works on a clean
   # checkout, which is the command the deploy workflow actually invokes.
   site:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run site:build
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run site:build
       - name: Check the published pages exist and are not empty
         run: |
           set -euo pipefail
@@ -73,19 +71,19 @@ jobs:
       LANG: ${{ matrix.locale }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run build
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+      # No build step: this renders the live TypeScript through `bun run
+      # thicket`, which is the command a reader of the README actually types.
       - name: Confirm the locale actually took effect
-        # Without this the job can pass vacuously: if Node ignored the locale,
-        # both arms would be the same environment and the comparison below
-        # would prove nothing.
-        run: node -e 'console.log("resolved:", Intl.Collator().resolvedOptions().locale, "| I vs i:", "I".localeCompare("i"))'
+        # Without this the job can pass vacuously: if the runtime ignored
+        # the locale, both arms would be the same environment and the
+        # comparison below would prove nothing.
+        run: bun -e 'console.log("resolved:", Intl.Collator().resolvedOptions().locale, "| I vs i:", "I".localeCompare("i"))'
       - name: Render the fixture report
-        run: node dist/cli.js --config tests/fixtures/sample/tsconfig.json > report.md
+        run: bun run thicket --config tests/fixtures/sample/tsconfig.json > report.md
       - name: Fail if the report is empty
         # A zero-file analysis must never look like a successful clean report,
         # so "exit 0" is not sufficient evidence that anything was produced.

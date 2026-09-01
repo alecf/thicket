@@ -16,35 +16,34 @@ Not on npm — the name is taken by an unrelated package, so `npx thicket` will 
 
 ```bash
 git clone <this repo> && cd thicket
-npm install
-npm run build
-node dist/cli.js --help
+bun install
+bun run thicket --help
 ```
 
-Node ≥24 is required: the cache uses the built-in `node:sqlite`. `npm link` puts a `thicket` on your `PATH` if you want one; the examples below spell out `node dist/cli.js`.
+There is no build step: `bun run thicket` executes `src/cli.ts` directly. Bun ≥1.4 is required. `bun run build` still exists and emits `dist/`, which is what the `thicket` bin points at if you `npm link` one onto your `PATH`; the examples below spell out `bun run thicket`.
 
 ## Usage
 
 Point it at a tsconfig. The report goes to stdout, so it pipes:
 
 ```bash
-node dist/cli.js --config ./tsconfig.json
-node dist/cli.js --config ./tsconfig.json > report.md
+bun run thicket --config ./tsconfig.json
+bun run thicket --config ./tsconfig.json > report.md
 ```
 
 A monorepo takes one `--config` per project. Passing the same path twice does nothing useful — the TypeScript API dedupes by path — but genuinely distinct configs are analyzed as one corpus, so a package duplicated across two of them is found:
 
 ```bash
-node dist/cli.js --config packages/a/tsconfig.json --config packages/b/tsconfig.json
+bun run thicket --config packages/a/tsconfig.json --config packages/b/tsconfig.json
 ```
 
 For the loop, keep the JSON sidecar and diff it against the next iteration's:
 
 ```bash
-node dist/cli.js --config ./tsconfig.json --json before.json > /dev/null
+bun run thicket --config ./tsconfig.json --json before.json > /dev/null
 # ...an LLM refactors something...
-node dist/cli.js --config ./tsconfig.json --json after.json  > /dev/null
-node dist/cli.js diff before.json after.json
+bun run thicket --config ./tsconfig.json --json after.json  > /dev/null
+bun run thicket diff before.json after.json
 ```
 
 ```
@@ -91,7 +90,7 @@ The depth presets, in full:
 
 ## Report format
 
-Pointed at this repository's own test fixture, `node dist/cli.js --config tests/fixtures/sample/tsconfig.json` prints exactly this:
+Pointed at this repository's own test fixture, `bun run thicket --config tests/fixtures/sample/tsconfig.json` prints exactly this:
 
 `````markdown
 # thicket report
@@ -326,7 +325,7 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 ## Stack
 
-TypeScript on Node ≥24, with **zero native dependencies** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/sync`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
+TypeScript on Bun ≥1.4, with **zero native dependencies** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/async`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
 
 ## License
 

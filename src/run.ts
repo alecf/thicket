@@ -553,7 +553,10 @@ export async function runReport(
     };
   } finally {
     cache?.close();
-    project.close();
+    // Awaited: the API holds a live connection to the tsgo child, and an
+    // unclosed one keeps the event loop alive -- the process runs to
+    // completion, prints its report, and then never exits.
+    await project.close();
   }
 }
 

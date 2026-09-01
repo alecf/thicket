@@ -36,17 +36,16 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
+          bun-version: "1.4"
 
-      # The build itself needs nothing installed -- it is dependency-free Node.
-      # `npm ci` is here so the site tests can run, which is what stops a broken
-      # page from deploying.
-      - run: npm ci
-      - run: npm run site:build
-      - run: npx vitest run tests/site.test.ts
+      # The build itself needs nothing installed -- it is dependency-free.
+      # The install is here so the site tests can run, which is what stops a
+      # broken page from deploying.
+      - run: bun install --frozen-lockfile
+      - run: bun run site:build
+      - run: bunx vitest run tests/site.test.ts
 
       - uses: actions/upload-pages-artifact@v3
         with:
