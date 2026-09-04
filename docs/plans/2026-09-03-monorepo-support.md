@@ -114,6 +114,27 @@ export function ignored(): string {
 ```
 `libs/ignored` deliberately has **no tsconfig.json** — it must be excluded by the negation glob, not by accident of having no config.
 
+**Step 3b: `tools/cfgonly` — a workspace that provides configs and owns no source**
+
+Observed in Sample D: a workspace whose whole job is to publish shared tsconfig
+bases, consumed by the others as `"extends": "@scope/cfg/base.json"`. It has a
+`package.json`, so it *is* a workspace, but no `tsconfig*.json` and no source.
+Config selection must yield zero configs for it rather than throwing or
+inventing one.
+
+`tools/cfgonly/package.json`: `{ "name": "@fix/cfgonly", "version": "0.0.0" }`
+`tools/cfgonly/base.json`:
+```json
+{ "compilerOptions": { "strict": true } }
+```
+`tools/cfgonly/global.d.ts`:
+```ts
+declare const __FIXTURE__: true;
+```
+Note the only `.ts` here is a `.d.ts`, which `scanSourceFiles` already skips —
+so this workspace contributes zero to the denominator and must never appear as
+a coverage gap.
+
 **Step 4: Add helpers**
 
 In `tests/helpers.ts`, append:
@@ -463,6 +484,18 @@ describe("selectWorkspaces", () => {
       .toEqual(["tools/alpha", "tools/omega"]);
   });
 
+  // THE BUG THIS TEST EXISTS FOR. `matchesGlob` treats `/` as a path
+  // separator, so a scoped package name never matches `*`. Measured on a
+  // sample monorepo, `--filter=*` silently selected 3 of 10 workspaces and
+  // reported a clean-looking result over 30% of the tree; on another, where
+  // every name is scoped, it errored instead. A partial selection that does
+  // not announce itself is the worse of the two. Name patterns are matched as
+  // STRINGS, where `/` is an ordinary character.
+  it("selects every workspace for `*`, scoped names included", () => {
+    expect(selectWorkspaces(WS, ["*"]).map((w) => w.dir))
+      .toEqual(["libs/beta", "tools/alpha", "tools/omega"]);
+  });
+
   it("treats a ./-prefixed pattern as a path glob", () => {
     expect(selectWorkspaces(WS, ["./tools/*"]).map((w) => w.dir))
       .toEqual(["tools/alpha", "tools/omega"]);
@@ -484,6 +517,16 @@ describe("selectWorkspaces", () => {
   it("throws naming what is available when a filter matches nothing", () => {
     expect(() => selectWorkspaces(WS, ["nope"])).toThrow(/nope/);
     expect(() => selectWorkspaces(WS, ["nope"])).toThrow(/beta/);
+  });
+
+  // A workspace whose directory name differs from its package name is normal:
+  // in Sample D a directory `evals` publishes as `@scope/evals`, so the
+  // obvious `--filter=evals` matches nothing. That is turbo's behavior too and
+  // we keep it -- but the error has to resolve to the thing, so it lists BOTH
+  // addresses of every workspace and the reader can see `./evals` works.
+  it("lists both the name and the path of each workspace when it fails", () => {
+    expect(() => selectWorkspaces(WS, ["alpha"])).toThrow(/@fix\/alpha/);
+    expect(() => selectWorkspaces(WS, ["alpha"])).toThrow(/\.\/tools\/alpha/);
   });
 });
 ```
@@ -511,7 +554,13 @@ export function selectWorkspaces(
     const pattern = negated ? filter.slice(1) : filter;
     const hits = all.filter((w) => matchesFilter(w, pattern));
     if (hits.length === 0) {
-      const known = all.map((w) => w.name ?? `./${w.dir}`).sort(compareStrings);
+      // Both addresses of every workspace, because the pattern that failed is
+      // usually the other one: a directory `evals` publishing as
+      // `@scope/evals` makes `--filter=evals` match nothing, and the reader
+      // needs to see that `./evals` is right there.
+      const known = all
+        .map((w) => (w.name === undefined ? `./${w.dir}` : `${w.name} (./${w.dir})`))
+        .sort(compareStrings);
       throw new Error(
         `--filter ${filter} matched no workspace. Available: ${known.join(", ")}`,
       );
@@ -526,9 +575,20 @@ export function selectWorkspaces(
 
 function matchesFilter(ws: Workspace, pattern: string): boolean {
   if (pattern.startsWith("./") || pattern.startsWith("../") || pattern.startsWith("/")) {
+    // A PATH is matched as a path: `/` is a separator, so `./tools/*` does not
+    // reach `tools/a/b`.
     return matchesGlob(ws.dir, pattern.replace(/^\.\//, ""));
   }
-  return ws.name !== undefined && matchesGlob(ws.name, pattern);
+  // A NAME is matched as a string. `matchesGlob` would treat the `/` in a
+  // scoped name as a separator, so `*` would silently skip every scoped
+  // package -- selecting part of the repo and reporting it as if whole.
+  return ws.name !== undefined && globToRegExp(pattern).test(ws.name);
+}
+
+/** `*` matches any run of characters, `/` included. Everything else is literal. */
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
 }
 ```
 
@@ -640,6 +700,35 @@ it("adds a sibling tsconfig only when it contributes files", async () => {
 
 `libs/beta` has no sibling, so its absence from the list proves siblings are not added blindly. Delete the contribution check and `tools/alpha/tsconfig.test.json` still appears — so also assert the negative: add a `tools/alpha/tsconfig.build.json` that is a strict *subset* of the main config and assert it is **not** chosen.
 
+Three more cases, each observed in a real repo:
+
+```ts
+// Sample D has a workspace that publishes shared tsconfig bases and owns no
+// source. It is a workspace (it has a package.json) with no tsconfig*.json at
+// all -- must contribute nothing rather than throw.
+it("contributes no config for a workspace that has none", async () => {
+  const chosen = await configsFor(workspacesRoot(), [{ dir: "tools/cfgonly", name: "@fix/cfgonly" }]);
+  expect(chosen.filter((c) => c.startsWith("tools/cfgonly"))).toEqual([]);
+});
+
+// Sample D's root tsconfig is `{"files": [], "references": [...]}` -- it owns
+// zero files and delegates. Scoping the root's coverage check to the whole
+// tree would show every workspace's files as the ROOT's gap, and then hunt for
+// a root sibling to close a gap that is not the root's to close.
+it("scopes the root's own coverage check to files in no workspace", async () => {
+  const chosen = await configsFor(solutionWorkspacesRoot(), [{ dir: "tools/alpha" }]);
+  expect(chosen).not.toContain("tsconfig.build.json");
+});
+
+// The root config may `reference` a workspace that discovery also selects.
+// Loading the same config twice is a wasted program load, and AGENTS.md §3
+// hazard 3 is that a file in N projects gets visited N times.
+it("names each config once even when the root references a workspace", async () => {
+  const chosen = await configsFor(solutionWorkspacesRoot(), [{ dir: "tools/alpha" }]);
+  expect(new Set(chosen).size).toBe(chosen.length);
+});
+```
+
 **Step 2: Run, watch it fail.**
 
 **Step 3: Implement**
@@ -670,14 +759,22 @@ export async function configsFor(
   opts: ScanOptions = {},
 ): Promise<string[]> {
   const chosen: string[] = [];
-  for (const dir of [".", ...workspaces.map((w) => w.dir)]) {
-    chosen.push(...(await configsForOne(root, dir, opts)));
+  const workspaceDirs = workspaces.map((w) => w.dir);
+  for (const dir of [".", ...workspaceDirs]) {
+    // The root owns only what lives in NO workspace. Sample D's root config is
+    // `{"files": [], "references": [...]}` -- it owns nothing itself -- and
+    // measuring its coverage against the whole tree would blame it for every
+    // workspace's files and then hunt for a root sibling to close that gap.
+    const owned = dir === "." ? { excludeDirs: workspaceDirs } : {};
+    chosen.push(...(await configsForOne(root, dir, { ...opts, ...owned })));
   }
-  return chosen.sort(compareStrings);
+  // A root solution config may `reference` a workspace discovery also selected,
+  // so the same path can arrive twice.
+  return [...new Set(chosen)].sort(compareStrings);
 }
 ```
 
-`configsForOne` reads `tsconfig*.json` from that directory (sorted, `tsconfig.json` first), probes the primary with `sourceFileNames`, diffs against `scanSourceFiles` scoped to the directory, and probes-and-keeps siblings while a gap remains. Return repo-relative POSIX paths so the result is deterministic and printable.
+`configsForOne` reads `tsconfig*.json` from that directory (sorted, `tsconfig.json` first). **If there are none it returns `[]`** — a workspace can legitimately exist to publish shared config bases and own no source. Otherwise it probes the primary with `sourceFileNames`, diffs against `scanSourceFiles` scoped to the directory (minus `excludeDirs`), and probes-and-keeps siblings while a gap remains. Return repo-relative POSIX paths so the result is deterministic and printable.
 
 **Step 4: Run, confirm PASS. Step 5: Commit**
 
@@ -748,6 +845,13 @@ git commit -am "feat: thicket [dir], --filter, --no-workspaces; pin the cache to
 
 **Files:** Modify `src/extract/scope.ts`, `tests/scope.test.ts`
 
+**Why this is bigger than it looks.** On Sample D at 98.3% coverage, **8 of the
+9 remaining gaps advised a `--config` that was already on the command line**.
+The ninth correctly advised nothing. So at high coverage — exactly the state
+this feature produces — the scope warning degrades into a list of instructions
+that cannot work, and one of them named a solution config that owns no files at
+all. Left unfixed, monorepo support makes this section actively misleading.
+
 **Step 1: Write the failing test**
 
 ```ts
@@ -786,6 +890,14 @@ git commit -am "fix: stop advising a --config that was already passed"
 
 **Risk:** `THK-CYC-*` ids derive from module names. Changing granularity globally churns ids on ordinary repos, and finding ids are the loop's backbone (PRD §9.1). So size-targeting applies **only** when more than one workspace is in play; single-project runs keep today's `selectGranularity` exactly.
 
+**Measured shape of the problem.** In both sample monorepos a *single*
+workspace holds ~88% of the source: 6048 of 6831 in Sample C, 3923 of 4464 in
+Sample D. So per-workspace granularity is not mainly about splitting the big
+app — it is about not shredding the small packages. Sample D makes the case
+concrete: it has workspaces of 1, 3, 5 and 12 source files. A per-workspace
+`[8, 64]` clamp would try to cut a 1-file workspace into 8 modules; size
+targeting resolves each to exactly one, which is the honest answer.
+
 **Files:** Modify `src/graph/granularity.ts`, `tests/granularity.test.ts`
 
 **Step 1: Write the failing test**
@@ -823,12 +935,26 @@ git commit -am "feat: per-workspace granularity targeting a module size"
 
 **Not a code task — a measurement.** The design makes two cost claims that are currently unverified.
 
-**Step 1: Golden-path check.** Against the sample monorepo used for the design (path supplied at run time, never committed):
+**Step 1: Golden-path check.** Against **two** sample monorepos (paths supplied
+at run time, never committed). They differ in every way that matters: package
+manager, manifest format, root-config style.
 
 ```bash
 bun run thicket <dir> --json /tmp/ws.json > /tmp/ws.md
 ```
-Expected: coverage ≈93.1%, ≈6831 files, 2 SCCs. Compare against the eleven-`--config` baseline; the finding set should match.
+
+| | Sample C | Sample D |
+| --- | --- | --- |
+| manifest | `package.json` `workspaces` | `pnpm-workspace.yaml` |
+| root tsconfig | owns 333 files, excludes every workspace dir | solution config, owns **zero** files |
+| workspaces | 10 | 14, one with no tsconfig, one addressed by a non-glob entry |
+| baseline coverage | 333 / 7337 = 4.5% | 3968 / 4348 = 91.3% |
+| **expected after discovery** | **6831 / 7337 = 93.1%**, 2 SCCs | **4390 / 4464 = 98.3%**, 3 SCCs |
+
+Both must match the hand-assembled `--config` baseline finding-for-finding.
+Sample D is the sharper test of discovery (its manifest is the only place the
+workspace list exists); Sample C is the sharper test of the payoff (its
+baseline is 4.5%).
 
 **Step 2: Cost.** Time a cold run (`--no-cache`) and a warm one. The design predicts the sibling probes add little because probes skip AST materialization. **If cold time regresses more than ~25%, stop and reconsider** — the fallback is to load all `tsconfig*.json` per workspace in a single pass and report which contributed.
 
