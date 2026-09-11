@@ -198,7 +198,14 @@ jobs:
           - target: darwin-arm64
             runs-on: macos-latest
           - target: darwin-x64
-            runs-on: macos-13
+            # Rosetta on an arm64 runner, NOT native Intel. `macos-13` is the
+            # only native x64 image left and it is being retired -- a blocking
+            # job pinned to a disappearing runner queues until it is removed
+            # outright. Rosetta genuinely executes the artifact, tsgo child and
+            # all, so it catches packaging faults; it would not catch a fault
+            # specific to real Intel silicon, which is a far narrower risk than
+            # never running the binary at all.
+            runs-on: macos-latest
           - target: linux-x64
             runs-on: ubuntu-latest
           - target: linux-arm64
