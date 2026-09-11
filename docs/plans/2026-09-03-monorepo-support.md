@@ -901,6 +901,16 @@ it("errors, naming the nearest ancestor, when a directory has no project", async
 - `src/run.ts`: accept `dir` and `filter`. When `--config` is absent and `workspaces !== false`, call `discoverWorkspaces` → `selectWorkspaces` → `configsFor`. Pin `const analysisRoot = dir` and use `cachePathFor(analysisRoot)`.
 - Guard the escape case: if `project.root` resolves *above* `dir`, use `project.root` and warn, because repo-relative paths must not gain a `../` prefix (`src/extract/ts-adapter.ts:431`).
 - **Do not** add filters or the workspace list to `configHash`.
+- **Warn when a manifest exists but could not be read.** `workspaceGlobs` (Task 2)
+  answers `undefined` for absent, unreadable and unparseable alike, which is the
+  right call *there* — `src/extract/` writes to stderr nowhere, every warning in
+  this codebase lives in `src/cli.ts`, and the coverage banner is a loud
+  backstop (a monorepo whose manifest failed to read falls from ~93% coverage to
+  a single project and the report says so). But the banner blames *scope*, not
+  the manifest, so a `package.json` that exists and is unreadable reads as "not a
+  monorepo". The CLI owns stderr and can tell these apart cheaply: an existing
+  manifest that failed to read or parse gets one line; ENOENT stays silent. This
+  is the layer to do it in.
 
 Update `USAGE` with `[dir]`, `--filter`, `--no-workspaces`.
 
