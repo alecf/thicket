@@ -211,12 +211,12 @@ export function tangleConfig(): string {
 }
 
 /**
- * A workspace root whose own tsconfig covers only `scripts/`, beside two
+ * A workspace root whose own tsconfig covers only `scripts/`, beside three
  * workspaces and one excluded by a negation glob. Directory names are
  * deliberately `tools/` and `libs/`: any hardcoded `apps`/`packages` name
  * fails here instead of passing by luck. `tools/alpha` carries a sibling
  * `tsconfig.test.json` covering the one file its main config excludes, and a
- * `tsconfig.build.json` that covers a strict subset of files the main config
+ * `tsconfig.build.json` that covers a proper subset of files the main config
  * already has -- so "add every sibling" and "add the siblings that contribute
  * files" are distinguishable. `tools/cfgonly` is a workspace that publishes
  * shared config and owns no tsconfig and no source; it must yield zero configs
