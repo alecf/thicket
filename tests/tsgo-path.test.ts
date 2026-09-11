@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { win32 } from "node:path";
 import { version as pinnedVersion } from "typescript";
 import { TSGO_ENV_VAR, resolveTsgoPath, tsgoVersion } from "../src/extract/tsgo-path.js";
 
@@ -66,14 +67,19 @@ describe("resolveTsgoPath", () => {
     expect(r.searched).toEqual(["/Users/x/.bun/bin/tsgo/tsc"]);
   });
 
-  it("looks for tsc.exe on Windows", () => {
+  it("looks for tsc.exe beside the executable on Windows", () => {
+    // `path: win32` is load-bearing. With the host's POSIX path module,
+    // dirname("C:\\tools\\thicket\\thicket.exe") is "." and this asserts
+    // nothing about where the sibling lookup landed -- the old suffix-only
+    // assertion passed against the relative path "tsgo/tsc.exe".
     const r = resolveTsgoPath({
       env: {},
       execPath: "C:\\tools\\thicket\\thicket.exe",
       platform: "win32",
       exists: () => true,
+      path: win32,
     });
-    expect(r.path?.endsWith("tsc.exe")).toBe(true);
+    expect(r.path).toBe("C:\\tools\\thicket\\tsgo\\tsc.exe");
   });
 });
 
@@ -105,6 +111,26 @@ describe("tsgoVersion", () => {
       io({ "/opt/thicket/tsgo/package.json": '{"version":"7.9.9-custom"}' }),
     );
     expect(v).toBe("7.9.9-custom");
+  });
+
+  it("does not trust a manifest an override brought with it", () => {
+    // The sharp case: two different $THICKET_TSGO compilers can each sit beside
+    // a manifest claiming the same version -- rebuild a patched tsgo and the
+    // version string does not move. Trusting it would hand both the same
+    // configHash, and the warm cache would serve findings produced by the other
+    // one. Only the PACKAGED manifest is trustworthy, because this repo's build
+    // writes it and the executable from the same verified tarball.
+    const manifest = '{"version":"7.1.0-dev.20260808.1"}';
+    const first = tsgoVersion(
+      { path: "/custom/tsc", source: "env", searched: [] },
+      io({ "/custom/tsc": "original compiler", "/custom/package.json": manifest }),
+    );
+    const patched = tsgoVersion(
+      { path: "/custom/tsc", source: "env", searched: [] },
+      io({ "/custom/tsc": "patched compiler", "/custom/package.json": manifest }),
+    );
+    expect(first).not.toBe(patched);
+    expect(first).not.toBe("7.1.0-dev.20260808.1");
   });
 
   it("identifies an unlabelled compiler by its bytes, never by the bundled pin", () => {

@@ -107,6 +107,23 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+
+          # Preflight BEFORE anything is published. The unscoped `thicket` name
+          # is currently held by an unrelated package, so publishing the four
+          # platform packages first and discovering that on the last command
+          # would leave them orphaned on the registry -- pointing at a thin
+          # package that does not exist, at a version that can never be
+          # republished. Better to publish nothing.
+          name=$(node -p "require('./dist-npm/thicket/package.json').name")
+          me=$(npm whoami)
+          if npm view "$name" version > /dev/null 2>&1; then
+            if ! npm owner ls "$name" 2>/dev/null | grep -qE "^$me <"; then
+              echo "::warning::npm package '$name' exists and is not owned by $me."
+              echo "::warning::Skipping ALL npm publishing; the GitHub release and tap are unaffected."
+              exit 0
+            fi
+          fi
+
           # Platform packages first: the thin package's optionalDependencies
           # name versions that must already resolve when someone installs it.
           for dir in dist-npm/thicket-*; do

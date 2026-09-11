@@ -71,6 +71,11 @@ for (const { platform, arch } of PLATFORMS) {
         // what makes exactly one of these install.
         os: [platform],
         cpu: [arch],
+        // The Linux binaries are glibc-linked. npm's os/cpu matching alone
+        // would install them on Alpine; `libc` is honoured by npm >=10 and
+        // skips them there. Older clients still install it, which is why the
+        // launcher also falls back when the binary will not start.
+        ...(platform === "linux" ? { libc: ["glibc"] } : {}),
         files: ["thicket", "tsgo", "LICENSE"],
       },
       null,
@@ -132,10 +137,26 @@ function run(command, args) {
   process.exit(r.status ?? 1);
 }
 
+let exe;
 try {
-  run(join(dirname(require.resolve(pkg + "/package.json")), exeName), process.argv.slice(2));
-} catch (e) {
-  if (e?.code !== "MODULE_NOT_FOUND") throw e;
+  exe = join(dirname(require.resolve(pkg + "/package.json")), exeName);
+} catch {
+  exe = undefined; // no platform package for this os/cpu
+}
+
+if (exe) {
+  const r = spawnSync(exe, process.argv.slice(2), { stdio: "inherit" });
+  // A binary that RAN and exited non-zero is thicket's own exit code, and must
+  // be passed through untouched.
+  if (!r.error) process.exit(r.status ?? 1);
+  // A binary that could not START is a different thing: npm's os/cpu matching
+  // installs this package on musl hosts like Alpine, where the glibc-linked
+  // executable fails at the dynamic loader. Crashing there would strand a user
+  // the JS fallback could have served, so fall through to it.
+  console.error(
+    \`thicket: the prebuilt binary would not start (\${r.error.code ?? r.error.message}); \` +
+      \`falling back to the JavaScript implementation.\`,
+  );
 }
 
 // No binary for this platform. The bundled JS does the same work under the

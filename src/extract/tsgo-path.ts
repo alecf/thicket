@@ -34,8 +34,16 @@ export function resolveTsgoPath(opts: {
   execPath: string;
   platform: string;
   exists: (p: string) => boolean;
+  /**
+   * Injectable because the host's `path` is POSIX here and Windows there, so a
+   * win32 case asserted against POSIX `dirname` proves nothing: `dirname` of a
+   * backslash path returns ".", and the sibling lookup silently becomes a
+   * relative one that still ends in "tsc.exe".
+   */
+  path?: { dirname: (p: string) => string; join: (...parts: string[]) => string };
 }): TsgoResolution {
   const { env, execPath, platform, exists } = opts;
+  const { dirname: dirOf, join: joinOf } = opts.path ?? { dirname, join };
   // The published bin is named `tsc` even though it is tsgo: the name comes
   // from the owning package (`typescript`), not from what the binary is.
   const binName = platform === "win32" ? "tsc.exe" : "tsc";
@@ -56,7 +64,7 @@ export function resolveTsgoPath(opts: {
   // latter is `file:///$bunfs/root/cli` -- a virtual path with no filesystem
   // under it. `execPath` also resolves THROUGH the Homebrew `bin/` symlink to
   // the real `libexec/` location, which is what makes the symlink work.
-  const packaged = join(dirname(execPath), "tsgo", binName);
+  const packaged = joinOf(dirOf(execPath), "tsgo", binName);
   if (exists(packaged)) {
     return { path: packaged, source: "packaged", searched: [packaged] };
   }
@@ -127,8 +135,18 @@ export function tsgoVersion(
   // package.json -- so the bundled version IS the compiler's version.
   if (!resolution.path) return pinnedTypeScriptVersion;
 
-  const labelled = versionBeside(resolution.path, io);
-  if (labelled) return labelled;
+  // The manifest is trusted for the PACKAGED compiler only, where
+  // scripts/build-binary.ts writes it and the executable out of the same
+  // integrity-checked tarball, so the two cannot disagree.
+  //
+  // An override's manifest is not evidence of anything: rebuild a patched tsgo
+  // and its version string does not move, so two different compilers would
+  // present the same version, share a configHash, and let the warm cache serve
+  // findings the other one produced.
+  if (resolution.source === "packaged") {
+    const labelled = versionBeside(resolution.path, io);
+    if (labelled) return labelled;
+  }
 
   // An unlabelled compiler. Borrowing `pinnedTypeScriptVersion` here would be
   // the cache bug described above, so hash what is actually going to run.

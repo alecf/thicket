@@ -21,6 +21,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -82,6 +83,19 @@ function human(bytes: number): string {
 }
 
 /**
+ * Everything a packaged tsgo cannot start without: the executable, the manifest
+ * `tsgoVersion()` reads, and the stdlib whose absence is a panic rather than a
+ * degraded run.
+ */
+function isCompleteTsgo(dir: string): boolean {
+  return (
+    existsSync(join(dir, "lib", "tsc")) &&
+    existsSync(join(dir, "lib", "lib.d.ts")) &&
+    existsSync(join(dir, "package.json"))
+  );
+}
+
+/**
  * Downloads and unpacks one platform's tsgo, verifying the registry's own
  * integrity digest. Cached, because the payload is 28MB per platform and a
  * four-target build would otherwise refetch 112MB on every run.
@@ -89,9 +103,16 @@ function human(bytes: number): string {
 async function fetchTsgo(target: Target): Promise<string> {
   const name = `typescript-${target.platform}-${target.arch}`;
   const dest = join(cacheRoot, `${name}-${TS_VERSION}`);
-  if (existsSync(join(dest, "lib", "tsc"))) return join(dest, "lib");
+  // A cache hit must mean the whole payload, not just the executable. tsgo
+  // panics rather than degrading when its stdlib is missing, so an extraction
+  // interrupted after `tsc` landed would otherwise be trusted forever and ship
+  // an artifact that dies on first run.
+  if (isCompleteTsgo(dest)) return join(dest, "lib");
 
-  const metaUrl = `https://registry.npmjs.org/@typescript/${name}/${TS_VERSION}`;
+  // Percent-encoded, which is the form the registry API documents for a scoped
+  // name. registry.npmjs.org accepts the bare `@scope/name` too -- that is what
+  // this used and it worked -- but stricter mirrors and proxies do not.
+  const metaUrl = `https://registry.npmjs.org/@typescript%2f${name}/${TS_VERSION}`;
   const meta = (await (await fetch(metaUrl)).json()) as {
     dist?: { tarball?: string; integrity?: string };
   };
@@ -117,13 +138,27 @@ async function fetchTsgo(target: Target): Promise<string> {
     throw new Error(`integrity mismatch for @typescript/${name}@${TS_VERSION}`);
   }
 
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(dest, { recursive: true });
-  const tgz = join(dest, "package.tgz");
-  writeFileSync(tgz, bytes);
-  // --strip-components=1 drops npm's "package/" wrapper directory.
-  run("tar", ["-xzf", tgz, "--strip-components=1", "-C", dest], dest);
-  rmSync(tgz, { force: true });
+  // Extract to a staging directory and rename it into place. The rename is
+  // atomic within a filesystem, so the cache only ever contains a payload that
+  // finished extracting -- a build killed mid-tar leaves the staging directory
+  // behind and the next run redownloads rather than trusting a half-tree.
+  const staging = `${dest}.incoming-${process.pid}`;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  try {
+    const tgz = join(staging, "package.tgz");
+    writeFileSync(tgz, bytes);
+    // --strip-components=1 drops npm's "package/" wrapper directory.
+    run("tar", ["-xzf", tgz, "--strip-components=1", "-C", staging], staging);
+    rmSync(tgz, { force: true });
+    if (!isCompleteTsgo(staging)) {
+      throw new Error(`@typescript/${name}@${TS_VERSION} unpacked without a complete tsgo`);
+    }
+    rmSync(dest, { recursive: true, force: true });
+    renameSync(staging, dest);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
   return join(dest, "lib");
 }
 
