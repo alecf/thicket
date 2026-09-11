@@ -4,7 +4,7 @@
  * Segments are compared whole, never as string prefixes, so `repo/pack` and
  * `repo/package` share only `repo`.
  */
-const dirParts = (p: string): string[] => {
+export const dirParts = (p: string): string[] => {
   const parts = p.split("/");
   parts.pop(); // drop the filename
   return parts.filter((s) => s.length > 0 && s !== ".");

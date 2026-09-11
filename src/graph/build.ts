@@ -1,6 +1,10 @@
 import type { Project } from "../extract/ts-adapter.js";
 import { compareStrings } from "../order.js";
-import { selectGranularity } from "./granularity.js";
+import {
+  selectGranularity,
+  selectGranularityAcross,
+  workspaceGroups,
+} from "./granularity.js";
 import { groupByDepth, groupByDirectory } from "./grouping.js";
 
 export interface ModuleEdge {
@@ -88,6 +92,21 @@ export interface GraphOptions {
    * which erases every directory below it.
    */
   granularity?: "auto" | "file" | "dir" | number;
+  /**
+   * The monorepo this run is a slice of. Present only when workspace discovery
+   * found the configs, and only then does `auto` target a module SIZE per
+   * workspace instead of one directory depth for the tree.
+   *
+   * Confined to that path on purpose: module names are `THK-CYC-*` ids
+   * (PRD §9.1), so re-cutting an ordinary single-project repo would churn the
+   * ids of every existing user for no gain. Two workspaces are the threshold
+   * because one workspace has no peer to be out of scale with.
+   *
+   * `dirs` is every DISCOVERED workspace, not the selected ones -- a `--filter`
+   * must not move the threshold -- and `repoFileCount` is the tree's source
+   * count on disk, which likewise does not move with the filter.
+   */
+  workspaces?: { dirs: readonly string[]; repoFileCount: number };
 }
 
 /**
@@ -141,7 +160,11 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
     moduleOf = groupByDepth(paths, g);
     label = `dir:${g}`;
   } else {
-    const chosen = selectGranularity(paths);
+    const ws = opts.workspaces;
+    const chosen =
+      ws !== undefined && ws.dirs.length > 1
+        ? selectGranularityAcross(workspaceGroups(paths, ws.dirs), ws.repoFileCount)
+        : selectGranularity(paths);
     moduleOf = chosen.moduleOf;
     label = chosen.label;
   }

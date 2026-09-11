@@ -302,6 +302,22 @@ interface Discovery {
    * the load by `warnUnreachedWorkspaces`.
    */
   unconfigured: readonly Workspace[];
+  /**
+   * Every workspace DISCOVERED under the root, whether or not `--filter`
+   * selected it. Empty when the run is a plain project or the caller named its
+   * own configs.
+   *
+   * Discovered rather than selected because it decides the granularity ladder
+   * (`GraphOptions.workspaces`), and a filter that changes which ladder runs
+   * renames the modules of the workspace it kept -- which is the churn this
+   * list exists to prevent.
+   *
+   * ABSOLUTE, unlike every other path this module passes around, because the
+   * root these are measured from is not known yet: discovery runs before the
+   * program is loaded, and without a `dir` pin the analyzed root is derived
+   * from the configs and can land BELOW the directory discovery walked.
+   */
+  workspaceDirs: readonly string[];
 }
 
 /**
@@ -344,6 +360,7 @@ async function discoverConfigs(
         return {
           configs: chosen.configs.map((c) => resolve(root, c)),
           rejected: chosen.rejected,
+          workspaceDirs: discovered.map((ws) => resolve(root, ws.dir)),
           // Reported only once the program is loaded: whether a workspace with
           // no config of its own goes unanalyzed depends on what the OTHER
           // configs reached, and nothing here knows that yet.
@@ -363,7 +380,9 @@ async function discoverConfigs(
     );
   }
   const single = join(root, "tsconfig.json");
-  if (existsSync(single)) return { configs: [single], rejected: [], unconfigured: [] };
+  if (existsSync(single)) {
+    return { configs: [single], rejected: [], unconfigured: [], workspaceDirs: [] };
+  }
   throw new Error(noProjectMessage(root));
 }
 
@@ -531,6 +550,7 @@ export async function runReport(
           configs: Array.isArray(opts.config) ? opts.config : [opts.config],
           rejected: [],
           unconfigured: [],
+          workspaceDirs: [],
         };
 
   const project = await openProject(discovery.configs, {
@@ -596,7 +616,30 @@ export async function runReport(
       warn,
     });
 
-    const graph = buildModuleGraph(project, { granularity, types });
+    // Measured from the analyzed root, which is what every path in the graph
+    // speaks. It is the directory discovery walked whenever one was pinned,
+    // and BELOW it otherwise -- an unpinned run roots itself at the common
+    // ancestor of the configs it opened, so a monorepo whose root holds no
+    // tsconfig roots inside `pkg/`. A workspace that falls outside the
+    // analyzed root entirely owns no analyzed file and is dropped, rather than
+    // being carried as a `../` name that can match nothing.
+    const wsDirs = discovery.workspaceDirs
+      .map((abs) => toPosix(relative(project.root, abs)))
+      .filter((d) => d !== ".." && !d.startsWith("../"));
+    const graph = buildModuleGraph(project, {
+      granularity,
+      types,
+      ...(wsDirs.length === 0
+        ? {}
+        : {
+            workspaces: {
+              dirs: wsDirs,
+              // The tree's size, not the run's: `--filter` changes which files
+              // are analyzed and must not change how big a module should be.
+              repoFileCount: scope.onDisk,
+            },
+          }),
+    });
     const clusters = subsume(await findDuplication(project, { minNodes, minLines, cache }));
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
     // but not what the report speaks. Swap in the THK-DUP finding id for the
