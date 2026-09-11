@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { globsFromPnpmText, workspaceGlobs } from "../src/extract/workspaces.js";
+import {
+  discoverWorkspaces,
+  globsFromPnpmText,
+  workspaceGlobs,
+} from "../src/extract/workspaces.js";
 import { pnpmWorkspacesRoot, workspacesRoot } from "./helpers.js";
 
 /**
@@ -312,4 +316,205 @@ describe("globsFromPnpmText", () => {
     // `["libs"]`, an answer with no relationship to what the manifest says.
     expect(globsFromPnpmText("packages:\n  libs:\n    - a/*\n")).toBeUndefined();
   });
+});
+
+describe("discoverWorkspaces", () => {
+  it("finds workspaces under non-conventional directory names", () => {
+    // `tools/` and `libs/`, not `apps/` and `packages/`: a hardcoded layout
+    // name finds nothing here rather than passing by luck.
+    expect(discoverWorkspaces(workspacesRoot())).toEqual([
+      { dir: "deep/a/b/gamma", name: "@fix/gamma" },
+      { dir: "libs/beta", name: "beta" },
+      { dir: "tools/alpha", name: "@fix/alpha" },
+      { dir: "tools/cfgonly", name: "@fix/cfgonly" },
+    ]);
+  });
+
+  // The negation glob is the only thing excluding `libs/ignored`; it has a
+  // package.json AND a tsconfig.json like the others, so honouring the negation
+  // is the only thing keeping its source out of the analyzed set.
+  it("honours negation globs", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs).not.toContain("libs/ignored");
+  });
+
+  // `deep/a/b/gamma` is reachable only through the `deep/**` glob. Every other
+  // workspace sits at depth 2 under a `dir/*` glob, so without this one a naive
+  // single-level expansion passes every test here -- and the decision to walk
+  // for package.json and MATCH, rather than expand globs into paths, would be
+  // asserted by nothing.
+  it("matches a workspace nested below a ** glob", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs).toContain("deep/a/b/gamma");
+  });
+
+  // Delete the node_modules skip in the package walk and `dep` becomes a
+  // workspace -- and every transitive dependency of a real repo with it.
+  it("never treats a package inside node_modules as a workspace", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs.some((d) => d.includes("node_modules"))).toBe(false);
+  });
+
+  // `deep/**` matches `deep/a` and `deep/a/b` too, and neither is a package.
+  // Expanding the globs into paths and calling the results workspaces would
+  // hand Task 7 two directories with nothing to analyze in them; walking for
+  // `package.json` first cannot propose them at all.
+  it("does not propose a matched directory that holds no package.json", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs).not.toContain("deep/a");
+    expect(dirs).not.toContain("deep/a/b");
+  });
+
+  it("answers [] for a root that declares no workspaces", () => {
+    // `undefined` globs and `[]` globs are different answers to "is this a
+    // workspace root" -- that distinction lives in `workspaceGlobs` and is
+    // Task 5's to act on. Discovery has the same thing to say about both: no
+    // members. What it must not do is walk the tree and report every package
+    // it finds in a repo whose manifest never asked for workspaces.
+    //
+    // `libs/beta` is what makes that assertion mean anything. Without a
+    // package on disk, a root that answered "every directory I can find" would
+    // still answer `[]` here, and this case would pass with the check deleted.
+    const member = { "libs/beta/package.json": JSON.stringify({ name: "beta" }) };
+    withRoot({ ...member, "package.json": JSON.stringify({ name: "plain" }) }, (root) =>
+      expect(discoverWorkspaces(root)).toEqual([]),
+    );
+    withRoot({ ...member, "package.json": JSON.stringify({ workspaces: [] }) }, (root) =>
+      expect(discoverWorkspaces(root)).toEqual([]),
+    );
+  });
+
+  it("sorts by code unit, not by walk order and not by locale", () => {
+    // Both halves of this are constructed, because both mutations otherwise
+    // survive.
+    //
+    // Walk order: the walk emits a package before descending into it, so `a`
+    // and `a/c` are adjacent in its output no matter what order the filesystem
+    // hands back -- and `a-b` sorts BETWEEN them (`-` is 0x2D, `/` is 0x2F).
+    // No readdir permutation can produce the sorted answer by accident, so
+    // deleting the sort fails here on every filesystem rather than on whichever
+    // one returns entries unordered.
+    //
+    // Locale: `Tools` is capitalized, so `localeCompare` under `en-US` folds
+    // the case and moves it to the end while code-unit order keeps it first.
+    // That is the exact failure AGENTS.md §1 describes, and CI's locale matrix
+    // is what would otherwise have to catch it.
+    withRoot(
+      {
+        "Tools/package.json": JSON.stringify({ name: "tools" }),
+        "a/package.json": JSON.stringify({ name: "a" }),
+        "a/c/package.json": JSON.stringify({ name: "c" }),
+        "a-b/package.json": JSON.stringify({ name: "a-b" }),
+        "libs/package.json": JSON.stringify({ name: "libs" }),
+        "package.json": JSON.stringify({ workspaces: ["*", "a/*"] }),
+      },
+      (root) =>
+        expect(discoverWorkspaces(root).map((w) => w.dir)).toEqual([
+          "Tools",
+          "a",
+          "a-b",
+          "a/c",
+          "libs",
+        ]),
+    );
+  });
+
+  it("lets the globs decide whether a package nested inside a workspace is one", () => {
+    // Real monorepos nest packages, and the manifest is the only thing that
+    // knows whether the inner one is a member or an implementation detail of
+    // the outer one. So the walk keeps descending through a match and the
+    // globs arbitrate: `tools/*` reaches one level and `tools/**` reaches
+    // both. Stopping the walk at the first match would make `tools/**` mean
+    // `tools/*`, silently, and no glob could ever name the inner package.
+    const files = {
+      "tools/alpha/package.json": JSON.stringify({ name: "alpha" }),
+      "tools/alpha/sub/package.json": JSON.stringify({ name: "sub" }),
+    };
+    withRoot({ ...files, "package.json": JSON.stringify({ workspaces: ["tools/*"] }) }, (root) =>
+      expect(discoverWorkspaces(root).map((w) => w.dir)).toEqual(["tools/alpha"]),
+    );
+    withRoot({ ...files, "package.json": JSON.stringify({ workspaces: ["tools/**"] }) }, (root) =>
+      expect(discoverWorkspaces(root).map((w) => w.dir)).toEqual([
+        "tools/alpha",
+        "tools/alpha/sub",
+      ]),
+    );
+  });
+
+  it("stops the package walk at MAX_WALK_DEPTH", () => {
+    // A `**` glob puts no bound on how deep the walk goes, so the walk carries
+    // its own. Both sides are pinned: a bound nothing reaches is a constant
+    // pretending to be a guard, and a bound one level tighter would silently
+    // drop a legitimate workspace. Eight is past any real layout -- the
+    // deepest fixture here sits at four.
+    const deep = (n: number) =>
+      Array.from({ length: n }, (_, i) => `d${i + 1}`).join("/") + "/package.json";
+    withRoot(
+      {
+        [deep(8)]: JSON.stringify({ name: "at-the-bound" }),
+        [deep(9)]: JSON.stringify({ name: "past-the-bound" }),
+        "package.json": JSON.stringify({ workspaces: ["**"] }),
+      },
+      (root) => {
+        const dirs = discoverWorkspaces(root).map((w) => w.dir);
+        expect(dirs).toEqual(["d1/d2/d3/d4/d5/d6/d7/d8"]);
+      },
+    );
+  });
+
+  it("omits the name when the package.json has none", () => {
+    // A nameless package is still a workspace: `name` is what `--filter` will
+    // match on, and having none means no filter can name it, not that its
+    // source stops existing.
+    withRoot(
+      {
+        "libs/nameless/package.json": JSON.stringify({ version: "0.0.0" }),
+        "package.json": JSON.stringify({ workspaces: ["libs/*"] }),
+      },
+      // `toStrictEqual`, so that a `name: undefined` key fails here: `toEqual`
+      // treats an explicit undefined property as absent, which is what makes
+      // the ternary that omits it look untested.
+      (root) => expect(discoverWorkspaces(root)).toStrictEqual([{ dir: "libs/nameless" }]),
+    );
+  });
+
+  it("reads manifests written with a byte order mark", () => {
+    // `JSON.parse` throws on a leading U+FEFF, and every read here degrades to
+    // "not a workspace" rather than throwing -- so a BOM makes a monorepo
+    // authored on Windows look like a plain single project, and a BOM on a
+    // member makes that workspace nameless. Both are silent. This is the same
+    // blind spot the CRLF bug came from: the fixtures are all LF, so nothing
+    // else in this file would notice.
+    withRoot(
+      {
+        "libs/beta/package.json": "\uFEFF" + JSON.stringify({ name: "beta" }),
+        "package.json": "\uFEFF" + JSON.stringify({ workspaces: ["libs/*"] }),
+      },
+      (root) => expect(discoverWorkspaces(root)).toEqual([{ dir: "libs/beta", name: "beta" }]),
+    );
+  });
+
+  // A backslash is a legal character in a POSIX directory name and an
+  // impossible one on Windows, which is why this case can only run here.
+  it.skipIf(process.platform === "win32")(
+    "treats a backslash in a directory name as part of the name",
+    () => {
+      // Measured against node 24 and bun 1.4: `path.win32.matchesGlob` splits
+      // on `\` and `path.posix.matchesGlob` does not, so the bare
+      // `path.matchesGlob` answers differently depending on the host -- a
+      // determinism bug per AGENTS.md §1. Matching goes through the posix
+      // implementation explicitly, and these strings are built from readdir
+      // names joined with `/`, so they are already POSIX and must not be
+      // "normalized" a second time: a blanket `split("\\").join("/")` turns
+      // this directory into a two-segment path that its own glob no longer
+      // matches, and the workspace disappears.
+      withRoot(
+        {
+          "weird\\name/package.json": JSON.stringify({ name: "weird" }),
+          "package.json": JSON.stringify({ workspaces: ["*"] }),
+        },
+        (root) => expect(discoverWorkspaces(root)).toEqual([{ dir: "weird\\name", name: "weird" }]),
+      );
+    },
+  );
 });

@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, posix } from "node:path";
+import { compareStrings } from "../order.js";
 
 /**
  * Workspace globs declared by the root manifest, or `undefined` when this
@@ -30,20 +31,7 @@ export function workspaceGlobs(root: string): string[] | undefined {
 }
 
 function globsFromPackageJson(root: string): string[] | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  } catch {
-    // Absent, unreadable and unparseable all land here, and all three mean the
-    // same thing: no workspace declaration at this root. None of them may mean
-    // "the run fails" -- discovery is a convenience, never a dependency
-    // (AGENTS.md §5 applies to it too). An `existsSync` ahead of the read
-    // would be a branch no behaviour *this function offers* can distinguish
-    // from this catch, so there isn't one. It does distinguish absent from
-    // unreadable, which a caller that owns stderr will want; this function just
-    // has nothing to say about the difference.
-    return undefined;
-  }
+  const parsed = readJson(join(root, "package.json"));
   const ws = (parsed as { workspaces?: unknown })?.workspaces;
   // npm/bun/yarn-berry take an array; yarn v1 takes { packages: [...] }.
   if (Array.isArray(ws)) return strings(ws);
@@ -146,4 +134,143 @@ function globsFromPnpm(root: string): string[] | undefined {
     }
   }
   return undefined;
+}
+
+export interface Workspace {
+  /** Repo-relative POSIX directory. */
+  dir: string;
+  /** `name` from its package.json, when it has one. */
+  name?: string;
+}
+
+/**
+ * Depth bound for the package walk, in path segments below the root. Past any
+ * real layout -- the deepest workspace in the fixtures sits at four -- and the
+ * only thing bounding a `**` glob, which otherwise names every directory in
+ * the tree.
+ */
+const MAX_WALK_DEPTH = 8;
+
+/**
+ * Every directory declared by the root manifest that actually holds a
+ * `package.json`, sorted by directory.
+ *
+ * Candidates are collected by walking for `package.json` and then MATCHED
+ * against the globs, rather than by expanding the globs into paths. Expansion
+ * would need its own `**` semantics; this needs none, and it never proposes a
+ * directory that is not a package -- `deep/**` matches `deep/a` and `deep/a/b`
+ * as readily as the workspace two levels below them.
+ *
+ * Matching goes through `posix.matchesGlob` rather than the bare
+ * `path.matchesGlob`, which is the win32 implementation on Windows and splits
+ * a directory name on `\` (measured against node 24 and bun 1.4). These paths
+ * are POSIX by construction, so the posix matcher is the correct one -- and
+ * pinning it keeps the answer a property of the strings rather than of the
+ * host, which is what AGENTS.md §1 asks of anything that reaches the report.
+ */
+export function discoverWorkspaces(root: string): Workspace[] {
+  const globs = workspaceGlobs(root);
+  // No manifest declared workspaces here, so there is nothing to walk for. A
+  // root that declares an empty list falls through instead and comes out empty
+  // at the include filter -- the same answer by a different route, which is
+  // right: the difference between the two is `workspaceGlobs`'s to report and
+  // a caller's to act on, not discovery's.
+  if (globs === undefined) return [];
+  const include = globs.filter((g) => !g.startsWith("!"));
+  const exclude = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1));
+
+  const out: Workspace[] = [];
+  for (const dir of packageDirs(root)) {
+    if (!include.some((g) => posix.matchesGlob(dir, g))) continue;
+    if (exclude.some((g) => posix.matchesGlob(dir, g))) continue;
+    const name = packageName(join(root, dir));
+    out.push(name === undefined ? { dir } : { dir, name });
+  }
+  // The only ordering guarantee in here, and it has to be this one:
+  // `readdirSync` order is a property of the filesystem, and the walk's own
+  // order is depth-first, which agrees with code-unit order on most trees but
+  // not all -- `a` and `a/c` come out adjacent whatever the filesystem says,
+  // and `a-b` sorts between them.
+  return out.sort((a, b) => compareStrings(a.dir, b.dir));
+}
+
+/**
+ * Repo-relative POSIX directories holding a `package.json`, excluding `root`
+ * itself.
+ *
+ * This is a full walk of the tree, minus `node_modules`, dot-directories and
+ * anything deeper than `MAX_WALK_DEPTH`. It does not stop descending at a match,
+ * because real monorepos nest packages and the manifest is the only thing that
+ * knows whether an inner one is a member: stopping would make `tools/**` mean
+ * `tools/*` and leave no glob able to name the inner package. The cost is one
+ * `readdirSync` per directory, paid once per run before any file is parsed --
+ * a rounding error beside parsing the sources, and not worth bounding further
+ * until a measurement says otherwise.
+ */
+function packageDirs(root: string): string[] {
+  const out: string[] = [];
+  const walk = (abs: string, rel: string, depth: number): void => {
+    if (depth > MAX_WALK_DEPTH) return;
+    let entries;
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      // Same skips as `scanSourceFiles`: every dependency of the repo is a
+      // package, and a checkout inside a dot-directory is a whole second copy
+      // of every package in it.
+      if (name === "node_modules" || name.startsWith(".")) continue;
+      // Joined with `/`, never with `path.join`: a readdir entry is a single
+      // name, so this is already POSIX on every platform, and the result is
+      // matched against manifest globs written with `/`. It is not normalized
+      // afterwards either -- `\` is a legal character in a POSIX directory
+      // name, and folding it to `/` would split one directory into two
+      // segments that its own glob no longer matches.
+      const childRel = rel === "" ? name : `${rel}/${name}`;
+      if (existsSync(join(abs, name, "package.json"))) out.push(childRel);
+      walk(join(abs, name), childRel, depth + 1);
+    }
+  };
+  walk(root, "", 1);
+  return out;
+}
+
+function packageName(dir: string): string | undefined {
+  const parsed = readJson(join(dir, "package.json"));
+  const name = (parsed as { name?: unknown })?.name;
+  // A nameless package is still a workspace. `name` is what `--filter` matches
+  // on, so having none means no filter can name it -- not that its source
+  // stops existing.
+  return typeof name === "string" ? name : undefined;
+}
+
+/**
+ * `path` parsed as JSON, or `undefined` if it is absent, unreadable or not
+ * JSON.
+ *
+ * Absent, unreadable and unparseable are deliberately one answer: at every
+ * call site here they mean the same thing -- no declaration to read -- and
+ * none of them may mean "the run fails", because discovery is a convenience,
+ * never a dependency (AGENTS.md §5 applies to it too). An `existsSync` ahead
+ * of the read would be a branch no caller can distinguish from this catch. It
+ * does distinguish absent from unreadable, which a caller that owns stderr
+ * will want; this has nothing to say about the difference.
+ *
+ * The BOM strip is load-bearing rather than tidy, and silent both ways:
+ * `JSON.parse` throws on a leading U+FEFF, so a root manifest saved with one
+ * makes a monorepo read as a plain single project, and a member manifest with
+ * one makes that workspace nameless and unfilterable. Windows editors write
+ * BOMs; every fixture in this repo is LF and BOM-free, which is the same blind
+ * spot the CRLF bug in the pnpm parser came out of.
+ */
+function readJson(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
+  } catch {
+    return undefined;
+  }
 }
