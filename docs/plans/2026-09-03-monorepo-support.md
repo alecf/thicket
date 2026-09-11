@@ -1005,14 +1005,22 @@ which still pin the behaviour the parameter was there to produce.
 > so. Deferring it to Task 8 left that task only two levers — post-filtering a
 > config Task 7 chose, with less information, or passing the full list as
 > `workspaces`, which loads unselected primaries and defeats the filter the
-> other way. `configsFor` therefore takes a fourth argument, every discovered
-> workspace, read for ATTRIBUTION only: `owned` is still built from the
-> selected list, so an unselected workspace contributes neither a primary nor
-> a candidate. It defaults to the selected list — right when nothing was
-> filtered, and the old behaviour otherwise — and the two lists are unioned
+> other way. `configsFor` therefore takes BOTH lists, named and both required
+> — `configsFor(root, { selected, discovered }, opts)` — the second read for
+> ATTRIBUTION only: `owned` is still built from `selected`, so an unselected
+> workspace contributes neither a primary nor a candidate. The two are unioned
 > rather than trusted, because a call site that filters in place hands over a
-> list missing the workspace it selected and that failure is silent and
-> identical. `tests/fixtures/workspaces-filter/` is the fixture.
+> `discovered` missing the workspace it selected, and that failure is silent
+> and identical. `tests/fixtures/workspaces-filter/` is the fixture.
+>
+> Two positional `Workspace[]` arguments were the first shape, and both ways
+> of confusing them were silent: omitting the second reproduced the very bug
+> it was added to fix (the lists are then equal by construction), and swapping
+> them analyzed every workspace the filter excluded. Documenting a footgun and
+> pinning its wrong behaviour with a test is worse than deleting the footgun,
+> when deletion costs one signature change and there is exactly one production
+> caller — which Task 8 has yet to write. `discovered` is required rather than
+> optional for the same reason: an optional one re-opens the omission.
 >
 > `excludeDirs` would not have closed this either: a root scan excluding only
 > the SELECTED workspaces counts the unselected ones just the same.
