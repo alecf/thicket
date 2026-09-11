@@ -12,7 +12,8 @@
   },
   "scripts": {
     "thicket": "bun src/cli.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "bun scripts/build-binary.ts",
+    "build:all": "bun scripts/build-binary.ts --all",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
