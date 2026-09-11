@@ -773,9 +773,12 @@ clean: nothing below `interface Workspace` calls anything above it except
 Split `tests/workspaces.test.ts` along the same line. Do this as its own commit
 before any Task 7 behaviour lands, so the move is reviewable as a pure move.
 
-**Add a nested-workspace case to `tests/fixtures/workspaces-solution/`.** The
-`excludeDirs` rule below has to hold for a parent workspace, not only for the
-root, and nothing currently exercises that.
+**BUILT.** The nested-workspace case landed in a fixture of its own,
+`tests/fixtures/workspaces-nested/`, rather than inside
+`workspaces-solution/`: it needs a parent sibling config reaching into its
+child, and it needs NO root tsconfig, which is also the only committed shape
+that puts the probe's root below the repo root. Bending the solution fixture
+to carry both would have blunted the two mis-scopes it already catches.
 
 **Files:** Modify `src/extract/workspaces.ts`, `tests/workspaces.test.ts`
 
@@ -964,13 +967,43 @@ Revised algorithm — two probes total, not N:
 4. For each workspace with a gap and unloaded siblings, add that workspace's
    siblings as candidates. If none, stop.
 5. **One** further `sourceFileNames(allPrimaries + candidates)` call. Keep only
-   the candidates that contributed a file step 3 had in the gap.
+   the candidates that contributed a file step 3 had in the gap — per
+   candidate, which finding (e) below is about.
 
 This also retires `excludeDirs`: with the gap computed once, globally, and
 attributed to the deepest containing workspace, a parent never sees its child's
 files as its own and the root never sees any workspace's. Delete that parameter
 rather than carrying it — but keep the `workspaces-solution` fixture assertions,
 which still pin the behaviour the parameter was there to produce.
+
+> **CONFIRMED on implementation.** The two constructions produce the same
+> partition: "scan under W, minus every nested workspace" and "every gapped
+> file, to the deepest workspace containing it" name the same set for every W,
+> the root included. `excludeDirs` was never written.
+
+> **(e) The probe's UNION cannot say WHICH candidate contributed.** Step 5 keeps
+> "the candidates that contributed", and one batched probe cannot answer that:
+> `tools/alpha` has two siblings, the union says `src/a.test.ts` got covered,
+> and it does not say by which. Keeping both is exactly the sibling that adds
+> nothing, which this task exists to refuse; probing each candidate alone is
+> the N spawns finding (b) rules out. So `ProbeResult` gained `byConfig` — the
+> same names split by contributing config, out of the same call and at no
+> extra cost, since the projects were already being iterated. Look values up;
+> never iterate it. One caveat rides along: a candidate that is itself a
+> solution config owns no files of its own, so it maps to an empty list and is
+> declined. That errs toward reporting a permanent gap rather than toward
+> widening the analysis, which is the safe direction.
+
+> **(f) A known limit, and `--filter` reaches it.** A file inside a workspace
+> that was discovered but NOT selected is contained by no scope `configsFor`
+> can see, so it lands in the ROOT's gap — and a root sibling whose `include`
+> spans the repo would then be adopted to close it, widening a filtered run
+> back out. Closing it needs the unselected workspaces, which this signature
+> does not carry; `excludeDirs` would not have closed it either, since a root
+> scan excluding only the SELECTED workspaces counts the unselected ones just
+> the same. No fixture root here carries a sibling beside its primary, so
+> nothing exercises it today. Task 8 holds the full discovery list at the call
+> site, which is where it should be decided.
 
 **Step 4: Run, confirm PASS. Step 5: Commit**
 
