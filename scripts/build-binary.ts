@@ -64,7 +64,10 @@ const TS_VERSION = (() => {
   const deps = pkg.dependencies as Record<string, string> | undefined;
   const v = deps?.typescript;
   if (!v) throw new Error("package.json has no `typescript` dependency to pin tsgo to");
-  if (!/^\d/.test(v)) {
+  // A leading digit is not exactness: `7.x` and `7.1.0 || 7.2.0` both start
+  // with one, and either would package a moving compiler against a contract
+  // that says the report is a pure function of its version.
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(v)) {
     throw new Error(`typescript must be pinned exactly, not a range (found ${v}) -- AGENTS.md §2`);
   }
   return v;

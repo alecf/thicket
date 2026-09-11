@@ -144,6 +144,7 @@ try {
   exe = undefined; // no platform package for this os/cpu
 }
 
+let binaryFailed = false;
 if (exe) {
   const r = spawnSync(exe, process.argv.slice(2), { stdio: "inherit" });
   // A binary that RAN and exited non-zero is thicket's own exit code, and must
@@ -153,6 +154,7 @@ if (exe) {
   // installs this package on musl hosts like Alpine, where the glibc-linked
   // executable fails at the dynamic loader. Crashing there would strand a user
   // the JS fallback could have served, so fall through to it.
+  binaryFailed = true;
   console.error(
     \`thicket: the prebuilt binary would not start (\${r.error.code ?? r.error.message}); \` +
       \`falling back to the JavaScript implementation.\`,
@@ -165,8 +167,12 @@ if (exe) {
 try {
   require.resolve("typescript/package.json");
 } catch {
+  // Saying "no prebuilt binary" when one WAS installed and merely refused to
+  // start -- the musl case -- sends the reader to the wrong problem entirely.
   console.error(
-    \`thicket: no prebuilt binary for \${process.platform}-\${process.arch}, and the\\n\` +
+    (binaryFailed
+      ? \`thicket: the prebuilt binary for \${process.platform}-\${process.arch} would not run, and the\\n\`
+      : \`thicket: no prebuilt binary for \${process.platform}-\${process.arch}, and the\\n\`) +
       \`JavaScript fallback needs the 'typescript' package. Install it with:\\n\\n\` +
       \`  npm install typescript@${pkg.dependencies.typescript}\\n\`,
   );

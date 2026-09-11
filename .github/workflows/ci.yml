@@ -129,6 +129,43 @@ jobs:
           npm init -y > /dev/null
           npm install --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
 
+      # Installing both tarballs directly means the launcher would resolve the
+      # platform package even if the thin package pointed at the wrong name or
+      # version, and even if os/cpu were mistyped -- in which case npm would
+      # silently skip the binary and every user would get the slow JS fallback,
+      # with CI still green. Names and versions cannot drift (build-npm.ts
+      # derives optionalDependencies from the same loop that writes each
+      # platform package), so what is checked here is the part that CAN: that
+      # the declared os/cpu actually match the platform they are built for.
+      - name: The thin package must point at packages this platform selects
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const thin = require("./dist-npm/thicket/package.json");
+            const optional = thin.optionalDependencies ?? {};
+            let checked = 0;
+            for (const dir of fs.readdirSync("dist-npm")) {
+              if (dir === "thicket") continue;
+              const pkg = require(`./dist-npm/${dir}/package.json`);
+              if (optional[pkg.name] !== pkg.version) {
+                throw new Error(`thin package does not name ${pkg.name}@${pkg.version}`);
+              }
+              const [, platform, arch] = dir.split("-");
+              if (!pkg.os?.includes(platform)) throw new Error(`${pkg.name} os ${pkg.os} != ${platform}`);
+              if (!pkg.cpu?.includes(arch)) throw new Error(`${pkg.name} cpu ${pkg.cpu} != ${arch}`);
+              checked++;
+            }
+            if (checked !== Object.keys(optional).length) {
+              throw new Error(`${checked} platform packages but ${Object.keys(optional).length} optional deps`);
+            }
+            // The runner is linux-x64, so npm must have a package for it.
+            if (!optional[`@thicket/thicket-${process.platform}-${process.arch}`]) {
+              throw new Error(`nothing declared for this runner`);
+            }
+            console.log(`${checked} platform packages, all selectable`);
+          '
+
       - name: The npm platform binary must produce the same report
         run: |
           set -euo pipefail

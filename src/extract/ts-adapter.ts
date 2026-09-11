@@ -433,9 +433,13 @@ function createAPI(cwd: string): API {
   try {
     return new API(tsgo.path ? { cwd, tsserverPath: tsgo.path } : { cwd });
   } catch (e) {
+    // Only one location is ever tried. Naming the other sends a reader to
+    // debug a path this run never looked at.
+    const where = tsgo.path
+      ? `Used ${tsgo.path}, from ${tsgo.source === "env" ? TSGO_ENV_VAR : "the packaged tsgo/ directory"}.`
+      : `Looked for a packaged tsgo at ${tsgo.searched.join(", ")}, then in the installed \`typescript\` package.`;
     throw new Error(
-      `could not find the tsgo executable thicket analyzes with. Looked in: ` +
-        `${tsgo.searched.join(", ")}, then the installed \`typescript\` package. ` +
+      `could not start the tsgo executable thicket analyzes with. ${where} ` +
         `Set ${TSGO_ENV_VAR} to point at one. (${e instanceof Error ? e.message : String(e)})`,
     );
   }

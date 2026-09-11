@@ -96,6 +96,12 @@ describe("tsgoVersion", () => {
       return f;
     },
     readBytes: (p: string) => Buffer.from(files[p] ?? ""),
+    // Every entry in the directory holding the executable, which is where the
+    // stdlib lives too.
+    listDir: (dir: string) =>
+      Object.keys(files)
+        .filter((f) => f.startsWith(`${dir}/`) && !f.slice(dir.length + 1).includes("/"))
+        .map((f) => f.slice(dir.length + 1)),
   });
 
   it("uses the bundled pin when typescript resolves tsgo itself", () => {
@@ -142,6 +148,19 @@ describe("tsgoVersion", () => {
     );
     expect(v).not.toBe(pinnedVersion);
     expect(v).toMatch(/^sha256:[0-9a-f]{16}$/);
+  });
+
+  it("notices when only the stdlib beside the compiler changed", () => {
+    // tsgo READS the sibling lib.*.d.ts files; edit one and type resolution --
+    // and therefore the findings -- change while the executable is untouched.
+    // An identity covering only the executable would hand both the same
+    // configHash and let the warm cache answer for the other one.
+    const identity = (libDts: string) =>
+      tsgoVersion(
+        { path: "/custom/tsc", source: "env", searched: [] },
+        io({ "/custom/tsc": "same compiler", "/custom/lib.d.ts": libDts }),
+      );
+    expect(identity("declare var x: number;")).not.toBe(identity("declare var x: string;"));
   });
 
   it("gives two different unlabelled compilers two different identities", () => {

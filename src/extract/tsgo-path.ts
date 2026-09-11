@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { version as pinnedTypeScriptVersion } from "typescript";
+import { compareStrings } from "../order.js";
 
 /**
  * Escape hatch for pointing thicket at a different tsgo build. It changes the
@@ -89,11 +90,14 @@ export function resolveTsgo(): TsgoResolution {
 export interface TsgoIo {
   readText: (path: string) => string;
   readBytes: (path: string) => Buffer;
+  /** Entry names directly inside `dir`. */
+  listDir: (dir: string) => string[];
 }
 
 const defaultIo: TsgoIo = {
   readText: (p) => readFileSync(p, "utf8"),
   readBytes: (p) => readFileSync(p),
+  listDir: (d) => readdirSync(d),
 };
 
 /** The `version` beside the executable, if there is a trustworthy one. */
@@ -149,6 +153,21 @@ export function tsgoVersion(
   }
 
   // An unlabelled compiler. Borrowing `pinnedTypeScriptVersion` here would be
-  // the cache bug described above, so hash what is actually going to run.
-  return `sha256:${createHash("sha256").update(io.readBytes(resolution.path)).digest("hex").slice(0, 16)}`;
+  // the cache bug described above, so hash what is actually going to run --
+  // the executable AND the stdlib beside it, because tsgo reads those
+  // lib.*.d.ts files and editing one changes type resolution, and therefore
+  // the findings, without touching the binary.
+  const dir = dirname(resolution.path);
+  const digest = createHash("sha256");
+  // Sorted so the identity is a property of the payload and not of readdir
+  // order, which is a filesystem detail that differs between machines.
+  for (const entry of [...io.listDir(dir)].sort(compareStrings)) {
+    digest.update(entry).update("\u0000");
+    try {
+      digest.update(io.readBytes(join(dir, entry)));
+    } catch {
+      // A directory or unreadable entry still contributes its name above.
+    }
+  }
+  return `sha256:${digest.digest("hex").slice(0, 16)}`;
 }

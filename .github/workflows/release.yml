@@ -14,23 +14,15 @@ on:
 # One host builds every target: each platform's tsgo is a plain registry
 # tarball, so nothing here needs a macOS or arm runner.
 jobs:
-  release:
+  # Build, smoke, publish are three jobs on purpose. Publishing must depend on
+  # every artifact having been RUN, and only a job per platform can run them.
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
-      # PRESENCE, not the secrets themselves. A step's own `env:` is not visible
-      # to its `if:`, so the gate has to read something job-level -- but hoisting
-      # the tokens put both publishing credentials in the environment of every
-      # step, including `bun install` (which runs lifecycle scripts) and the test
-      # run. Any dependency executing from this tag could have read them. These
-      # booleans gate the same steps and carry nothing worth stealing; the
-      # tokens appear only in the one step that publishes.
-      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
-      HAS_TAP_TOKEN: ${{ secrets.TAP_TOKEN != '' }}
-      # workflow_dispatch CAN be run against a tag, in which case every publish
-      # guard below would otherwise fire while the UI said "without publishing
-      # anything". `inputs` is null on a tag push, so this is false there.
+      # No secrets in this job at all. It runs `bun install` (lifecycle scripts)
+      # and the test suite from a tag, so anything with a token in scope here
+      # could be read by code this repo does not own. Publishing happens in its
+      # own job, below.
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
       - uses: actions/checkout@v4
@@ -76,27 +68,110 @@ jobs:
           bun run build:formula
           bun run build:npm
 
-      - name: Prove the linux-x64 artifact actually runs before publishing it
-        # The same check CI runs on every PR, repeated here against the exact
-        # bytes about to be uploaded rather than a rebuild of them.
+      - name: Render the reference report the smoke jobs compare against
+        run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            dist-bin/*.tar.gz
+            dist-bin/checksums.txt
+            dist-bin/thicket.rb
+            from-source.md
+          retention-days: 7
+
+  # Every artifact is executed on a machine of its own kind before anything is
+  # published. Cross-compiling proves four binaries LINK; it says nothing about
+  # whether a target-specific tsgo packaging fault ships. CI runs this matrix on
+  # pull requests, but CI is not a prerequisite for a tag push and it builds with
+  # a floating Bun, so the exact bytes being released have to be run here.
+  smoke:
+    needs: build
+    name: run the ${{ matrix.target }} artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-latest
+          - target: darwin-x64
+            # Rosetta on arm64; macos-13 is the last native x64 image and is
+            # being retired. See ci.yml for the full reasoning.
+            runs-on: macos-latest
+          - target: linux-x64
+            runs-on: ubuntu-latest
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+
+      - name: Run the exact tarball that is about to be published
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+          tarball="dist-bin/thicket-$version-${{ matrix.target }}.tar.gz"
+          test -f "$tarball" || { echo "::error::no $tarball"; find . -name '*.tar.gz'; exit 1; }
           mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
-          tar -xzf "dist-bin/thicket-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
-          mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
           ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/prefix/bin/thicket" \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
           cd "$GITHUB_WORKSPACE"
+          test -s from-binary.md
           diff -u from-source.md from-binary.md \
-            || { echo "::error::refusing to release: the packaged binary disagrees with the source"; exit 1; }
+            || { echo "::error::refusing to release: ${{ matrix.target }} disagrees with the source run"; exit 1; }
+          echo "${{ matrix.target }}: byte-identical."
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # PRESENCE, not the secrets. A step's own `env:` is not visible to its
+      # `if:`, so the gate reads these; the tokens themselves appear only in
+      # the single step that uses each one.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+      HAS_TAP_TOKEN: ${{ secrets.TAP_TOKEN != '' }}
+      DRY_RUN: ${{ inputs.dry_run || false }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+
+      - name: Restage the npm packages from the smoke-tested tarballs
+        # Rebuilt from the DOWNLOADED tarballs, not recompiled: the bytes npm
+        # publishes are then the same ones the matrix above just ran.
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          for t in dist-bin/*.tar.gz; do tar -xzf "$t" -C dist-bin; done
+          bun install --frozen-lockfile
+          bun run build:npm
 
       - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v') && env.DRY_RUN != 'true'
+        # Gated on the repository too. A fork pushing a tag runs this with its
+        # own token and would cut a release in the fork -- harmless, but it
+        # contradicts the promise that a fork builds, verifies and stops.
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') && env.DRY_RUN != 'true'
+          && github.repository == 'alecf/thicket'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -105,9 +180,6 @@ jobs:
             --generate-notes \
             dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/thicket.rb
 
-      # Both publishing steps are gated on their secret rather than assumed:
-      # a fork, or this repo before the npm name lands, should build and verify
-      # everything above and then stop cleanly instead of failing red.
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/v') && env.HAS_NPM_TOKEN == 'true' && env.DRY_RUN != 'true'
         env:
@@ -176,12 +248,3 @@ jobs:
           # commits yet leaves an unborn branch with no upstream, and a bare
           # push there fails with "has no upstream branch".
           git push -u origin HEAD
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: thicket-artifacts
-          path: |
-            dist-bin/*.tar.gz
-            dist-bin/checksums.txt
-            dist-bin/thicket.rb
-          retention-days: 14
