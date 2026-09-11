@@ -617,8 +617,10 @@ export function selectWorkspaces(
 function matchesFilter(ws: Workspace, pattern: string): boolean {
   if (pattern.startsWith("./") || pattern.startsWith("../") || pattern.startsWith("/")) {
     // A PATH is matched as a path: `/` is a separator, so `./tools/*` does not
-    // reach `tools/a/b`.
-    return matchesGlob(ws.dir, pattern.replace(/^\.\//, ""));
+    // reach `tools/a/b`. `posix.matchesGlob`, never the bare export, which is
+    // the win32 implementation on Windows -- see `discoverWorkspaces` for the
+    // measurement and the premise test that pins it.
+    return posix.matchesGlob(ws.dir, pattern.replace(/^\.\//, ""));
   }
   // A NAME is matched as a string. `matchesGlob` would treat the `/` in a
   // scoped name as a separator, so `*` would silently skip every scoped
@@ -731,6 +733,21 @@ git commit -am "feat: probe a project's source file names without materializing 
 
 ### Task 7: Coverage-driven config selection
 
+**Split the file first.** By Task 7 `src/extract/workspaces.ts` holds manifest
+reading (two formats), a YAML subset parser, a filesystem walk, `--filter`
+selection, and now tsconfig probing — four ideas, and `configsFor` drags in
+`ScanOptions` and `sourceFileNames` besides. The seam already exists and is
+clean: nothing below `interface Workspace` calls anything above it except
+`workspaceGlobs` and `readJson`. Move manifest reading (`workspaceGlobs`,
+`globsFromPnpmText`, `unquote`, `strings`, `readJson`) to
+`src/extract/manifest.ts`; everything from `interface Workspace` down stays.
+Split `tests/workspaces.test.ts` along the same line. Do this as its own commit
+before any Task 7 behaviour lands, so the move is reviewable as a pure move.
+
+**Add a nested-workspace case to `tests/fixtures/workspaces-solution/`.** The
+`excludeDirs` rule below has to hold for a parent workspace, not only for the
+root, and nothing currently exercises that.
+
 **Files:** Modify `src/extract/workspaces.ts`, `tests/workspaces.test.ts`
 
 **Step 1: Write the failing test**
@@ -834,12 +851,23 @@ export async function configsFor(
   const chosen: string[] = [];
   const workspaceDirs = workspaces.map((w) => w.dir);
   for (const dir of [".", ...workspaceDirs]) {
-    // The root owns only what lives in NO workspace. Sample D's root config is
-    // `{"files": [], "references": [...]}` -- it owns nothing itself -- and
-    // measuring its coverage against the whole tree would blame it for every
-    // workspace's files and then hunt for a root sibling to close that gap.
-    const owned = dir === "." ? { excludeDirs: workspaceDirs } : {};
-    chosen.push(...(await configsForOne(root, dir, { ...opts, ...owned })));
+    // Every directory owns only what lives in NO workspace beneath it.
+    //
+    // The root is the obvious case: Sample D's root config is `{"files": [],
+    // "references": [...]}` -- it owns nothing itself -- and measuring its
+    // coverage against the whole tree would blame it for every workspace's
+    // files and then hunt for a root sibling to close that gap.
+    //
+    // But the root is NOT the only case, which an earlier draft of this ternary
+    // got wrong. Task 4 makes nested workspaces reachable: `tools/**` yields
+    // both `tools/alpha` and `tools/alpha/sub`. A parent workspace scoped with
+    // `{}` counts its child's files as its own gap, and then hunts for a
+    // sibling config inside the parent to close a gap that is not the parent's
+    // to close -- the same bug `tests/fixtures/workspaces-solution/` exists to
+    // catch, one level down. So subtract nested workspaces from every scope,
+    // not just from the root's.
+    const nested = workspaceDirs.filter((d) => dir === "." || d.startsWith(`${dir}/`));
+    chosen.push(...(await configsForOne(root, dir, { ...opts, excludeDirs: nested })));
   }
   // A root solution config may `reference` a workspace discovery also selected,
   // so the same path can arrive twice.
