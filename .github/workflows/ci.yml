@@ -18,7 +18,9 @@ jobs:
         with:
           bun-version: "1.4"
       - run: bun install --frozen-lockfile
-      - run: bun run build
+      # `bun run build` is deliberately absent: it now compiles a binary rather
+      # than typechecking, and the `package` job below both builds it and
+      # proves the result runs. `typecheck` is what covers src/**.
       - run: bun run typecheck
       - run: bun run test
 
@@ -46,6 +48,61 @@ jobs:
           # silently and break the only integration the report promises.
           test -s site/dist/report-guide.md
           diff -q docs/report-guide.md site/dist/report-guide.md
+
+  # `bun build --compile` succeeding proves nothing about the binary running:
+  # the bundle built cleanly for weeks' worth of commits and died on first
+  # invocation with `ENOENT: /$bunfs/package.json`, because the native tsgo
+  # child is found by reading a package.json relative to `import.meta.url`.
+  # Only an extracted artifact, run from a directory with no node_modules, can
+  # see that class of failure -- the same reason process-exit.test.ts spawns a
+  # real subprocess.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+
+      - name: Render the reference report from source
+        run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+
+      - name: Build the host artifact
+        run: bun run build
+
+      - name: Install it the way Homebrew does, far from any node_modules
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
+          tar -xzf "dist-bin/thicket-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+
+      - name: Render the same report through the installed binary
+        # cd out of the checkout: inside it, a stray node_modules could satisfy
+        # a resolution the packaged layout is supposed to satisfy on its own,
+        # and the job would pass while the artifact was broken for everyone.
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+
+      - name: The packaged binary must produce the same bytes as the source
+        run: |
+          test -s from-binary.md
+          diff -u from-source.md from-binary.md \
+            || { echo "::error::The packaged binary disagrees with the source run"; exit 1; }
+          echo "Packaged binary and source run are byte-identical."
+
+      - name: The Homebrew formula must be generatable and valid Ruby
+        run: |
+          set -euo pipefail
+          bun run build:formula
+          ruby -c dist-bin/thicket.rb
 
   # thicket's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide

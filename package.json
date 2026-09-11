@@ -12,6 +12,7 @@
     "build": "bun scripts/build-binary.ts",
     "build:all": "bun scripts/build-binary.ts --all",
     "build:npm": "bun scripts/build-npm.ts",
+    "build:formula": "bun scripts/homebrew-formula.ts",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",

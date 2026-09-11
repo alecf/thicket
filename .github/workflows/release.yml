@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify the artifacts without publishing anything"
+        type: boolean
+        default: true
+
+# One host builds every target: each platform's tsgo is a plain registry
+# tarball, so nothing here needs a macOS or arm runner.
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Hoisted to the job: a step's own `env:` block is not visible to that
+    # step's `if:`, so gating on the secret has to read it from here.
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: bun install --frozen-lockfile
+
+      - name: The tag must match the version being released
+        # A tag that disagrees with package.json ships a formula whose URLs
+        # point at files the release does not contain.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          test "$tag" = "$pkg" || {
+            echo "::error::tag v$tag does not match package.json version $pkg"; exit 1; }
+
+      - run: bun run typecheck
+      - run: bun run test
+
+      - name: Build every target, the formula, and the npm packages
+        run: |
+          bun run build:all
+          bun run build:formula
+          bun run build:npm
+
+      - name: Prove the linux-x64 artifact actually runs before publishing it
+        # The same check CI runs on every PR, repeated here against the exact
+        # bytes about to be uploaded rather than a rebuild of them.
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+          mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
+          tar -xzf "dist-bin/thicket-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+          cd "$GITHUB_WORKSPACE"
+          diff -u from-source.md from-binary.md \
+            || { echo "::error::refusing to release: the packaged binary disagrees with the source"; exit 1; }
+
+      - name: Publish the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF#refs/tags/}" \
+            --title "${GITHUB_REF#refs/tags/}" \
+            --generate-notes \
+            dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/thicket.rb
+
+      # Both publishing steps are gated on their secret rather than assumed:
+      # a fork, or this repo before the npm name lands, should build and verify
+      # everything above and then stop cleanly instead of failing red.
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Platform packages first: the thin package's optionalDependencies
+          # name versions that must already resolve when someone installs it.
+          for dir in dist-npm/thicket-*; do
+            (cd "$dir" && npm publish --access public)
+          done
+          (cd dist-npm/thicket && npm publish --access public)
+
+      - name: Push the formula to the Homebrew tap
+        if: startsWith(github.ref, 'refs/tags/v') && env.TAP_TOKEN != ''
+        env:
+          TAP_REPO: ${{ vars.TAP_REPO || 'alecf/homebrew-thicket' }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/$TAP_REPO.git" tap
+          mkdir -p tap/Formula
+          cp dist-bin/thicket.rb tap/Formula/thicket.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/thicket.rb
+          git diff --staged --quiet || git commit -m "thicket ${GITHUB_REF#refs/tags/v}"
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thicket-artifacts
+          path: |
+            dist-bin/*.tar.gz
+            dist-bin/checksums.txt
+            dist-bin/thicket.rb
+          retention-days: 14
