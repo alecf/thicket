@@ -994,16 +994,39 @@ which still pin the behaviour the parameter was there to produce.
 > declined. That errs toward reporting a permanent gap rather than toward
 > widening the analysis, which is the safe direction.
 
-> **(f) A known limit, and `--filter` reaches it.** A file inside a workspace
-> that was discovered but NOT selected is contained by no scope `configsFor`
-> can see, so it lands in the ROOT's gap — and a root sibling whose `include`
-> spans the repo would then be adopted to close it, widening a filtered run
-> back out. Closing it needs the unselected workspaces, which this signature
-> does not carry; `excludeDirs` would not have closed it either, since a root
-> scan excluding only the SELECTED workspaces counts the unselected ones just
-> the same. No fixture root here carries a sibling beside its primary, so
-> nothing exercises it today. Task 8 holds the full discovery list at the call
-> site, which is where it should be decided.
+> **(f) `--filter` reached past its own filter. FIXED HERE, not deferred.** A
+> file inside a workspace that was discovered but NOT selected was contained by
+> no scope `configsFor` could see, so it landed in the ROOT's gap — and a root
+> sibling whose `include` spans the repo (an ordinary `tsconfig.eslint.json`)
+> was then adopted to close it. The consequence is worse than "analyzes more":
+> every number here is computed over the file set, so pulling the excluded
+> workspace back in changes the SELECTED workspace's propagation cost,
+> duplicated coverage, cycles and clusters, with nothing in the output saying
+> so. Deferring it to Task 8 left that task only two levers — post-filtering a
+> config Task 7 chose, with less information, or passing the full list as
+> `workspaces`, which loads unselected primaries and defeats the filter the
+> other way. `configsFor` therefore takes a fourth argument, every discovered
+> workspace, read for ATTRIBUTION only: `owned` is still built from the
+> selected list, so an unselected workspace contributes neither a primary nor
+> a candidate. It defaults to the selected list — right when nothing was
+> filtered, and the old behaviour otherwise — and the two lists are unioned
+> rather than trusted, because a call site that filters in place hands over a
+> list missing the workspace it selected and that failure is silent and
+> identical. `tests/fixtures/workspaces-filter/` is the fixture.
+>
+> `excludeDirs` would not have closed this either: a root scan excluding only
+> the SELECTED workspaces counts the unselected ones just the same.
+
+> **(g) One gap left on purpose.** A candidate sibling that is itself a
+> solution config (`{"files": [], "references": [...]}`) owns no files, so
+> `byConfig` reports its contribution as empty and it is never kept — even when
+> the config it delegates to is the only thing covering a gapped file. The
+> failure direction is UNDER-selection: the file goes unanalyzed and Task 9's
+> `analysisScope` reports it as a coverage gap, which is honest-but-incomplete
+> rather than an analysis quietly widened past what was asked for. The fix, if
+> it ever matters, belongs in `expandReferences`: roll an added config's files
+> up into the entry for the config that pulled it in, since the caller named
+> that one and can act on it.
 
 **Step 4: Run, confirm PASS. Step 5: Commit**
 
