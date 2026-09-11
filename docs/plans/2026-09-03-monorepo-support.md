@@ -26,7 +26,7 @@ The fixture deliberately uses `tools/` and `libs/` — **not** `apps/`, `package
 - Create: `tests/fixtures/workspaces/package.json`
 - Create: `tests/fixtures/workspaces/tsconfig.json`
 - Create: `tests/fixtures/workspaces/scripts/root-util.ts`
-- Create: `tests/fixtures/workspaces/tools/alpha/{package.json,tsconfig.json,tsconfig.test.json,src/a.ts,src/a.test.ts}`
+- Create: `tests/fixtures/workspaces/tools/alpha/{package.json,tsconfig.json,tsconfig.test.json,tsconfig.build.json,src/a.ts,src/b.ts,src/a.test.ts}`
 - Create: `tests/fixtures/workspaces/libs/beta/{package.json,tsconfig.json,src/b.ts}`
 - Create: `tests/fixtures/workspaces/libs/ignored/{package.json,src/c.ts}`
 
@@ -612,7 +612,7 @@ git commit -am "feat: turbo-style --filter selection over workspaces"
 it("lists a project's source files without materializing them", async () => {
   const names = await sourceFileNames([resolve(workspacesRoot(), "tools/alpha/tsconfig.json")]);
   // The main config excludes tests; the probe must reflect that exactly.
-  expect(names).toEqual(["tools/alpha/src/a.ts"]);
+  expect(names).toEqual(["tools/alpha/src/a.ts", "tools/alpha/src/b.ts"]);
 });
 
 it("sees the file the sibling test config adds", async () => {
@@ -620,11 +620,22 @@ it("sees the file the sibling test config adds", async () => {
     resolve(workspacesRoot(), "tools/alpha/tsconfig.json"),
     resolve(workspacesRoot(), "tools/alpha/tsconfig.test.json"),
   ]);
-  expect(names).toEqual(["tools/alpha/src/a.test.ts", "tools/alpha/src/a.ts"]);
+  expect(names).toEqual([
+    "tools/alpha/src/a.test.ts",
+    "tools/alpha/src/a.ts",
+    "tools/alpha/src/b.ts",
+  ]);
 });
 ```
 
 Note both assert an exact list. `expect(names.length).toBeGreaterThan(0)` would pass with the feature deleted.
+
+`src/b.ts` exists so that `tools/alpha/tsconfig.build.json` (`include: ["src/a.ts"]`)
+is a *proper* subset of `tsconfig.json`'s file set rather than equal to it. With
+the two sets equal, Task 7's "a sibling that adds nothing is not chosen"
+assertion passes under a weaker rule than the one we want. Expect the probe to
+return the program's files, which is the transitive closure — `a.test.ts` imports
+`a.ts`, so the second case lists three files, not two.
 
 **Step 2: Run, watch it fail.**
 
@@ -865,18 +876,49 @@ it("never advises a config that was already passed", () => {
   expect(gap?.config).not.toBe("tools/alpha/tsconfig.json");
 });
 
-it("advises the sibling that actually covers the gap", () => {
+// `analysisScope` is synchronous and loads no program, so it CANNOT know which
+// sibling covers the gap -- it can only know which configs were already tried.
+// Naming one would be a guess presented as an instruction, which is the defect
+// this task exists to remove. So it offers the untried candidates and asserts
+// nothing about which works.
+it("offers the siblings that have not been tried, and not the one that has", () => {
   const scope = analysisScope(workspacesRoot(), ["tools/alpha/src/a.ts"], {
     analyzedConfigs: ["tools/alpha/tsconfig.json"],
   });
-  expect(scope.gaps.find((g) => g.dir === "tools/alpha")?.config)
-    .toBe("tools/alpha/tsconfig.test.json");
+  const gap = scope.gaps.find((g) => g.dir === "tools/alpha");
+  expect(gap?.configs).toEqual([
+    "tools/alpha/tsconfig.build.json",
+    "tools/alpha/tsconfig.test.json",
+  ]);
+});
+
+// The common case after this feature lands: every config in the directory was
+// already passed, so there is nothing left to suggest. Say nothing rather than
+// repeat an instruction the reader already followed.
+it("offers nothing when every config in the directory was already tried", () => {
+  const scope = analysisScope(workspacesRoot(), ["libs/beta/src/b.ts"], {
+    analyzedConfigs: ["libs/beta/tsconfig.json"],
+  });
+  expect(scope.gaps.find((g) => g.dir === "libs/beta")?.configs).toEqual([]);
 });
 ```
 
 **Step 2: Run, watch them fail.**
 
-**Step 3: Implement** — give `ScanOptions` an `analyzedConfigs?: readonly string[]`. In `owningDir`/gap construction, consider every `tsconfig*.json` in the directory (sorted), skip any already in `analyzedConfigs`, and emit the first remaining one; emit no `config` when none is left. The current code hardcodes the `tsconfig.json` basename in two places — both must change.
+**Step 3: Implement** — give `ScanOptions` an `analyzedConfigs?: readonly string[]`. Replace `ScopeGap.config?: string` with `configs: string[]`: every `tsconfig*.json` in the owning directory, sorted with `compareStrings`, minus those already analyzed. The current code hardcodes the `tsconfig.json` basename in two places — both must change. Update `scopeWarning` in `src/report/markdown.ts` to render a list (and to render nothing when the list is empty), and update the JSON sidecar shape.
+
+> **Design note — read before implementing.** An earlier draft of this task said
+> "emit the first remaining sibling", and asserted that would be
+> `tsconfig.test.json`. It would not: sorted, `tsconfig.build.json` comes first,
+> and it covers nothing new. That is the fixture doing its job. The deeper point
+> is that ranking siblings requires knowing what each one *covers*, which needs a
+> program load — `analysisScope` is synchronous by design and has none. So it
+> must not rank. Where ranking is possible is the workspace path: `configsFor`
+> (Task 7) already probes every candidate sibling and keeps the ones that
+> contribute, so after it runs, a surviving gap genuinely has no config that
+> closes it. **If Task 7 threads its probe results through, prefer that: emit an
+> empty `configs` for a directory whose siblings were all probed and rejected.**
+> Decide this while implementing, and say in the report which way you went.
 
 **Step 4: Run, confirm PASS. Step 5: Commit**
 
