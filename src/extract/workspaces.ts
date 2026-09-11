@@ -162,11 +162,15 @@ const MAX_WALK_DEPTH = 8;
  * as readily as the workspace two levels below them.
  *
  * Matching goes through `posix.matchesGlob` rather than the bare
- * `path.matchesGlob`, which is the win32 implementation on Windows and splits
- * a directory name on `\` (measured against node 24 and bun 1.4). These paths
- * are POSIX by construction, so the posix matcher is the correct one -- and
- * pinning it keeps the answer a property of the strings rather than of the
- * host, which is what AGENTS.md §1 asks of anything that reaches the report.
+ * `path.matchesGlob`, which is the win32 implementation on Windows. The two
+ * disagree on exactly one thing: a `\` in the path, which win32 reads as a
+ * separator (measured against node 24 and bun 1.4). No walk here can produce
+ * such a name -- Windows forbids `\` in a filename, and on POSIX `path` IS
+ * `path.posix` -- so this fixes no live bug. It pins the semantics: these
+ * strings are POSIX by construction, so the posix matcher is the correct one,
+ * and which implementation runs should not be a property of the host. The
+ * premise is pinned by a test in `tests/workspaces.test.ts`, so it fails if
+ * the two ever converge rather than quietly becoming a dead justification.
  */
 export function discoverWorkspaces(root: string): Workspace[] {
   const globs = workspaceGlobs(root);

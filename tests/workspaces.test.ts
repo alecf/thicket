@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   discoverWorkspaces,
@@ -494,20 +494,28 @@ describe("discoverWorkspaces", () => {
     );
   });
 
+  // Not a guard on the call site -- on POSIX `path === path.posix`, so no test
+  // here can catch the `posix.` being deleted. This pins the REASON it is
+  // written: the two implementations disagree, so which one runs must not be a
+  // property of the host. If node ever unifies them this fails, and the
+  // explicitness above becomes deletable rather than silently pointless.
+  it("win32 and posix matchesGlob disagree on a backslash in a directory name", () => {
+    expect(win32.matchesGlob("tools\\alpha", "tools/*")).toBe(true);
+    expect(posix.matchesGlob("tools\\alpha", "tools/*")).toBe(false);
+  });
+
   // A backslash is a legal character in a POSIX directory name and an
   // impossible one on Windows, which is why this case can only run here.
   it.skipIf(process.platform === "win32")(
     "treats a backslash in a directory name as part of the name",
     () => {
-      // Measured against node 24 and bun 1.4: `path.win32.matchesGlob` splits
-      // on `\` and `path.posix.matchesGlob` does not, so the bare
-      // `path.matchesGlob` answers differently depending on the host -- a
-      // determinism bug per AGENTS.md §1. Matching goes through the posix
-      // implementation explicitly, and these strings are built from readdir
-      // names joined with `/`, so they are already POSIX and must not be
-      // "normalized" a second time: a blanket `split("\\").join("/")` turns
-      // this directory into a two-segment path that its own glob no longer
-      // matches, and the workspace disappears.
+      // These strings are built from readdir names joined with `/`, so they
+      // are already POSIX and must not be "normalized" a second time: the
+      // `toPosix` idiom used elsewhere in this codebase -- a blanket
+      // `split("\\").join("/")` -- turns this one directory into a
+      // two-segment path that its own glob no longer matches, and the
+      // workspace disappears. This is what the walk's join is guarded on; the
+      // matcher's own backslash behaviour is pinned separately above.
       withRoot(
         {
           "weird\\name/package.json": JSON.stringify({ name: "weird" }),
