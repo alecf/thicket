@@ -359,3 +359,27 @@ export function withRoot(files: Record<string, string>, body: (root: string) => 
 export function nestedWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-nested");
 }
+
+/**
+ * A fifth workspace root, built for one question: what happens to a workspace
+ * the run was told to leave out.
+ *
+ * The root carries `tsconfig.all.json`, whose `include` is `**` -- the shape
+ * of a real `tsconfig.eslint.json`. Under `--filter @filt/alpha`, `pkg/beta`'s
+ * files are covered by no chosen config, and if the root is blamed for them
+ * this config is exactly what closes that gap. The run then analyzes beta
+ * anyway, and since every number thicket reports is computed over the file set
+ * -- propagation cost, duplicated coverage, cycles, clusters -- alpha's own
+ * figures change, measured over a tree the reader explicitly excluded, with
+ * nothing in the output saying so.
+ *
+ * `pkg/beta/tsconfig.extra.json` is the other half. It covers
+ * `pkg/beta/scripts/gen.ts`, which beta's own config misses, so it MUST be
+ * adopted when beta is selected and must NOT be when beta is not -- and not
+ * because the file stopped being uncovered, but because the gap is beta's and
+ * beta is not in this run. A "list of every workspace" used for anything but
+ * attribution pulls both that config and beta's primary back in.
+ */
+export function filterWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-filter");
+}

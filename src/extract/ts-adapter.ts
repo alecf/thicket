@@ -758,7 +758,12 @@ export interface ProbeResult {
    * included, so a config the caller never named can appear here. The inverse
    * is the one to keep in mind: a solution config owning no files of its own
    * maps to an EMPTY list, and what it delegates to is listed under the
-   * config that owns it.
+   * config that owns it. A caller asking "did the config I named contribute
+   * anything" therefore gets `no` for every solution config -- safe where the
+   * cost of a `no` is analyzing less, which is `configsFor`'s case, and wrong
+   * anywhere the cost runs the other way. Closing it means rolling an added
+   * config's files up into the entry for the config that pulled it in, which
+   * is `expandReferences`'s knowledge and nobody else's.
    */
   byConfig: Map<string, string[]>;
 }

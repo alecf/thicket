@@ -390,6 +390,12 @@ function configsIn(root: string, dir: string): DirConfigs | undefined {
  * to close a gap that is not the parent's -- and a parent's build config
  * reaching into its child's directory will happily close it.
  *
+ * `scopes` here is EVERY workspace, not the selected ones: a workspace left
+ * out of the run still owns its own files, and the answer for one of them has
+ * to be a directory the run will then decline to act on. Pass only the
+ * selected list and those files fall through to `"."`, which is how a
+ * repo-spanning root config gets adopted to close a gap the filter created.
+ *
  * Longest wins because every directory containing `file` is a prefix of every
  * deeper one, so string length orders them exactly.
  */
@@ -471,24 +477,53 @@ function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
  * these names may answer "does this config contribute files" and nothing else
  * -- never the coverage numerator, never a prediction of the analyzed set.
  *
- * KNOWN LIMIT, and it is reachable through `--filter`: a file inside a
- * workspace that was DISCOVERED but not selected is contained by no scope
- * here, so it lands in the root's gap. The root's own sibling configs are
- * then judged against it, and one whose `include` spans the repo would be
- * adopted -- widening a filtered run back out. Closing it needs the
- * unselected workspaces, which this signature does not carry; every fixture
- * root here has no sibling beside its primary, so nothing exercises it today.
+ * `discovered` is every workspace the repository HAS, and it is read for
+ * attribution and nothing else. It matters only when `workspaces` is a subset
+ * -- that is, under `--filter`. Without it, a file inside an unselected
+ * workspace is contained by no scope, falls through to the root, and a root
+ * sibling whose `include` spans the repo is then adopted to close it: the
+ * filtered run analyzes the workspace it was told to leave out, and because
+ * every number here is computed over the file set -- propagation cost,
+ * duplicated coverage, cycles, clusters -- that does not merely add findings,
+ * it changes the SELECTED workspace's own. One ordinary
+ * `tsconfig.eslint.json` at the root is enough to trigger it.
+ *
+ * It defaults to `workspaces`, which is exactly right for an unfiltered run
+ * (where the two lists are equal) and is the pre-filter behaviour otherwise.
+ * That default is a convenience for callers that genuinely have one list; a
+ * caller that filtered and does not pass the full list gets the failure above.
+ *
+ * ONE GAP LEFT, deliberately: a sibling that is itself a solution config
+ * (`{"files": [], "references": [...]}`) owns no files of its own, so the
+ * probe reports its contribution as empty and it is never kept, even when the
+ * config it delegates to is the only thing covering a gapped file. The
+ * failure direction is UNDER-selection -- the file goes unanalyzed and
+ * `analysisScope` reports it as a coverage gap, which is honest if
+ * incomplete, rather than an analysis quietly widened past what was asked
+ * for. The fix, if it ever matters, belongs in `expandReferences`: roll an
+ * added config's files up into the entry for the config that pulled it in,
+ * since the caller named that one and can act on it.
  */
 export async function configsFor(
   root: string,
   workspaces: readonly Workspace[],
   opts: ScanOptions = {},
+  discovered: readonly Workspace[] = workspaces,
 ): Promise<string[]> {
   // Sorted and deduped: a caller may pass the root itself, or the same
   // workspace twice (two globs matching one directory), and neither may
   // change the answer -- the second is the phantom-identical-clone hazard
   // from AGENTS.md §3 reached by a different road.
   const scopes = [...new Set([".", ...workspaces.map((w) => w.dir)])].sort(compareStrings);
+  // Attribution runs over every workspace that EXISTS, selection over the ones
+  // asked for. A workspace left out of the run still owns its files, and
+  // saying so is what keeps them out of everyone else's gap. Nothing else
+  // reads this list -- `owned`, and therefore both the primaries and the
+  // candidates, is built from `scopes` alone, so an unselected workspace can
+  // contribute no config by any route.
+  const attribution = [...new Set([...scopes, ...discovered.map((w) => w.dir)])].sort(
+    compareStrings,
+  );
 
   const owned = new Map<string, DirConfigs>();
   for (const dir of scopes) {
@@ -511,7 +546,10 @@ export async function configsFor(
   const gapOf = new Map<string, Set<string>>();
   for (const file of scanSourceFiles(root, opts)) {
     if (covered.has(file)) continue;
-    const dir = deepestScope(scopes, file);
+    // Keyed by attribution scope, so an unselected workspace gets an entry
+    // that nothing ever reads -- which is the point: the file is accounted
+    // for, and it is in nobody's gap.
+    const dir = deepestScope(attribution, file);
     const gap = gapOf.get(dir);
     if (gap === undefined) gapOf.set(dir, new Set([file]));
     else gap.add(file);
@@ -540,6 +578,14 @@ export async function configsFor(
     // `byConfig`, not the union: with two siblings beside one workspace the
     // union says only that SOMETHING closed the gap, and keeping both is
     // exactly the "adds nothing" config this check exists to refuse.
+    //
+    // A candidate that is itself a solution config answers EMPTY here -- its
+    // files belong to the configs it references, which the probe lists
+    // separately -- so it is declined even when it covers the gap. That errs
+    // toward an honest coverage gap rather than toward a widened analysis,
+    // which is the safe direction. Fixing it means rolling a referenced
+    // config's files up into the entry for the config that pulled it in,
+    // inside `expandReferences`; do it there, not by unioning here.
     const own = second.byConfig.get(resolve(root, config).toLowerCase()) ?? [];
     return gap !== undefined && own.some((name) => gap.has(rebaseSecond(name)));
   });

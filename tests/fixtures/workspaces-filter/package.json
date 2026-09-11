@@ -1,0 +1,6 @@
+{
+  "name": "filter-fixture-root",
+  "private": true,
+  "type": "module",
+  "workspaces": ["pkg/*"]
+}

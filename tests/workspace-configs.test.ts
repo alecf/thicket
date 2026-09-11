@@ -6,6 +6,7 @@ import { compareStrings } from "../src/order.js";
 import { openProject, sourceFileNames } from "../src/extract/ts-adapter.js";
 import { configsFor, discoverWorkspaces, selectWorkspaces } from "../src/extract/workspaces.js";
 import {
+  filterWorkspacesRoot,
   nestedWorkspacesRoot,
   solutionWorkspacesRoot,
   workspacesRoot,
@@ -203,6 +204,100 @@ describe("configsFor", () => {
       "tools/alpha/sub/tsconfig.extra.json",
       "tools/alpha/sub/tsconfig.json",
     ]);
+  });
+
+  it("leaves an unselected workspace's files to that workspace", async () => {
+    // The root sibling here spans the repository, so the only thing keeping a
+    // filtered run inside its filter is WHO `pkg/beta`'s files are attributed
+    // to. Blame the root and `tsconfig.all.json` closes that gap; blame beta,
+    // which is not in this run, and nobody goes looking for a config at all.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    const selected = selectWorkspaces(all, ["@filt/alpha"]);
+    expect(selected).toEqual([{ dir: "pkg/alpha", name: "@filt/alpha" }]);
+
+    const chosen = await configsFor(filterWorkspacesRoot(), selected, {}, all);
+    expect(chosen).toEqual(["pkg/alpha/tsconfig.json", "tsconfig.json"]);
+    // Both halves of "attribution only", and they fail to different
+    // mutations: the root must not adopt a repo-spanning sibling to cover
+    // beta, and beta must contribute neither its primary nor its own sibling
+    // just for being known about.
+    expect(chosen).not.toContain("tsconfig.all.json");
+    expect(chosen).not.toContain("pkg/beta/tsconfig.json");
+    expect(chosen).not.toContain("pkg/beta/tsconfig.extra.json");
+
+    // And the consequence, asserted where it actually bites: the analyzed
+    // file set. A config list that merely looks right is not the claim --
+    // beta's source must not reach the graph the report is computed over.
+    const project = await openProject(chosen.map((c) => resolve(filterWorkspacesRoot(), c)));
+    try {
+      expect(project.files().map((f) => f.path)).toEqual([
+        "pkg/alpha/src/a.ts",
+        "scripts/root.ts",
+      ]);
+    } finally {
+      await project.close();
+    }
+  });
+
+  it("attributes a selected workspace's files to it even if the list omits it", async () => {
+    // `discovered` is meant to be a superset of `workspaces`, and a call site
+    // that filters its list in place hands over one that is not. The two
+    // lists are unioned rather than trusted, because the failure is silent
+    // and identical to the one this parameter was added to fix: the selected
+    // workspace's own files fall through to the root, and the repo-spanning
+    // root sibling is adopted to cover them.
+    // `pkg/beta` is the workspace to select here, and deliberately: it is the
+    // one with a gap of its own. A workspace whose primary covers everything
+    // it owns cannot show this at all -- misattributing a file that is
+    // already covered changes nothing, because only GAPPED files are ever
+    // looked up.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    const selected = selectWorkspaces(all, ["@filt/beta"]);
+    const withoutBeta = all.filter((w) => w.dir !== "pkg/beta");
+    expect(withoutBeta.map((w) => w.dir)).toEqual(["pkg/alpha"]);
+
+    const chosen = await configsFor(filterWorkspacesRoot(), selected, {}, withoutBeta);
+    expect(chosen).toEqual([
+      // Beta's gap stays beta's: its own sibling closes it...
+      "pkg/beta/tsconfig.extra.json",
+      "pkg/beta/tsconfig.json",
+      "tsconfig.json",
+    ]);
+    // ...and the root's repo-spanning sibling, which also covers that file,
+    // is never reached for it.
+    expect(chosen).not.toContain("tsconfig.all.json");
+  });
+
+  it("still adopts that workspace's sibling once it is selected", async () => {
+    // The other direction, and the reason the test above cannot stand alone:
+    // `pkg/beta/scripts/gen.ts` is uncovered in both runs, so a fix that
+    // simply stopped adopting siblings would pass it. Here beta IS selected,
+    // its gap is its own, and its sibling is the config that closes it --
+    // while the root's repo-spanning sibling stays out, because the root's
+    // own gap is empty either way.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    const chosen = await configsFor(filterWorkspacesRoot(), all, {}, all);
+    expect(chosen).toEqual([
+      "pkg/alpha/tsconfig.json",
+      "pkg/beta/tsconfig.extra.json",
+      "pkg/beta/tsconfig.json",
+      "tsconfig.json",
+    ]);
+  });
+
+  it("attributes to the selected workspaces alone when told nothing more", async () => {
+    // The documented default: `discovered` defaults to `workspaces`, so an
+    // unfiltered caller -- where the two lists are equal anyway -- needs to
+    // know nothing about it. Pinned because the default is what every caller
+    // that does not filter will use, and because omitting it on a FILTERED
+    // run is the behaviour the parameter exists to replace: beta's files fall
+    // through to the root, and the repo-spanning sibling is adopted.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    expect(await configsFor(filterWorkspacesRoot(), all)).toEqual(
+      await configsFor(filterWorkspacesRoot(), all, {}, all),
+    );
+    const filtered = selectWorkspaces(all, ["@filt/alpha"]);
+    expect(await configsFor(filterWorkspacesRoot(), filtered)).toContain("tsconfig.all.json");
   });
 
   it("refuses a probe root above the repository root", async () => {
