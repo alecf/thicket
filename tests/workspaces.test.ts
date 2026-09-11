@@ -772,16 +772,23 @@ describe("selectWorkspaces", () => {
   });
 
   // Not a style preference, and not a hypothetical. `*a*a*...*ab` against a
-  // name of 40 `a`s is the textbook catastrophic backtrack, and BOTH obvious
-  // implementations take it: measured under node 24, a compiled `^.*a.*a...ab$`
-  // takes 9.4s at 10 repeats and `posix.matchesGlob` 7.3s, each roughly
-  // tripling per further repeat. A filter is a CLI string, so the cost lands on
-  // whoever typed it -- but "thicket hung" is the worst available way to report
-  // a pattern that simply matches nothing.
+  // name of 40 `a`s is the textbook catastrophic backtrack, and both obvious
+  // implementations take it. At ten stars on that input: the compiled
+  // `^.*a.*a...ab$` costs 8.1s under node 24 and 1.2s under bun 1.4, and
+  // `posix.matchesGlob` 6.4s under node and nothing at all under bun, which is
+  // native. Each roughly triples per further star.
   //
-  // Ten repeats rather than twenty on purpose: twenty makes a regressed
+  // Which runtime runs this matters to what the case catches, so: vitest runs
+  // on node, where both regressions blow the budget. Moved to a bun runner, the
+  // compiled form still does -- 1.2s against 1000ms is the whole reason the
+  // budget is not looser -- while a `matchesGlob` regression would slip past
+  // here. It would not slip past the file: the scoped-`*` case and the
+  // literal-matching cases above fail on it too, and this case is the only one
+  // covering the compiled form. Neither guard rests on the other.
+  //
+  // Ten stars rather than twenty on purpose: twenty makes a regressed
   // implementation run for hours, and a test that hangs the suite reports the
-  // regression far worse than one that fails in nine seconds. The correct
+  // regression far worse than one that fails in eight seconds. The correct
   // implementation answers in microseconds, so the budget has four orders of
   // magnitude of room.
   it("answers a pathological star pattern immediately", () => {

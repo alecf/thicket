@@ -180,6 +180,23 @@ const MAX_WALK_DEPTH = 8;
  * and which implementation runs should not be a property of the host. The
  * premise is pinned by a test in `tests/workspaces.test.ts`, so it fails if
  * the two ever converge rather than quietly becoming a dead justification.
+ *
+ * These globs come from the REPOSITORY BEING ANALYZED rather than from whoever
+ * ran thicket, which is what makes the cost of a hostile one worth writing
+ * down. A glob alternating `*` with literals (`*a*a*...*ab`) backtracks
+ * exponentially under node's JavaScript glob implementation and is
+ * constant-time under bun's native one. Measured end to end on this function --
+ * one 40-character package directory, a ten-star glob, the SAME `dist/`
+ * JavaScript both times: 6.28s under node 24, 0.000s under bun 1.4, growing
+ * ~2.7x per further star, so fourteen stars is minutes and twenty is out of
+ * reach. The primitive alone measures 6.38s and 0.000s on that input, and `bun
+ * run thicket`, which loads `src/` directly, answers in 0.010s -- so the
+ * immunity is a property of the RUNTIME, not of how the module is loaded.
+ *
+ * thicket targets bun, so there is deliberately no cap on glob complexity here:
+ * on the supported runtime the exponential case cannot be reached, and a limit
+ * that can never fire is a guard that guards nothing. The one configuration
+ * that does inherit it is the built JavaScript run under node.
  */
 export function discoverWorkspaces(root: string): Workspace[] {
   const globs = workspaceGlobs(root);
@@ -374,6 +391,13 @@ function matchesFilter(ws: Workspace, pattern: string): boolean {
     // reach `tools/a/b`. `posix.matchesGlob`, never the bare export, which is
     // the win32 implementation on Windows -- see `discoverWorkspaces` for the
     // measurement and the premise test that pins it.
+    //
+    // This is the one matcher in this file that keeps node's exponential
+    // backtracking case; `discoverWorkspaces` carries the figures. Kept on
+    // purpose: thicket targets bun, where the same call is constant-time, the
+    // pattern here is the user's own typing rather than the repository's, and a
+    // path pattern needs real `**`-versus-`*` separator semantics that the name
+    // matcher below does not implement.
     return posix.matchesGlob(ws.dir, pattern.replace(/^\.\//, ""));
   }
   // A NAME is matched as a string. `matchesGlob` would treat the `/` in a
@@ -394,25 +418,20 @@ function matchesFilter(ws: Workspace, pattern: string): boolean {
  *   the one that gets missed does not fail -- `--filter 'a.b'` quietly selects
  *   `axb` as well.
  * - `*` compiles to `.*`, and a pattern of alternating stars and literals is
- *   the textbook catastrophic backtrack. `posix.matchesGlob` is no escape --
- *   it backtracks too. Measured against a 40-character name with `*a` repeated
- *   ten times plus a `b`: 9.4s compiled, 7.3s through `matchesGlob`, each
- *   tripling per further repeat. The filter is typed by the person running the
- *   tool, so this is a foot-gun rather than an attack -- but "thicket hung" is
- *   the worst available way to report a pattern that simply matches nothing.
- *   This walk is linear in the name per segment.
+ *   the textbook catastrophic backtrack. Measured on the compiled form against
+ *   a 40-character name, `*a` repeated ten times plus a `b`: 8.1s under node 24
+ *   and 1.2s under bun 1.4, each roughly tripling per further star -- so
+ *   fourteen stars is about a minute on bun and several on node. The filter is
+ *   typed by the person running the tool, so this is a foot-gun rather than an
+ *   attack, but "thicket hung" is the worst available way to report a pattern
+ *   that simply matches nothing. This walk is linear in the name per segment.
  *
- * The `matchesGlob` half of that measurement is runtime-dependent, which is the
- * reason it is worth writing down: the same call is microseconds under bun and
- * seconds under node 24, so a foot-gun placed here would be invisible in
- * development and live only in the `dist/` build. Determinism (AGENTS.md §1) is
- * about the answer rather than the clock, but "which runtime am I on" is not a
- * thing this file should be sensitive to either way.
- *
- * The PATH branch above still goes through `posix.matchesGlob` and keeps that
- * exposure, deliberately: it needs real `**`-versus-`*` separator semantics,
- * which this walk does not implement, and `discoverWorkspaces` has run manifest
- * globs through the same matcher since it was written.
+ * `posix.matchesGlob` is not the alternative it looks like, and the reason is
+ * worth keeping: it backtracks the same way under node -- 6.4s on that input --
+ * and not at all under bun, whose glob is native. thicket targets bun, so THAT
+ * hazard is bounded in practice and `discoverWorkspaces` documents the split in
+ * full. The compiled RegExp is the one that survives the runtime choice: it is
+ * slow on both, which is what decided this walk.
  *
  * Taking the EARLIEST occurrence of each interior segment is exact, not a
  * heuristic: with `*` the only wildcard, a later occurrence leaves strictly
