@@ -1123,6 +1123,24 @@ baseline is 4.5%).
 **Files:** Modify `AGENTS.md`, `README.md`, `docs/PRD.md`
 
 - `AGENTS.md`: note that workspace discovery is an opinion with its own off switch (§4b), and record the refinement to the cache-hash rule — *what is stored for a file* joins the hash, *which files are asked about* does not.
+- `AGENTS.md`, a new hazard — **one class is bounded only by the runtime choice.**
+  Proposed wording, measured rather than asserted:
+
+  > A glob alternating `*` with literals backtracks exponentially under node's
+  > JavaScript glob implementation (6.4s at ten stars on a 40-character subject)
+  > and is constant-time under bun's native one — measured at 0.000s from the
+  > *same* `dist/` JavaScript, so the immunity belongs to the runtime, not the
+  > build. Manifest globs come from the repository being analyzed, so do not
+  > reintroduce a complexity cap to fence a case the supported runtime cannot
+  > reach. Do not assume the same of a *compiled RegExp*, which is slow on both
+  > (1.2s under bun at ten stars) and is why `matchesNameGlob` exists.
+
+- **Reconcile the runtime claims with bun-exclusivity.** `AGENTS.md` currently
+  says "`dist/` still runs under Node ≥24 for anyone who installs the bin", and
+  `package.json` `engines` carries `"node": ">=24"`. Both contradict a bun-only
+  target, and the node path is exactly where the glob hazard above lives. Check
+  whether the bun-compiled-binary work has already changed `engines` before
+  editing it, so the two do not fight.
 - `README.md`: document `thicket [dir]`, `--filter`, `--no-workspaces`.
 - `docs/PRD.md`: a short subsection under §7.1 on per-workspace granularity, noting that a workspace is a semantic boundary where directory depth is not.
 
