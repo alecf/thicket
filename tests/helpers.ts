@@ -209,3 +209,19 @@ export function typeCutConfig(): string {
 export function tangleConfig(): string {
   return resolve(here, "fixtures/tangle/tsconfig.json");
 }
+
+/**
+ * A workspace root whose own tsconfig covers only `scripts/`, beside two
+ * workspaces and one excluded by a negation glob. Directory names are
+ * deliberately `tools/` and `libs/`: any hardcoded `apps`/`packages` name
+ * fails here instead of passing by luck. `tools/alpha` carries a sibling
+ * `tsconfig.test.json` covering the one file its main config excludes, and a
+ * `tsconfig.build.json` that covers a strict subset of files the main config
+ * already has -- so "add every sibling" and "add the siblings that contribute
+ * files" are distinguishable. `tools/cfgonly` is a workspace that publishes
+ * shared config and owns no tsconfig and no source; it must yield zero configs
+ * rather than throwing, and its lone `.d.ts` keeps it out of the denominator.
+ */
+export function workspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces");
+}

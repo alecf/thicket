@@ -1,0 +1,9 @@
+{
+  // A sibling config that contributes NOTHING: its file set is a strict subset
+  // of `tsconfig.json`'s, which already covers all of `src/`. Picking up every
+  // `tsconfig*.json` beside a workspace's main config must be justified by the
+  // files it adds -- `tsconfig.test.json` adds the one file the main config
+  // excludes, and this one adds nothing at all.
+  "extends": "./tsconfig.json",
+  "include": ["src/a.ts"]
+}
