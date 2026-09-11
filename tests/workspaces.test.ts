@@ -213,6 +213,32 @@ describe("globsFromPnpmText", () => {
     ).toEqual(["a/*"]);
   });
 
+  it("stops at a top-level key whose own list is flush", () => {
+    // The item regex runs before the top-level-key break and no longer requires
+    // indentation, so this is the shape that would leak if the break were ever
+    // moved below it or loosened: `- esbuild` is a well-formed list item
+    // belonging to somebody else's key. Nothing is wrong today -- this is here
+    // so the next person to touch either regex does not have to re-derive it.
+    expect(globsFromPnpmText("packages:\n  - a/*\nonlyBuiltDependencies:\n- esbuild\n")).toEqual([
+      "a/*",
+    ]);
+  });
+
+  it("answers [] for a packages key with no members", () => {
+    // YAML calls this value `null`, and `undefined` would be the literal
+    // reading. `[]` is the right answer anyway: the file declares `packages:`,
+    // so this IS a pnpm workspace root, it just lists nobody -- the same
+    // semantics `{"workspaces": []}` already has in package.json. The
+    // `undefined`-versus-`[]` contract asks "is this a workspace root", which
+    // the key's presence answers, and the two manifest formats agreeing on it
+    // matters more than matching YAML's null/empty-list distinction.
+    //
+    // Ending at a later key and ending at EOF agree; both are pinned because
+    // nothing else here would notice if only one of them changed.
+    expect(globsFromPnpmText("packages:\ncatalog:\n  react: ^18.3.1\n")).toEqual([]);
+    expect(globsFromPnpmText("packages:\n")).toEqual([]);
+  });
+
   it("answers undefined for a manifest with no packages key", () => {
     expect(globsFromPnpmText("catalog:\n  react: ^18\n")).toBeUndefined();
   });
