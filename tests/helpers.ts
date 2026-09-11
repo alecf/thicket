@@ -5,6 +5,40 @@ import { dirname, join, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Paths that make an ordering assertion falsifiable, in the order
+ * `compareStrings` must put them.
+ *
+ * A sort assertion is only a guard if its data can FAIL it, and four sorts in
+ * this repository reached review pinned by data that could not -- swapping
+ * `compareStrings` for `localeCompare` left every one of them green. Two
+ * properties are needed, and most hand-written lists have neither:
+ *
+ *  1. **Code-unit order differs from collation order.** `Util.ts` before
+ *     `alpha.ts` (`U` = 0x55 < `a` = 0x61), which en-US reverses because it
+ *     folds case; and the punctuation straddling the letters, since `-`
+ *     (0x2D), `.` (0x2E) and `_` (0x5F) are variable-weight under collation
+ *     and fixed under code units. Without one of these the two comparators
+ *     agree and the swap is invisible.
+ *  2. **Sorted order differs from any plausible INSERTION order.** `a/c.ts`
+ *     sorts between `a.min.ts` and `a_c.ts`, so the files of directory `a/` are
+ *     not contiguous in the answer: no walk that finishes one directory before
+ *     starting another can produce this list by luck, whether or not it sorts.
+ *
+ * Use it wherever a sort's output is asserted; where the data has to be
+ * domain-shaped instead (tsconfig basenames, directory names), state both
+ * properties and point back here rather than rederiving them.
+ */
+export const ORDERING_PROBE: readonly string[] = [
+  "Util.ts",
+  "a-b.ts",
+  "a.min.ts",
+  "a/c.ts",
+  "a_c.ts",
+  "ab.ts",
+  "alpha.ts",
+];
+
 export function fixtureRoot(): string {
   return resolve(here, "fixtures/sample");
 }
@@ -359,7 +393,10 @@ export function withRoot(files: Record<string, string>, body: (root: string) => 
  * `tools/Zed` is here for its capital letter and nothing else: it is the only
  * name in these fixtures that sorts differently under code-unit order and
  * under collation, so it is what fails when `compareStrings` is swapped for
- * `localeCompare` (AGENTS.md §1).
+ * `localeCompare` (AGENTS.md §1). It stays a bespoke datum because it has to
+ * be a directory ON DISK that workspace discovery walks, which no exported
+ * constant can be -- it carries property 1 of `ORDERING_PROBE` and not
+ * property 2, and the probe's docstring is where both are written down.
  */
 export function nestedWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-nested");

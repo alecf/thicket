@@ -233,13 +233,17 @@ function owningDir(
 /**
  * The `tsconfig*.json` files directly in `dir`, repo-relative POSIX, sorted.
  *
+ * The one definition of "the configs in this directory": `configsIn` in
+ * `workspaces.ts` picks the one it LOADS out of this list, so what a run opens
+ * and what the coverage section offers cannot drift apart. The order is part
+ * of that contract -- with no `tsconfig.json` present, `configsIn` takes the
+ * first of this list -- so it is `compareStrings`, never collation.
+ *
  * `tsconfig*.json` rather than the `tsconfig.json` basename, in BOTH of the
  * places that used to hardcode it: a directory holding `tsconfig.app.json` and
  * `tsconfig.node.json` and no `tsconfig.json` is an ordinary Vite layout, and
  * hardcoding the name charged its files to the top-level directory above it
- * The one definition of "the configs in this directory": `configsIn` in
- * `workspaces.ts` picks the one it LOADS out of this list, so what a run opens
- * and what the coverage section offers cannot drift apart.
+ * and then had no config to offer for them.
  *
  * `*.json` would be wrong: a `base.json` or `package.json` beside the configs
  * is not a project, and suggesting one is advice that cannot work.

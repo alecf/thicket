@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { analysisScope, type Scope, scanSourceFiles } from "../src/extract/scope.js";
-import { generatedRoot, partialRoot, withRoot, workspacesRoot } from "./helpers.js";
+import {
+  generatedRoot,
+  ORDERING_PROBE,
+  partialRoot,
+  withRoot,
+  workspacesRoot,
+} from "./helpers.js";
 
 describe("the denominator excludes what analysis excludes", () => {
   // Both sides must apply the same rules. When the banner sniff started
@@ -53,28 +59,17 @@ describe("scanSourceFiles", () => {
     ]);
   });
 
-  // The sort is `compareStrings`, and only names that sort differently under
-  // collation can say so. `Util.ts` before `alpha.ts` is the case AGENTS.md §1
-  // names: en-US folds case, so collation answers the reverse, and a repo with
-  // one capitalized filename emits differently-ordered reports on two hosts.
-  // `-`, `.` and `_` do the same for punctuation.
+  // `ORDERING_PROBE` rather than hand-picked names: the walk is recursive, so
+  // this sort needs both of the probe's properties -- one name whose collation
+  // order differs, and one nested path that no directory-at-a-time walk emits
+  // in sorted position.
   it("orders the files it finds by code unit, not by collation", () => {
-    withRoot(
-      {
-        "src/Util.ts": "export const u = 1;\n",
-        "src/alpha.ts": "export const a = 1;\n",
-        "src/a-b.ts": "export const b = 1;\n",
-        "src/a_c.ts": "export const c = 1;\n",
-      },
-      (root) => {
-        expect(scanSourceFiles(root)).toEqual([
-          "src/Util.ts",
-          "src/a-b.ts",
-          "src/a_c.ts",
-          "src/alpha.ts",
-        ]);
-      },
+    const files = Object.fromEntries(
+      ORDERING_PROBE.map((name, i) => [name, `export const v${i} = ${i};\n`]),
     );
+    withRoot(files, (root) => {
+      expect(scanSourceFiles(root)).toEqual([...ORDERING_PROBE]);
+    });
   });
 
   it("skips generated, declaration, and dot-directory files", () => {
@@ -203,7 +198,9 @@ describe("the configs a gap offers", () => {
   // Gaps are ordered by size and then by directory, and the tie-break is the
   // half a host can change: two one-file gaps whose names differ only in case
   // sort one way by code unit and the other under collation, so the report
-  // would list them differently on two machines from the same tree.
+  // would list them differently on two machines from the same tree. Directory
+  // names, so `ORDERING_PROBE` does not fit; this is its property 1, spelled
+  // with the capital that the probe's `Util.ts` carries.
   it("breaks a tie between equal-sized gaps by code unit, not by collation", () => {
     withRoot(
       { "Zed/x.ts": "export const x = 1;\n", "apps/y.ts": "export const y = 1;\n" },
@@ -225,14 +222,16 @@ describe("the configs a gap offers", () => {
   //
   // The other three names are here for the ORDER, which is not cosmetic: with
   // no `tsconfig.json` present, `configsIn` in `workspaces.ts` takes the first
-  // of this list as the config it LOADS. Under `localeCompare` the answer
-  // depends on the host's ICU data and `LANG` (AGENTS.md §1), and these names
-  // are what makes the two orders disagree -- `-` (0x2D), `.` (0x2E) and `_`
-  // (0x5F) sort in that order by code unit and in a different one under
-  // collation, which also folds `B` in beside `a`. Measured under en-US,
-  // collation answers `_legacy, -base, .app, .Build, .node`. Without a datum
-  // like `tsconfig-base.json` -- an ordinary convention -- every name in the
+  // of this list as the config it LOADS. `ORDERING_PROBE` cannot be used here
+  // -- these have to be `tsconfig*.json` basenames in one directory -- so they
+  // carry its property 1 by hand: `-` (0x2D), `.` (0x2E) and `_` (0x5F) sort
+  // in that order by code unit and in a different one under collation, which
+  // also folds `B` in beside `a`. Measured under en-US, collation answers
+  // `_legacy, -base, .app, .Build, .node`. Without a datum like
+  // `tsconfig-base.json` -- an ordinary convention -- every name in the
   // directory sorts identically both ways and the guard is unfalsifiable.
+  // Property 2 is not available in a single flat directory and is not needed:
+  // `readdirSync` returns one directory, and the sort is the only step.
   it("blames the directory whose only config is not named tsconfig.json", () => {
     withRoot(
       {
