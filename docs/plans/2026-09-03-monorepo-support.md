@@ -1191,6 +1191,14 @@ git commit -am "fix: stop advising a --config that was already passed"
 
 **Risk:** `THK-CYC-*` ids derive from module names. Changing granularity globally churns ids on ordinary repos, and finding ids are the loop's backbone (PRD §9.1). So size-targeting applies **only** when more than one workspace is in play; single-project runs keep today's `selectGranularity` exactly.
 
+**The churn is now observable from a command, not hypothetical.** Since Task 8
+wired the CLI, the same tree reports `granularity: dir:3 (4 modules)` unfiltered
+and `dir:1 (2 modules)` under `--filter` — so module names, and therefore
+`THK-CYC-*` ids, already differ between scopes of the same repository. PRD §9.1
+calls finding ids the loop's backbone. Reproduce this before starting, and use
+it as the acceptance test: a workspace's modules must not be renamed by the
+presence or absence of *other* workspaces in the run.
+
 **Measured shape of the problem.** In both sample monorepos a *single*
 workspace holds ~88% of the source: 6048 of 6831 in Sample C, 3923 of 4464 in
 Sample D. So per-workspace granularity is not mainly about splitting the big
