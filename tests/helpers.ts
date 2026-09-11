@@ -1,5 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -294,4 +296,34 @@ export function solutionWorkspacesRoot(): string {
  */
 export function pnpmWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-pnpm");
+}
+
+/**
+ * Runs `body` against a throwaway root holding exactly `files`, keyed by name.
+ *
+ * Malformed and oddly-shaped manifests are written here rather than committed
+ * as fixtures: each one is read by a single assertion, needs no TypeScript
+ * beside it, and an unparseable `package.json` checked into `tests/fixtures/`
+ * is a trap for every tool that walks this repo. The empty case -- `{}` -- is a
+ * temp dir for a different reason: it must be a directory that exists and holds
+ * no manifest, and a committed fixture only has that property until someone
+ * adds a `package.json` to it, at which point the test silently starts
+ * exercising a branch another test already covers.
+ *
+ * Files are named rather than implied, because which manifest wins when a root
+ * holds two of them is itself under test. A name may carry directories, since
+ * a workspace root's members live in subdirectories of it.
+ */
+export function withRoot(files: Record<string, string>, body: (root: string) => void): void {
+  const root = mkdtempSync(join(tmpdir(), "thicket-ws-"));
+  try {
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(root, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+    body(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
