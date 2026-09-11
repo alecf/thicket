@@ -366,14 +366,105 @@ describe("main [dir]", () => {
     expect(io.stderr()).toBe("");
   });
 
-  it("names the workspace it skipped for having no tsconfig", async () => {
-    // `tools/cfgonly` publishes shared compiler settings and owns no source.
-    // Contributing zero configs is correct; doing it silently leaves a reader
-    // to discover from the coverage figure that a workspace is missing.
+  it("says nothing about a workspace that holds no TypeScript", async () => {
+    // `tools/cfgonly` publishes shared compiler settings and owns no source
+    // but a `.d.ts`. It contributes zero configs, correctly -- and there is
+    // nothing of its to analyze, so a line about it is false in the sense the
+    // reader cares about and unactionable in every sense. At monorepo scale
+    // that is one such line per JS package on every run.
     const io = capture();
-    await main([workspacesRoot(), "--no-cache"]);
+    expect(await main([workspacesRoot(), "--no-cache"])).toBe(0);
+    expect(io.stderr()).toBe("");
+  });
+
+  it("warns for a config-less workspace with TypeScript, and not for one without", async () => {
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*"] }),
+      // Spans `pkg/covered` as well as the root's own source, which is how a
+      // workspace with no tsconfig of its own can still be fully analyzed.
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: { target: "es2022", module: "nodenext", moduleResolution: "nodenext" },
+        include: ["src/**/*.ts", "pkg/covered/**/*.ts"],
+      }),
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/ts/package.json": JSON.stringify({ name: "@t/ts" }),
+      "pkg/ts/src/x.ts": "export const x = 1;\n",
+      "pkg/js/package.json": JSON.stringify({ name: "@t/js" }),
+      "pkg/js/src/x.js": "export const x = 1;\n",
+      "pkg/covered/package.json": JSON.stringify({ name: "@t/covered" }),
+      "pkg/covered/src/c.ts": "export const c = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stdout()).toMatch(/\b2 files \//);
+    // Only the one with TypeScript nothing reached.
     expect(io.stderr().trim().split("\n")).toHaveLength(1);
-    expect(io.stderr()).toContain("@fix/cfgonly");
+    expect(io.stderr()).toContain("@t/ts");
+    expect(io.stderr()).not.toContain("@t/js");
+    expect(io.stderr()).not.toContain("@t/covered");
+  });
+
+  it("orders the warnings by what they display, not by directory", async () => {
+    // The walk orders workspaces by directory; the line leads with the package
+    // name. At 14 workspaces the unsorted form reads as shuffled.
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*"] }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/a/package.json": JSON.stringify({ name: "@z/one" }),
+      "pkg/a/src/x.ts": "export const x = 1;\n",
+      "pkg/b/package.json": JSON.stringify({ name: "@a/two" }),
+      "pkg/b/src/y.ts": "export const y = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    const lines = io.stderr().trim().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("@a/two");
+    expect(lines[1]).toContain("@z/one");
+  });
+
+  it("names a member manifest that would not read, which is why it has no name", async () => {
+    // The workspace is discovered -- the file exists -- but `packageName`
+    // answers undefined, so `--filter` by name cannot reach it and the error
+    // lists a bare `./pkg/bad` among named siblings, explaining nothing. The
+    // cause is a file in the reader's own tree.
+    const files = {
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*"] }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/bad/package.json": '{ "name": "@x/bad"',
+      "pkg/bad/tsconfig.json": TSCONFIG,
+      "pkg/bad/src/b.ts": "export const b = 1;\n",
+    };
+    const root = scratchTree(files);
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain(join(root, "pkg/bad/package.json"));
+
+    // And it is said BEFORE selection throws, which is the case it explains.
+    vi.restoreAllMocks();
+    const filtered = capture();
+    expect(await main([root, "--filter", "@x/bad", "--no-cache"])).toBe(1);
+    expect(filtered.stderr()).toContain(join(root, "pkg/bad/package.json"));
+    expect(filtered.stderr()).toMatch(/matched no workspace/);
+  });
+
+  it("says nothing about a member manifest that merely omits a name", async () => {
+    // Legal, and `./pkg/anon` still addresses it. A line here would fire on
+    // every private package in the tree.
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*"] }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/anon/package.json": JSON.stringify({ private: true }),
+      "pkg/anon/tsconfig.json": TSCONFIG,
+      "pkg/anon/src/b.ts": "export const b = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stderr()).toBe("");
   });
 
   it("warns once when a manifest exists but could not be read", async () => {

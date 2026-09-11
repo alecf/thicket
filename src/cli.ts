@@ -156,6 +156,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     dir !== undefined ? resolve(dir) : configs === undefined ? resolve(".") : undefined;
 
   const filter = values.filter ?? [];
+  // Only `--filter` is refused beside `--config`. `--no-workspaces` is equally
+  // inert there and is accepted on purpose: it asks for LESS -- "do not go
+  // looking for workspaces" -- which naming configs has already done, so the
+  // run the reader gets is the run they described. `--filter` asks for
+  // something the run will not do, and a narrowed report that quietly covers
+  // everything is the failure this tool exists to prevent. The asymmetry is
+  // the difference between belt-and-braces and a request that goes unanswered.
   if (filter.length > 0 && configs !== undefined) {
     process.stderr.write(
       `thicket: --filter selects workspaces and --config names configs; pass one or the other\n`,

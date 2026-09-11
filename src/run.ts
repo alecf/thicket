@@ -1,10 +1,15 @@
 import { existsSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
 import { manifestProblems, workspaceGlobs } from "./extract/manifest.js";
-import { analysisScope, type ScanOptions, type Scope } from "./extract/scope.js";
+import { analysisScope, scanSourceFiles, type ScanOptions, type Scope } from "./extract/scope.js";
 import { openProject, type ExcludedCounts } from "./extract/ts-adapter.js";
-import { configsFor, discoverWorkspaces, selectWorkspaces } from "./extract/workspaces.js";
+import {
+  configsFor,
+  discoverWorkspaces,
+  selectWorkspaces,
+  type Workspace,
+} from "./extract/workspaces.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
@@ -281,6 +286,18 @@ const MAX_COPIES_COMPARED = 20;
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 
+/** What discovery decided, and the one thing only the loaded program can judge. */
+interface Discovery {
+  /** Absolute tsconfig paths to open. */
+  configs: string[];
+  /**
+   * Selected workspaces that contributed no config of their own. Whether that
+   * matters depends on what the other configs reached, so it is answered after
+   * the load by `warnUnreachedWorkspaces`.
+   */
+  unconfigured: readonly Workspace[];
+}
+
 /**
  * The tsconfigs to analyze under `root` when the caller named none.
  *
@@ -304,25 +321,28 @@ async function discoverConfigs(
     scan: ScanOptions;
     warn: (message: string) => void;
   },
-): Promise<string[]> {
+): Promise<Discovery> {
   if (opts.workspaces) {
     for (const problem of manifestProblems(root)) {
       opts.warn(`${problem.path} ${problem.reason}; no workspace was discovered from it`);
     }
     const discovered = discoverWorkspaces(root);
     if (discovered.length > 0) {
+      warnNamelessWorkspaces(root, discovered, opts.warn);
       // `selected` decides what is analyzed and `discovered` is attribution
       // only -- passing the filtered list for both makes a filtered run adopt
       // a repo-spanning root config to cover the workspaces it excluded.
       const selected = selectWorkspaces(discovered, opts.filter);
       const chosen = await configsFor(root, { selected, discovered }, opts.scan);
-      for (const ws of selected) {
-        if (chosen.some((c) => ownConfigOf(ws.dir, c))) continue;
-        opts.warn(
-          `${ws.name ?? `./${ws.dir}`} holds no tsconfig, so none of its source is analyzed`,
-        );
+      if (chosen.length > 0) {
+        return {
+          configs: chosen.map((c) => resolve(root, c)),
+          // Reported only once the program is loaded: whether a workspace with
+          // no config of its own goes unanalyzed depends on what the OTHER
+          // configs reached, and nothing here knows that yet.
+          unconfigured: selected.filter((ws) => !chosen.some((c) => ownConfigOf(ws.dir, c))),
+        };
       }
-      if (chosen.length > 0) return chosen.map((c) => resolve(root, c));
       throw new Error(
         `no tsconfig in ${root} or in any of the ${selected.length} workspaces selected there`,
       );
@@ -334,8 +354,95 @@ async function discoverConfigs(
     );
   }
   const single = join(root, "tsconfig.json");
-  if (existsSync(single)) return [single];
+  if (existsSync(single)) return { configs: [single], unconfigured: [] };
   throw new Error(noProjectMessage(root));
+}
+
+/**
+ * One line per discovered workspace whose own `package.json` would not read.
+ *
+ * The workspace is still discovered -- the file exists, which is the only test
+ * the walk makes -- but `packageName` answers `undefined`, so it is nameless
+ * and `--filter` by name cannot reach it. The failure the reader sees is
+ * `--filter "@scope/thing" matched no workspace`, listing a bare `./pkg/thing`
+ * where every sibling has a name, and the cause is a file in their own tree
+ * that nothing mentions.
+ *
+ * Run over DISCOVERED rather than selected, and before selection, because the
+ * case it explains is the one where selection throws.
+ *
+ * Reusing `manifestProblems` rather than reporting "this has no name": a
+ * package.json may legitimately omit `name` (a private root-adjacent package),
+ * and that is not a problem to report -- `./dir` still addresses it. The
+ * symptom gates the check, so the read costs nothing on the common path; the
+ * diagnostic itself stays the one definition of "a manifest that exists and
+ * declares nothing usable".
+ */
+function warnNamelessWorkspaces(
+  root: string,
+  discovered: readonly Workspace[],
+  warn: (message: string) => void,
+): void {
+  const lines: string[] = [];
+  for (const ws of discovered) {
+    if (ws.name !== undefined) continue;
+    for (const problem of manifestProblems(join(root, ws.dir))) {
+      lines.push(`${problem.path} ${problem.reason}; ./${ws.dir} has no name to filter by`);
+    }
+  }
+  // Sorted by the line as printed. The walk orders workspaces by directory,
+  // which is not the order the reader sees when the line leads with a name.
+  for (const line of lines.sort(compareStrings)) warn(line);
+}
+
+/**
+ * One line per selected workspace holding TypeScript that no chosen config
+ * reached.
+ *
+ * Both halves of that are load-bearing. "Has no tsconfig of its own" alone is
+ * not a problem worth a line: a workspace may hold no TypeScript at all -- a
+ * pure-JS package, or one that exists to publish shared compiler settings --
+ * and saying its source went unanalyzed is false in the sense the reader cares
+ * about and unactionable in every sense. On a mixed monorepo that is one
+ * useless line per JS package on every run, which trains people to stop
+ * reading the channel that also carries the warnings that matter. Nor does a
+ * missing config prove a gap: another workspace's build config, or the root's,
+ * may reach into it.
+ *
+ * So it is asked after the load, against the files actually analyzed, and the
+ * count is of files that are on disk and not in the program.
+ *
+ * Costs one extra tree walk, and only when some selected workspace had no
+ * config of its own -- on a monorepo where every workspace has one, which is
+ * the common shape, `unconfigured` is empty and nothing is scanned.
+ */
+function warnUnreachedWorkspaces(opts: {
+  unconfigured: readonly Workspace[];
+  /** Root the workspace directories are relative to. */
+  dir: string;
+  /** Root the analyzed paths are relative to; differs only when a pin was declined. */
+  root: string;
+  analyzed: ReadonlySet<string>;
+  scan: ScanOptions;
+  warn: (message: string) => void;
+}): void {
+  if (opts.unconfigured.length === 0) return;
+  const onDisk = scanSourceFiles(opts.root, opts.scan);
+  // Workspace directories are relative to the directory discovery ran in,
+  // which is the analysis root unless the pin was declined -- in which case
+  // the real root is ABOVE it and every workspace needs that much more prefix.
+  const prefix = toPosix(relative(opts.root, opts.dir));
+  const lines: string[] = [];
+  for (const ws of opts.unconfigured) {
+    const dir = prefix === "" ? ws.dir : `${prefix}/${ws.dir}`;
+    const missed = onDisk.filter((p) => p.startsWith(`${dir}/`) && !opts.analyzed.has(p));
+    if (missed.length === 0) continue;
+    lines.push(
+      `${ws.name ?? `./${ws.dir}`} has no tsconfig of its own, so ${missed.length} ` +
+        `TypeScript ${missed.length === 1 ? "file" : "files"} under it went unanalyzed`,
+    );
+  }
+  for (const line of lines.sort(compareStrings)) opts.warn(line);
 }
 
 /** True when `config` is a tsconfig in `dir` itself, rather than below it. */
@@ -403,7 +510,7 @@ export async function runReport(
   // `dir` is resolved once: it is compared against `project.root`, which is
   // absolute and POSIX, and a relative one would never match.
   const dir = opts.dir === undefined ? undefined : toPosix(resolve(opts.dir));
-  const configs =
+  const discovery: Discovery =
     opts.config === undefined
       ? await discoverConfigs(dir ?? toPosix(resolve(".")), {
           filter: opts.filter ?? [],
@@ -411,9 +518,9 @@ export async function runReport(
           scan,
           warn,
         })
-      : opts.config;
+      : { configs: Array.isArray(opts.config) ? opts.config : [opts.config], unconfigured: [] };
 
-  const project = await openProject(configs, {
+  const project = await openProject(discovery.configs, {
     ...scan,
     ...(dir === undefined ? {} : { root: dir }),
   });
@@ -433,7 +540,7 @@ export async function runReport(
     opts.cache === false ? null : openCache(cachePathFor(project.root), configHash);
   try {
     const files = project.files();
-    if (files.length === 0) throw new EmptyProjectError(configs);
+    if (files.length === 0) throw new EmptyProjectError(discovery.configs);
     let lineCount = 0;
     let totalBytes = 0;
     for (const file of files) {
@@ -450,6 +557,17 @@ export async function runReport(
       files.map((f) => f.path),
       { includeGenerated, bannerScan, exclude },
     );
+    // Here rather than in discovery: "this workspace has no tsconfig" is only
+    // worth saying once it is known that nothing else covered its files, and
+    // that answer is the program.
+    warnUnreachedWorkspaces({
+      unconfigured: discovery.unconfigured,
+      dir: dir ?? project.root,
+      root: project.root,
+      analyzed: new Set(files.map((f) => f.path)),
+      scan,
+      warn,
+    });
 
     const graph = buildModuleGraph(project, { granularity, types });
     const clusters = subsume(await findDuplication(project, { minNodes, minLines, cache }));
