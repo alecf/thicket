@@ -936,6 +936,14 @@ export async function configsFor(
 > returns `{ root, names }` for precisely this reason, and step 3 below has to
 > rebase against it.
 
+> **(d) Probe output is a SUPERSET of what gets analyzed — never a predictor of
+> it.** The probe deliberately skips the generated-directory, banner and
+> `--exclude` rules that `openProject` and `scanSourceFiles` both apply. The
+> asymmetry is safe in this direction — probe ⊇ analyzed and `scanSourceFiles` ⊆
+> analyzed, so the gap computation cannot invent a gap — but it means probe
+> names may only ever answer *"does this config contribute files"*. Never use
+> them as the coverage numerator, or as a prediction of the analyzed set.
+
 Revised algorithm — two probes total, not N:
 
 1. Per selected workspace, take `tsconfig.json`, or the first `tsconfig*.json`
@@ -1234,3 +1242,25 @@ baseline is 4.5%).
 ```bash
 git commit -am "docs: monorepo discovery, filtering, and the cache-hash refinement"
 ```
+
+---
+
+## Follow-up work, found while implementing but out of scope
+
+- **`openProject` strands the `tsgo` child on a throw.** It creates the `API`
+  and calls `expandReferences` with no `try/finally`; the only `try` blocks are
+  deep inside the file loop. Any throw between construction and `return` leaks
+  the child, which is AGENTS.md §3's named hazard with the symptom "the process
+  never exits". `sourceFileNames` (Task 6) disposes correctly, so the two are
+  now visibly asymmetric. Pre-existing; needs its own task, and
+  `tests/process-exit.test.ts` is where the guard would go.
+
+- **"Does not materialize an AST" is carried by review, not by the suite.**
+  Replacing `sourceFileNames`'s body with `openProject(...).files().map(f =>
+  f.path)` passes every test — the agreement test passes by definition, and a
+  timing guard is ruled out because the probe measures 0.69×–1.13× of
+  `openProject` at workspace scale. Recorded rather than papered over with a
+  brittle assertion.
+
+- **Reconcile `engines.node` with bun-exclusivity** (see Task 12). Tracked
+  separately because a bun-compiled-binary PR may land it first.
