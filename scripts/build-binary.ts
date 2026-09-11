@@ -101,14 +101,20 @@ async function fetchTsgo(target: Target): Promise<string> {
   process.stdout.write(`  fetching @typescript/${name}@${TS_VERSION}\n`);
   const bytes = Buffer.from(await (await fetch(tarball)).arrayBuffer());
 
-  // The registry publishes an integrity digest; checking it is the difference
-  // between pinning a version and pinning the bytes that version resolved to.
+  // Checking the registry's digest is the difference between pinning a version
+  // and pinning the bytes that version resolved to. Deliberately fail-CLOSED:
+  // this is a 24MB native executable that ships to users, so absent or
+  // unrecognized integrity metadata is a refusal, not a skipped check.
   const integrity = meta.dist?.integrity;
-  if (integrity?.startsWith("sha512-")) {
-    const actual = createHash("sha512").update(bytes).digest("base64");
-    if (actual !== integrity.slice("sha512-".length)) {
-      throw new Error(`integrity mismatch for @typescript/${name}@${TS_VERSION}`);
-    }
+  if (!integrity?.startsWith("sha512-")) {
+    throw new Error(
+      `@typescript/${name}@${TS_VERSION} has no sha512 integrity metadata ` +
+        `(got ${integrity ?? "none"}). Refusing to ship an unverified executable.`,
+    );
+  }
+  const actual = createHash("sha512").update(bytes).digest("base64");
+  if (actual !== integrity.slice("sha512-".length)) {
+    throw new Error(`integrity mismatch for @typescript/${name}@${TS_VERSION}`);
   }
 
   rmSync(dest, { recursive: true, force: true });

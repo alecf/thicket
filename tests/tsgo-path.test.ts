@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TSGO_ENV_VAR, resolveTsgoPath } from "../src/extract/tsgo-path.js";
+import { version as pinnedVersion } from "typescript";
+import { TSGO_ENV_VAR, resolveTsgoPath, tsgoVersion } from "../src/extract/tsgo-path.js";
 
 /**
  * A compiled binary cannot use `typescript`'s own exe resolution: it reads a
@@ -73,5 +74,72 @@ describe("resolveTsgoPath", () => {
       exists: () => true,
     });
     expect(r.path?.endsWith("tsc.exe")).toBe(true);
+  });
+});
+
+/**
+ * The config hash keys the cache, so a tsgo whose identity is wrong is worse
+ * than one that is unknown: a different compiler silently shares the bundled
+ * compiler's hash and reads back a report it never produced (AGENTS.md §5).
+ */
+describe("tsgoVersion", () => {
+  const io = (files: Record<string, string>) => ({
+    readText: (p: string) => {
+      const f = files[p];
+      if (f === undefined) throw new Error(`ENOENT ${p}`);
+      return f;
+    },
+    readBytes: (p: string) => Buffer.from(files[p] ?? ""),
+  });
+
+  it("uses the bundled pin when typescript resolves tsgo itself", () => {
+    // Nothing was overridden, so the compiler is the one the pinned
+    // `typescript` package brings -- which is exactly the bundled version.
+    const v = tsgoVersion({ path: undefined, source: "node_modules", searched: [] }, io({}));
+    expect(v).toBe(pinnedVersion);
+  });
+
+  it("reads the version from the manifest beside the executable", () => {
+    const v = tsgoVersion(
+      { path: "/opt/thicket/tsgo/tsc", source: "packaged", searched: [] },
+      io({ "/opt/thicket/tsgo/package.json": '{"version":"7.9.9-custom"}' }),
+    );
+    expect(v).toBe("7.9.9-custom");
+  });
+
+  it("identifies an unlabelled compiler by its bytes, never by the bundled pin", () => {
+    // The bug this pins: falling back to the bundled version here would let a
+    // DIFFERENT compiler share the bundled one's config hash.
+    const v = tsgoVersion(
+      { path: "/custom/tsc", source: "env", searched: [] },
+      io({ "/custom/tsc": "a different compiler" }),
+    );
+    expect(v).not.toBe(pinnedVersion);
+    expect(v).toMatch(/^sha256:[0-9a-f]{16}$/);
+  });
+
+  it("gives two different unlabelled compilers two different identities", () => {
+    const one = tsgoVersion(
+      { path: "/a/tsc", source: "env", searched: [] },
+      io({ "/a/tsc": "compiler one" }),
+    );
+    const two = tsgoVersion(
+      { path: "/b/tsc", source: "env", searched: [] },
+      io({ "/b/tsc": "compiler two" }),
+    );
+    expect(one).not.toBe(two);
+  });
+
+  it("is stable for the same bytes at a different path", () => {
+    // Determinism: the identity is the compiler, not where it happens to sit.
+    const here = tsgoVersion(
+      { path: "/here/tsc", source: "env", searched: [] },
+      io({ "/here/tsc": "same bytes" }),
+    );
+    const there = tsgoVersion(
+      { path: "/there/tsc", source: "env", searched: [] },
+      io({ "/there/tsc": "same bytes" }),
+    );
+    expect(here).toBe(there);
   });
 });

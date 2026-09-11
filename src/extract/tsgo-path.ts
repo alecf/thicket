@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { version as pinnedTypeScriptVersion } from "typescript";
@@ -76,29 +77,60 @@ export function resolveTsgo(): TsgoResolution {
   });
 }
 
+/** Injectable so the identity rules can be tested without a real compiler. */
+export interface TsgoIo {
+  readText: (path: string) => string;
+  readBytes: (path: string) => Buffer;
+}
+
+const defaultIo: TsgoIo = {
+  readText: (p) => readFileSync(p, "utf8"),
+  readBytes: (p) => readFileSync(p),
+};
+
+/** The `version` beside the executable, if there is a trustworthy one. */
+function versionBeside(exe: string, io: TsgoIo): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(io.readText(join(dirname(exe), "package.json")));
+    if (parsed && typeof parsed === "object" && "version" in parsed) {
+      const v = (parsed as { version: unknown }).version;
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+  } catch {
+    // No manifest, or an unreadable one. Handled by the caller, which must not
+    // paper over it -- see below.
+  }
+  return undefined;
+}
+
 /**
- * The tsgo version the report was produced with.
+ * The identity of the tsgo the report was produced with.
  *
  * Part of the report's identity for the same reason `VERSION` is: a different
  * compiler parses and resolves differently, so two reports that share a config
- * hash must have been produced by the same one. In the packaged layout the
- * build drops `tsgo/package.json` beside the executable precisely so this
- * costs a file read instead of spawning `tsc --version`.
+ * hash must have been produced by the same one. The cache is keyed on that
+ * hash (AGENTS.md §5), which is what makes a WRONG answer here worse than an
+ * unknown one -- a different compiler would share the bundled compiler's hash
+ * and read back a report it never produced.
+ *
+ * So the bundled pin is used only when `typescript` resolved tsgo itself, where
+ * it is correct by construction. An overridden or packaged compiler is
+ * identified by the manifest the build drops beside it, and failing that by its
+ * own bytes -- content-addressed, like everything else here, so it is stable
+ * across machines and paths but differs the moment the compiler does.
  */
-export function tsgoVersion(resolution: TsgoResolution = resolveTsgo()): string {
-  if (resolution.path) {
-    try {
-      const pkg = readFileSync(join(dirname(resolution.path), "package.json"), "utf8");
-      const parsed: unknown = JSON.parse(pkg);
-      if (parsed && typeof parsed === "object" && "version" in parsed) {
-        const v = (parsed as { version: unknown }).version;
-        if (typeof v === "string") return v;
-      }
-    } catch {
-      // An unreadable package.json is not fatal: fall back to the version of
-      // the `typescript` client bundled alongside, which is the version the
-      // packaged tsgo was copied from by construction.
-    }
-  }
-  return pinnedTypeScriptVersion;
+export function tsgoVersion(
+  resolution: TsgoResolution = resolveTsgo(),
+  io: TsgoIo = defaultIo,
+): string {
+  // `typescript` resolved its own platform package, which is pinned exactly by
+  // package.json -- so the bundled version IS the compiler's version.
+  if (!resolution.path) return pinnedTypeScriptVersion;
+
+  const labelled = versionBeside(resolution.path, io);
+  if (labelled) return labelled;
+
+  // An unlabelled compiler. Borrowing `pinnedTypeScriptVersion` here would be
+  // the cache bug described above, so hash what is actually going to run.
+  return `sha256:${createHash("sha256").update(io.readBytes(resolution.path)).digest("hex").slice(0, 16)}`;
 }

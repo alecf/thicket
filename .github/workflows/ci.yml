@@ -108,6 +108,67 @@ jobs:
           bun run build:formula
           ruby -c dist-bin/thicket.rb
 
+      # Both npm paths exit 0 when they are broken, which is why they are
+      # checked here rather than trusted. The launcher once `await import`ed
+      # the fallback -- cli.ts runs main() only as an entry point, so it
+      # imported cleanly, ran nothing, printed nothing and exited 0. A second
+      # bug marked xxhash-wasm external, so the fallback died on import. Only
+      # installing the built packages and running them can see either.
+      - name: Stage and install the npm packages the way a user would
+        run: |
+          set -euo pipefail
+          bun run build:npm
+          mkdir -p "$RUNNER_TEMP/packs"
+          (cd dist-npm/thicket-linux-x64 && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          (cd dist-npm/thicket && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          mkdir -p "$RUNNER_TEMP/npmtest"
+          cd "$RUNNER_TEMP/npmtest"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
+
+      - name: The npm platform binary must produce the same report
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          ./node_modules/.bin/thicket \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-npm.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-npm.md
+          diff -u from-source.md from-npm.md \
+            || { echo "::error::The npm platform binary disagrees with the source run"; exit 1; }
+
+      - name: With no platform binary, the JS fallback must still work
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          # `typescript` is an optional peer: the fallback needs it, and it
+          # brings its own platform tsgo. Install it, then delete the platform
+          # binary so the launcher has no choice but the fallback.
+          npm install --no-audit --no-fund typescript@"$(node -p "require('$GITHUB_WORKSPACE/package.json').dependencies.typescript")"
+          rm -rf node_modules/@thicket
+          ./node_modules/.bin/thicket \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-fallback.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-fallback.md
+          diff -u from-source.md from-fallback.md \
+            || { echo "::error::The npm JS fallback disagrees with the source run"; exit 1; }
+
+      - name: With neither, it must explain itself rather than exit 0
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          rm -rf node_modules/typescript node_modules/@typescript
+          set +e
+          out=$(./node_modules/.bin/thicket --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" 2>&1)
+          code=$?
+          set -e
+          test "$code" -ne 0 || { echo "::error::exited 0 with no way to run"; echo "$out"; exit 1; }
+          echo "$out" | grep -q "npm install typescript@" \
+            || { echo "::error::failed without saying what to install"; echo "$out"; exit 1; }
+          echo "Refused correctly: exit $code"
+
   # thicket's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide
   # whether a refactor made progress, so environment-dependent output registers

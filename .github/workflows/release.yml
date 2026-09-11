@@ -7,6 +7,7 @@ on:
     inputs:
       dry_run:
         description: "Build and verify the artifacts without publishing anything"
+        # Honoured by every publish step below, including against a tag.
         type: boolean
         default: true
 
@@ -22,6 +23,10 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+      # workflow_dispatch CAN be run against a tag, in which case every publish
+      # guard below would otherwise fire while the UI said "without publishing
+      # anything". `inputs` is null on a tag push, so this is false there.
+      DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -84,7 +89,7 @@ jobs:
             || { echo "::error::refusing to release: the packaged binary disagrees with the source"; exit 1; }
 
       - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -97,7 +102,7 @@ jobs:
       # a fork, or this repo before the npm name lands, should build and verify
       # everything above and then stop cleanly instead of failing red.
       - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != '' && env.DRY_RUN != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -110,7 +115,7 @@ jobs:
           (cd dist-npm/thicket && npm publish --access public)
 
       - name: Push the formula to the Homebrew tap
-        if: startsWith(github.ref, 'refs/tags/v') && env.TAP_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.TAP_TOKEN != '' && env.DRY_RUN != 'true'
         env:
           # A shared personal tap, not a per-tool one: a tap holds any number
           # of formulae, and renaming later forces every user to re-tap. Only
