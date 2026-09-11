@@ -453,8 +453,20 @@ function scopeWarning(scope: Scope): string[] {
     ">",
   ];
   for (const gap of scope.gaps.slice(0, MAX_GAPS_SHOWN)) {
-    const fix = gap.config === undefined ? "" : ` — \`--config ${gap.config}\``;
-    lines.push(`> - \`${gap.dir}\` — ${gap.fileCount} files${fix}`);
+    // Nothing at all when there is nothing left to try, rather than an empty
+    // list or a repeat of a config already on the command line. On a sample
+    // monorepo at 98.4% coverage, 8 of 9 gaps named a config the run had
+    // already opened -- advice that cannot work, printed as if it could.
+    //
+    // "untried", not "fix": this is a list of candidates nobody has opened, in
+    // path order. Which of them covers the gap needs a program load that the
+    // scan does not do, so naming one would be a guess in the voice of an
+    // instruction.
+    const untried =
+      gap.configs.length === 0
+        ? ""
+        : ` — untried: ${gap.configs.map((c) => `\`--config ${c}\``).join(", ")}`;
+    lines.push(`> - \`${gap.dir}\` — ${gap.fileCount} files${untried}`);
   }
   const rest = scope.gaps.length - MAX_GAPS_SHOWN;
   if (rest > 0) lines.push(`> - … and ${rest} further directories`);

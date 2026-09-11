@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs";
+import { closeSync, openSync, readSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { compareStrings } from "../order.js";
 import { GENERATED_DIR_SEGMENTS, hasGeneratedBanner, isExcludedByPattern } from "./exclude.js";
@@ -17,6 +17,22 @@ export interface ScanOptions {
   /** See `OpenProjectOptions.bannerScan`. Must match what analysis used. */
   bannerScan?: boolean;
   exclude?: readonly string[];
+  /**
+   * The tsconfigs the program was built from, repo-relative POSIX. A gap never
+   * suggests one of these: the run already loaded it, and it is that config's
+   * own `include`/`exclude` leaving the files out.
+   */
+  analyzedConfigs?: readonly string[];
+  /**
+   * Tsconfigs `configsFor` opened as candidates and declined, repo-relative
+   * POSIX. Declined means the probe found none of the gapped files in them, so
+   * suggesting one is the same dead end as suggesting a config that was passed
+   * -- the reader would load it and the gap would not move.
+   *
+   * Separate from `analyzedConfigs` because the provenance differs and only
+   * the workspace path can supply it; both are subtracted the same way.
+   */
+  rejectedConfigs?: readonly string[];
 }
 
 /** How much of a file to read when looking for a generator's banner. */
@@ -45,13 +61,21 @@ function readHead(absPath: string): string {
   }
 }
 
-/** One directory of source the program never saw, and the config that owns it. */
+/** One directory of source the program never saw, and what is left to try. */
 export interface ScopeGap {
   /** Repo-relative POSIX directory. */
   dir: string;
   fileCount: number;
-  /** Repo-relative tsconfig that would bring `dir` in, when one exists. */
-  config?: string;
+  /**
+   * The `tsconfig*.json` files in `dir` that this run has not already tried,
+   * sorted. Empty is the common answer once workspace discovery has run, and
+   * it means "nothing here is worth suggesting" -- not "no config exists".
+   *
+   * Untried candidates, deliberately unranked. Knowing which one COVERS the
+   * gap needs a program load, and this function is synchronous by design, so
+   * ranking here would be a guess printed as an instruction.
+   */
+  configs: string[];
 }
 
 export interface Scope {
@@ -144,19 +168,34 @@ export function analysisScope(
   const analyzed = new Set(analyzedPaths.map(toPosix));
 
   const missing = onDiskPaths.filter((p) => !analyzed.has(p));
+  // One listing per directory, not one per unanalyzed file: a run that missed
+  // most of a large tree asks about the same ancestors thousands of times.
+  // Memoized per call rather than per process, so a directory that gains a
+  // config between two runs in one process is still read fresh.
+  const listings = new Map<string, string[]>();
+  const listConfigs = (dir: string): string[] => {
+    const hit = listings.get(dir);
+    if (hit !== undefined) return hit;
+    const found = configPathsIn(root, dir);
+    listings.set(dir, found);
+    return found;
+  };
+
   const byDir = new Map<string, number>();
   for (const path of missing) {
-    const dir = owningDir(root, path);
+    const dir = owningDir(root, path, listConfigs);
     byDir.set(dir, (byDir.get(dir) ?? 0) + 1);
   }
 
+  const tried = new Set(
+    [...(opts.analyzedConfigs ?? []), ...(opts.rejectedConfigs ?? [])].map(toPosix),
+  );
   const gaps: ScopeGap[] = [...byDir.entries()]
-    .map(([dir, fileCount]) => {
-      const config = `${dir}/tsconfig.json`;
-      return existsSync(join(root, config))
-        ? { dir, fileCount, config }
-        : { dir, fileCount };
-    })
+    .map(([dir, fileCount]) => ({
+      dir,
+      fileCount,
+      configs: listConfigs(dir).filter((c) => !tried.has(c)),
+    }))
     .sort((a, b) => b.fileCount - a.fileCount || compareStrings(a.dir, b.dir));
 
   return {
@@ -173,17 +212,50 @@ export function analysisScope(
 
 /**
  * The directory to blame for an unanalyzed file: its nearest ancestor holding
- * a `tsconfig.json`, else its top-level directory.
+ * a `tsconfig*.json`, else its top-level directory.
  *
- * Nearest-ancestor-with-a-config is what makes the report actionable — the
- * answer is the exact `--config` argument to add, rather than a directory the
- * reader then has to go hunting through.
+ * Nearest-ancestor-with-a-config is what makes the report actionable — it
+ * names the project the file should have belonged to, rather than a directory
+ * the reader then has to go hunting through, and it is the directory whose
+ * untried configs `ScopeGap.configs` are read from.
  */
-function owningDir(root: string, relPath: string): string {
+function owningDir(
+  root: string,
+  relPath: string,
+  listConfigs: (dir: string) => string[],
+): string {
   const segments = relPath.split("/");
   for (let i = segments.length - 1; i > 0; i--) {
     const dir = segments.slice(0, i).join("/");
-    if (existsSync(join(root, dir, "tsconfig.json"))) return dir;
+    if (listConfigs(dir).length > 0) return dir;
   }
   return segments.length > 1 ? segments[0]! : ".";
+}
+
+/**
+ * The `tsconfig*.json` files directly in `dir`, repo-relative POSIX, sorted.
+ *
+ * `tsconfig*.json` rather than the `tsconfig.json` basename, in BOTH of the
+ * places that used to hardcode it: a directory holding `tsconfig.app.json` and
+ * `tsconfig.node.json` and no `tsconfig.json` is an ordinary Vite layout, and
+ * hardcoding the name charged its files to the top-level directory above it
+ * The one definition of "the configs in this directory": `configsIn` in
+ * `workspaces.ts` picks the one it LOADS out of this list, so what a run opens
+ * and what the coverage section offers cannot drift apart.
+ *
+ * `*.json` would be wrong: a `base.json` or `package.json` beside the configs
+ * is not a project, and suggesting one is advice that cannot work.
+ */
+export function configPathsIn(root: string, dir: string): string[] {
+  let entries;
+  try {
+    entries = readdirSync(dir === "." ? root : join(root, dir), { withFileTypes: true });
+  } catch {
+    // An unreadable directory holds no config anyone can be told to pass.
+    return [];
+  }
+  return entries
+    .filter((e) => e.isFile() && e.name.startsWith("tsconfig") && e.name.endsWith(".json"))
+    .map((e) => (dir === "." ? e.name : `${dir}/${e.name}`))
+    .sort(compareStrings);
 }

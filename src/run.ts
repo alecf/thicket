@@ -291,6 +291,12 @@ interface Discovery {
   /** Absolute tsconfig paths to open. */
   configs: string[];
   /**
+   * Candidate configs the workspace probe opened and declined, repo-relative
+   * POSIX. Read only by the coverage section, which must not offer a config
+   * already proven to cover none of the gap. Empty whenever no probe ran.
+   */
+  rejected: readonly string[];
+  /**
    * Selected workspaces that contributed no config of their own. Whether that
    * matters depends on what the other configs reached, so it is answered after
    * the load by `warnUnreachedWorkspaces`.
@@ -334,13 +340,16 @@ async function discoverConfigs(
       // a repo-spanning root config to cover the workspaces it excluded.
       const selected = selectWorkspaces(discovered, opts.filter);
       const chosen = await configsFor(root, { selected, discovered }, opts.scan);
-      if (chosen.length > 0) {
+      if (chosen.configs.length > 0) {
         return {
-          configs: chosen.map((c) => resolve(root, c)),
+          configs: chosen.configs.map((c) => resolve(root, c)),
+          rejected: chosen.rejected,
           // Reported only once the program is loaded: whether a workspace with
           // no config of its own goes unanalyzed depends on what the OTHER
           // configs reached, and nothing here knows that yet.
-          unconfigured: selected.filter((ws) => !chosen.some((c) => ownConfigOf(ws.dir, c))),
+          unconfigured: selected.filter(
+            (ws) => !chosen.configs.some((c) => ownConfigOf(ws.dir, c)),
+          ),
         };
       }
       throw new Error(
@@ -354,7 +363,7 @@ async function discoverConfigs(
     );
   }
   const single = join(root, "tsconfig.json");
-  if (existsSync(single)) return { configs: [single], unconfigured: [] };
+  if (existsSync(single)) return { configs: [single], rejected: [], unconfigured: [] };
   throw new Error(noProjectMessage(root));
 }
 
@@ -518,7 +527,11 @@ export async function runReport(
           scan,
           warn,
         })
-      : { configs: Array.isArray(opts.config) ? opts.config : [opts.config], unconfigured: [] };
+      : {
+          configs: Array.isArray(opts.config) ? opts.config : [opts.config],
+          rejected: [],
+          unconfigured: [],
+        };
 
   const project = await openProject(discovery.configs, {
     ...scan,
@@ -555,7 +568,17 @@ export async function runReport(
     const scope = analysisScope(
       project.root,
       files.map((f) => f.path),
-      { includeGenerated, bannerScan, exclude },
+      {
+        includeGenerated,
+        bannerScan,
+        exclude,
+        // Repo-relative, because that is what the gaps speak. Measured from
+        // `project.root` rather than from `dir`: a config reaching above the
+        // directory named moves the root, and a path measured from the other
+        // one matches no gap and quietly reinstates the advice this removes.
+        analyzedConfigs: discovery.configs.map((c) => toPosix(relative(project.root, c))),
+        rejectedConfigs: discovery.rejected,
+      },
     );
     // Here rather than in discovery: "this workspace has no tsconfig" is only
     // worth saying once it is known that nothing else covered its files, and

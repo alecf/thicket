@@ -1113,6 +1113,43 @@ git commit -am "feat: thicket [dir], --filter, --no-workspaces; pin the cache to
 
 ### Task 9: Fix the scope warning's dead-end advice
 
+> **BUILT, and the probe route was taken.** `ScopeGap.config?: string` is now
+> `configs: string[]`: every `tsconfig*.json` in the owning directory, sorted,
+> minus the ones this run already tried. Two `ScanOptions` fields feed it and
+> both are subtracted identically, kept apart because their provenance differs
+> and their names have to stay true — `analyzedConfigs` (what the program was
+> built from, threaded from `run.ts`) and `rejectedConfigs` (what the probe
+> opened and declined).
+>
+> The design note's preferred route was reachable, but not for free:
+> `configsFor` discarded its declined candidates, so it now returns
+> `{ configs, rejected }` and `Discovery` carries `rejected` through. That is
+> sound rather than a heuristic — a declined candidate was measured against
+> that workspace's gap AT PROBE TIME, and the gap surviving into the report is
+> a subset of it, so a config that covered none of the first covers none of the
+> second. The cost was mechanical: ten `const chosen = await configsFor(...)`
+> call sites became `const { configs: chosen } = ...`.
+>
+> On the sample monorepo the probe route changes nothing — every gapped
+> directory there holds exactly one `tsconfig.json`, which the run had already
+> opened — so it is fixture-only today and `tests/workspace-run.test.ts` builds
+> the shape it needs (a sibling naming a proper subset of its primary).
+>
+> **Both hardcoded basenames went, and widening the second changed behaviour.**
+> `owningDir` tested for `tsconfig.json` by name, so a directory holding only
+> `tsconfig.app.json`/`tsconfig.node.json` — an ordinary Vite layout — was not
+> blamed for its own files; they were charged to the top-level directory above
+> it, which then had nothing to offer. It now tests for any `tsconfig*.json`,
+> matching `configsIn`.
+>
+> **Measured, sample monorepo, 4664 of 4740 files (98.4%):** 9 gaps, 8 of which
+> advised a `--config` already on the command line. After: all 9 offer nothing,
+> and the report is byte-identical apart from those four printed lines. The
+> rendering is `— untried: \`--config X\`, \`--config Y\``, absent entirely
+> when the list is empty; `docs/report-guide.md` no longer promises that "each
+> line names the argument that closes the gap", because for the common case
+> there is no such argument.
+
 **Files:** Modify `src/extract/scope.ts`, `tests/scope.test.ts`
 
 **Why this is bigger than it looks.** On Sample D at 98.3% coverage, **8 of the

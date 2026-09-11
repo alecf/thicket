@@ -48,14 +48,21 @@ report N+1 to see whether your work landed.
 ```
 > ⚠ 466 source files are outside this program. Every number above is drawn from
 > the 92.6% that is inside it.
-> - `apps/mobile` — 192 files — `--config apps/mobile/tsconfig.json`
+> - `apps/mobile` — 192 files — untried: `--config apps/mobile/tsconfig.json`
+> - `scripts` — 41 files
 ```
 
 **Read this before you trust any number.** A run covering 3% of a monorepo will
 happily report zero cycles and a low propagation cost, both of which are
-artifacts of the missing 97%. Each line names the argument that closes the gap.
-If you see this block, consider asking for a rerun with those configs before
-acting.
+artifacts of the missing 97%.
+
+`untried:` lists the `tsconfig*.json` files in that directory the run has **not**
+already opened — candidates to rerun with, in path order, not a ranking. A line
+that ends at the file count, like `scripts` above, has nothing to offer: every
+config there was already loaded, or was opened and found to cover none of these
+files. No flag closes that gap; those files are outside every project in the
+tree, and the report is telling you so rather than repeating an instruction you
+have already followed.
 
 ---
 

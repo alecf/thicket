@@ -63,7 +63,64 @@ describe("runReport over a workspace root", () => {
     // -- which has a working tsconfig of its own -- contributes nothing.
     expect(json.fileCount).toBe(6);
     expect(json.scope.onDisk).toBe(7);
-    expect(json.scope.gaps.map((g) => g.dir)).toEqual(["libs/ignored"]);
+    // The whole gap, through the JSON sidecar: `libs/ignored` is excluded by a
+    // negation glob, so its own config was never opened and is still worth
+    // suggesting. A gap that has something to offer must keep offering it --
+    // suppressing the tried ones must not suppress this.
+    expect(json.scope.gaps).toEqual([
+      { dir: "libs/ignored", fileCount: 1, configs: ["libs/ignored/tsconfig.json"] },
+    ]);
+  });
+
+  /**
+   * The defect this pair exists for. On a sample monorepo at 98.4% coverage, 8
+   * of the 9 gaps advised a `--config` the run had already opened -- it was
+   * that config's own `include`/`exclude` leaving the files out, so following
+   * the advice changed nothing.
+   */
+  const gappedWorkspace = (extra: Record<string, string>) => ({
+    "package.json": JSON.stringify({ name: "root", private: true, workspaces: ["pkg/*"] }),
+    // A root config of its own, so the analyzed root stays the tree root --
+    // with only `pkg/a`'s config to open, `commonRootDir` collapses onto it
+    // and every path below is measured from somewhere else.
+    "tsconfig.json": JSON.stringify({ include: ["scripts/**/*.ts"] }),
+    "scripts/s.ts": "export const s = 1;\n",
+    "pkg/a/package.json": JSON.stringify({ name: "@t/a" }),
+    "pkg/a/tsconfig.json": TSCONFIG,
+    "pkg/a/src/a.ts": "export const a = 1;\n",
+    // Outside `src/**`, so the workspace's own config cannot reach it.
+    "pkg/a/other/x.ts": "export const x = 1;\n",
+    ...extra,
+  });
+
+  it("offers no config for a gap whose directory's only config was opened", async () => {
+    const { json } = await runReport({ dir: scratchTree(gappedWorkspace({})), cache: false });
+    expect(json.scope.gaps).toEqual([{ dir: "pkg/a", fileCount: 1, configs: [] }]);
+  });
+
+  /**
+   * The other half, and the only thing the scan cannot work out for itself:
+   * `tsconfig.build.json` was never opened by the run, so "already passed"
+   * does not reach it -- but the probe DID open it, found none of the missing
+   * file in it, and declined it. Offering it would send the reader to load a
+   * config already proven to leave this gap exactly where it is.
+   */
+  it("offers no config the workspace probe opened and declined", async () => {
+    const root = scratchTree(
+      gappedWorkspace({
+        // A proper subset of `tsconfig.json`'s file set: it adds nothing, so
+        // the probe declines it. `src/b.ts` is what keeps the containment
+        // proper, so a rule that merely skipped an EQUAL file set would not
+        // pass this test.
+        "pkg/a/tsconfig.build.json": JSON.stringify({
+          extends: "./tsconfig.json",
+          include: ["src/a.ts"],
+        }),
+        "pkg/a/src/b.ts": "export const b = 2;\n",
+      }),
+    );
+    const { json } = await runReport({ dir: root, cache: false });
+    expect(json.scope.gaps).toEqual([{ dir: "pkg/a", fileCount: 1, configs: [] }]);
   });
 
   /**

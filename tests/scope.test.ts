@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { analysisScope, scanSourceFiles } from "../src/extract/scope.js";
-import { generatedRoot, partialRoot } from "./helpers.js";
+import { analysisScope, type Scope, scanSourceFiles } from "../src/extract/scope.js";
+import { generatedRoot, partialRoot, withRoot, workspacesRoot } from "./helpers.js";
 
 describe("the denominator excludes what analysis excludes", () => {
   // Both sides must apply the same rules. When the banner sniff started
@@ -84,7 +84,7 @@ describe("analysisScope", () => {
   it("attributes unanalyzed files to the tsconfig that would bring them in", () => {
     const scope = analysisScope(partialRoot(), ["src/main.ts"]);
     expect(scope.gaps).toEqual([
-      { dir: "packages/lib", fileCount: 2, config: "packages/lib/tsconfig.json" },
+      { dir: "packages/lib", fileCount: 2, configs: ["packages/lib/tsconfig.json"] },
     ]);
   });
 
@@ -111,5 +111,97 @@ describe("analysisScope", () => {
     ]);
     expect(scope.complete).toBe(true);
     expect(scope.gaps).toEqual([]);
+  });
+});
+
+/**
+ * What a gap offers the reader, and what it must refuse to offer.
+ *
+ * `analysisScope` is synchronous and loads no program, so it cannot know which
+ * config would close a gap -- only which ones were already tried. Naming one
+ * anyway is a guess presented as an instruction, which is the defect this
+ * section exists to avoid; it lists the untried candidates and ranks nothing.
+ */
+describe("the configs a gap offers", () => {
+  const gapFor = (scope: Scope, dir: string) => scope.gaps.find((g) => g.dir === dir);
+
+  it("offers every config in the directory when none was tried", () => {
+    const scope = analysisScope(workspacesRoot(), []);
+    expect(gapFor(scope, "tools/alpha")?.configs).toEqual([
+      "tools/alpha/tsconfig.build.json",
+      "tools/alpha/tsconfig.json",
+      "tools/alpha/tsconfig.test.json",
+    ]);
+  });
+
+  // The observed failure, on a sample monorepo at 98.4% coverage: 8 of its 9
+  // gaps advised a `--config` that was already on the command line -- and it
+  // was that config's own `exclude` leaving those files out. Following the
+  // advice changes nothing.
+  it("never advises a config that was already passed", () => {
+    const scope = analysisScope(workspacesRoot(), ["tools/alpha/src/a.ts"], {
+      analyzedConfigs: ["tools/alpha/tsconfig.json"],
+    });
+    expect(gapFor(scope, "tools/alpha")?.configs).not.toContain("tools/alpha/tsconfig.json");
+  });
+
+  it("offers the siblings that have not been tried, sorted", () => {
+    const scope = analysisScope(workspacesRoot(), ["tools/alpha/src/a.ts"], {
+      analyzedConfigs: ["tools/alpha/tsconfig.json"],
+    });
+    expect(gapFor(scope, "tools/alpha")?.configs).toEqual([
+      "tools/alpha/tsconfig.build.json",
+      "tools/alpha/tsconfig.test.json",
+    ]);
+  });
+
+  // The common case once workspace discovery lands: discovery already loaded
+  // every config the directory has, so there is nothing left to suggest. Say
+  // nothing rather than repeat an instruction the reader already followed.
+  it("offers nothing when every config in the directory was already tried", () => {
+    const scope = analysisScope(workspacesRoot(), [], {
+      analyzedConfigs: ["libs/beta/tsconfig.json"],
+    });
+    expect(gapFor(scope, "libs/beta")?.configs).toEqual([]);
+  });
+
+  // The probe knows something this function cannot: `configsFor` opens every
+  // candidate sibling and keeps the ones that cover a gapped file, so a
+  // rejected one has been PROVEN not to close this gap. Offering it is the
+  // same dead end as offering a config that was passed.
+  it("offers nothing a probe already proved covers none of the gap", () => {
+    const scope = analysisScope(workspacesRoot(), ["tools/alpha/src/a.ts"], {
+      analyzedConfigs: ["tools/alpha/tsconfig.json"],
+      rejectedConfigs: ["tools/alpha/tsconfig.build.json"],
+    });
+    expect(gapFor(scope, "tools/alpha")?.configs).toEqual(["tools/alpha/tsconfig.test.json"]);
+  });
+
+  it("offers nothing for a directory that holds no config at all", () => {
+    const scope = analysisScope(workspacesRoot(), []);
+    expect(gapFor(scope, "scripts")?.configs).toEqual([]);
+  });
+
+  // `tsconfig.json` is a convention, not a requirement, and a directory whose
+  // configs are `tsconfig.app.json` and `tsconfig.node.json` is an ordinary
+  // Vite layout. Blame it for its own files -- and offer them -- rather than
+  // charging them to the top-level directory with no advice attached.
+  it("blames the directory whose only config is not named tsconfig.json", () => {
+    withRoot(
+      {
+        "apps/web/tsconfig.app.json": "{}",
+        "apps/web/tsconfig.node.json": "{}",
+        "apps/web/src/a.ts": "export const a = 1;\n",
+      },
+      (root) => {
+        expect(analysisScope(root, []).gaps).toEqual([
+          {
+            dir: "apps/web",
+            fileCount: 1,
+            configs: ["apps/web/tsconfig.app.json", "apps/web/tsconfig.node.json"],
+          },
+        ]);
+      },
+    );
   });
 });

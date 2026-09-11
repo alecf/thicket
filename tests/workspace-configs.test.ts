@@ -45,7 +45,7 @@ beforeEach(() => {
 
 describe("configsFor", () => {
   it("adds a sibling tsconfig only when it contributes files", async () => {
-    const chosen = await configsFor(workspacesRoot(), {
+    const { configs: chosen } = await configsFor(workspacesRoot(), {
       selected: FIXTURE_WORKSPACES,
       discovered: FIXTURE_WORKSPACES,
     });
@@ -66,6 +66,25 @@ describe("configsFor", () => {
     // added siblings blindly would still leave it alone -- which is why the
     // first absence is the one under test.
     expect(chosen).not.toContain("tools/alpha/tsconfig.build.json");
+  });
+
+  /**
+   * The declined candidates are reported, not discarded. Only the probe knows
+   * this config covers none of `tools/alpha`'s missing file, and the coverage
+   * section has no program to find it out with -- so without this list it
+   * offers the reader a `--config` already proven to leave the gap where it
+   * is.
+   *
+   * A config that was never a candidate must not appear here: `libs/beta` has
+   * no sibling, and the root's config is a primary rather than something that
+   * had to earn its place.
+   */
+  it("reports the candidate siblings it opened and declined", async () => {
+    const { rejected } = await configsFor(workspacesRoot(), {
+      selected: FIXTURE_WORKSPACES,
+      discovered: FIXTURE_WORKSPACES,
+    });
+    expect(rejected).toEqual(["tools/alpha/tsconfig.build.json"]);
   });
 
   it("uses two probes for the whole repository, not one per workspace", async () => {
@@ -94,7 +113,7 @@ describe("configsFor", () => {
     // A workspace can exist to publish shared compiler settings and own no
     // source: `tools/cfgonly` has `base.json` and a `.d.ts` and nothing else.
     // It must contribute nothing rather than throw or invent a config.
-    const chosen = await configsFor(workspacesRoot(), {
+    const { configs: chosen } = await configsFor(workspacesRoot(), {
       selected: [{ dir: "tools/cfgonly", name: "@fix/cfgonly" }],
       discovered: FIXTURE_WORKSPACES,
     });
@@ -110,7 +129,7 @@ describe("configsFor", () => {
     // workspace's files read as the ROOT's gap, and `tsconfig.build.json`,
     // whose `include` reaches into `tools/**`, looks like the config that
     // closes it.
-    const chosen = await configsFor(solutionWorkspacesRoot(), {
+    const { configs: chosen } = await configsFor(solutionWorkspacesRoot(), {
       selected: [{ dir: "tools/alpha", name: "@sol/alpha" }],
       discovered: [{ dir: "tools/alpha", name: "@sol/alpha" }],
     });
@@ -130,7 +149,7 @@ describe("configsFor", () => {
     // distinct. The hazard lives one layer lower, where the adapter expands
     // the root's `references: [{path: "tools/alpha"}]` and meets
     // `tools/alpha/tsconfig.json`, already on the list.
-    const chosen = await configsFor(solutionWorkspacesRoot(), {
+    const { configs: chosen } = await configsFor(solutionWorkspacesRoot(), {
       selected: [{ dir: "tools/alpha" }],
       discovered: [{ dir: "tools/alpha" }],
     });
@@ -145,7 +164,7 @@ describe("configsFor", () => {
   });
 
   it("gives a gapped file to the deepest workspace that contains it", async () => {
-    const chosen = await configsFor(nestedWorkspacesRoot(), {
+    const { configs: chosen } = await configsFor(nestedWorkspacesRoot(), {
       selected: NESTED_WORKSPACES,
       discovered: NESTED_WORKSPACES,
     });
@@ -179,7 +198,7 @@ describe("configsFor", () => {
     // scope wins anyway -- so it takes a NESTED workspace beside a plain
     // directory to reach. `lib` beside `lib-legacy` inside a parent workspace
     // is the same shape.
-    const chosen = await configsFor(nestedWorkspacesRoot(), {
+    const { configs: chosen } = await configsFor(nestedWorkspacesRoot(), {
       selected: NESTED_WORKSPACES,
       discovered: NESTED_WORKSPACES,
     });
@@ -247,7 +266,7 @@ describe("configsFor", () => {
     const selected = selectWorkspaces(all, ["@nest/sub"]);
     expect(selected).toEqual([{ dir: "tools/alpha/sub", name: "@nest/sub" }]);
 
-    const chosen = await configsFor(nestedWorkspacesRoot(), { selected, discovered: all });
+    const { configs: chosen } = await configsFor(nestedWorkspacesRoot(), { selected, discovered: all });
     expect(chosen).toEqual([
       "tools/alpha/sub/tsconfig.extra.json",
       "tools/alpha/sub/tsconfig.json",
@@ -263,7 +282,7 @@ describe("configsFor", () => {
     const selected = selectWorkspaces(all, ["@filt/alpha"]);
     expect(selected).toEqual([{ dir: "pkg/alpha", name: "@filt/alpha" }]);
 
-    const chosen = await configsFor(filterWorkspacesRoot(), { selected, discovered: all });
+    const { configs: chosen } = await configsFor(filterWorkspacesRoot(), { selected, discovered: all });
     expect(chosen).toEqual(["pkg/alpha/tsconfig.json", "tsconfig.json"]);
     // Both halves of "attribution only", and they fail to different
     // mutations: the root must not adopt a repo-spanning sibling to cover
@@ -304,7 +323,7 @@ describe("configsFor", () => {
     const withoutBeta = all.filter((w) => w.dir !== "pkg/beta");
     expect(withoutBeta.map((w) => w.dir)).toEqual(["pkg/alpha"]);
 
-    const chosen = await configsFor(filterWorkspacesRoot(), {
+    const { configs: chosen } = await configsFor(filterWorkspacesRoot(), {
       selected,
       discovered: withoutBeta,
     });
@@ -327,7 +346,7 @@ describe("configsFor", () => {
     // while the root's repo-spanning sibling stays out, because the root's
     // own gap is empty either way.
     const all = discoverWorkspaces(filterWorkspacesRoot());
-    const chosen = await configsFor(filterWorkspacesRoot(), { selected: all, discovered: all });
+    const { configs: chosen } = await configsFor(filterWorkspacesRoot(), { selected: all, discovered: all });
     expect(chosen).toEqual([
       "pkg/alpha/tsconfig.json",
       "pkg/beta/tsconfig.extra.json",

@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { compareStrings } from "../order.js";
 import { readJson, workspaceGlobs } from "./manifest.js";
-import { type ScanOptions, scanSourceFiles } from "./scope.js";
+import { configPathsIn, type ScanOptions, scanSourceFiles } from "./scope.js";
 import { sourceFileNames } from "./ts-adapter.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
@@ -367,23 +367,16 @@ interface DirConfigs {
  * property of the filesystem.
  */
 function configsIn(root: string, dir: string): DirConfigs | undefined {
-  let entries;
-  try {
-    entries = readdirSync(dir === "." ? root : join(root, dir), { withFileTypes: true });
-  } catch {
-    // An unreadable directory is a permissions problem, not a configuration.
-    // Answering "no configs" degrades to analyzing less; throwing would make
-    // one unreadable workspace end the run.
-    return undefined;
-  }
-  const names = entries
-    .filter((e) => e.isFile() && e.name.startsWith("tsconfig") && e.name.endsWith(".json"))
-    .map((e) => e.name)
-    .sort(compareStrings);
-  if (names.length === 0) return undefined;
-  const primary = names.includes("tsconfig.json") ? "tsconfig.json" : names[0]!;
-  const rel = (name: string) => (dir === "." ? name : `${dir}/${name}`);
-  return { primary: rel(primary), siblings: names.filter((n) => n !== primary).map(rel) };
+  // Which files count, and in what order, is `configPathsIn`'s to say -- the
+  // coverage section offers exactly this set, and two copies of the rule are
+  // two chances for what a run LOADS and what it SUGGESTS to disagree. An
+  // unreadable directory arrives here as "no configs", which degrades to
+  // analyzing less; throwing would let one unreadable workspace end the run.
+  const paths = configPathsIn(root, dir);
+  if (paths.length === 0) return undefined;
+  const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+  const primary = paths.find((p) => base(p) === "tsconfig.json") ?? paths[0]!;
+  return { primary, siblings: paths.filter((p) => p !== primary) };
 }
 
 /**
@@ -461,6 +454,21 @@ export interface WorkspaceSelection {
    * not in `selected` contributes no config by any route.
    */
   discovered: readonly Workspace[];
+}
+
+/** What the probe decided about every config it considered. */
+export interface ChosenConfigs {
+  /** The tsconfigs to open, repo-relative POSIX, sorted. */
+  configs: string[];
+  /**
+   * The candidate siblings that were opened and declined, repo-relative POSIX,
+   * sorted. Declined means the probe found none of that workspace's missing
+   * files in the config, so it cannot close the gap that survives into the
+   * report -- the surviving gap is a subset of the one it was measured
+   * against. That is the one thing the coverage section cannot work out for
+   * itself, and without it the section offers configs already proven useless.
+   */
+  rejected: string[];
 }
 
 /**
@@ -545,7 +553,7 @@ export async function configsFor(
   root: string,
   workspaces: WorkspaceSelection,
   opts: ScanOptions = {},
-): Promise<string[]> {
+): Promise<ChosenConfigs> {
   // The order of what follows, before any of the reasons for it: take each
   // directory's primary config; probe them all at once to learn what they
   // cover; subtract that from the files on disk to get the gap; attribute
@@ -580,7 +588,7 @@ export async function configsFor(
   // Nothing to load, so nothing to probe. `sourceFileNames([])` would throw on
   // an empty common root, and "this tree holds no tsconfig" is a caller's
   // problem to report, not an exception from config selection.
-  if (primaries.length === 0) return [];
+  if (primaries.length === 0) return { configs: [], rejected: [] };
 
   const primaryProbe = await sourceFileNames(primaries.map((c) => resolve(root, c)));
   const rebasePrimary = rebaseOnto(root, primaryProbe.root);
@@ -604,7 +612,7 @@ export async function configsFor(
     if (configs === undefined || (gapOf.get(dir)?.size ?? 0) === 0) continue;
     for (const config of configs.siblings) candidates.push({ config, scope: dir });
   }
-  if (candidates.length === 0) return primaries;
+  if (candidates.length === 0) return { configs: primaries, rejected: [] };
 
   // The primaries go in again. Not for the keep-check below -- `byConfig` is
   // per-project and does not change with what else is open -- but so that both
@@ -633,5 +641,13 @@ export async function configsFor(
     return gap !== undefined && own.some((name) => gap.has(rebaseCandidate(name)));
   });
 
-  return [...new Set([...primaries, ...kept.map((k) => k.config)])].sort(compareStrings);
+  const chosen = [...new Set([...primaries, ...kept.map((k) => k.config)])].sort(compareStrings);
+  return {
+    configs: chosen,
+    // Subtracted rather than assumed disjoint: a config kept for one workspace
+    // must not also be reported as declined because another scope declined it.
+    rejected: [...new Set(candidates.map((c) => c.config))]
+      .filter((c) => !chosen.includes(c))
+      .sort(compareStrings),
+  };
 }
