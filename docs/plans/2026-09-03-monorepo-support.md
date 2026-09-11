@@ -653,9 +653,15 @@ git commit -am "feat: turbo-style --filter selection over workspaces"
 
 ```ts
 it("lists a project's source files without materializing them", async () => {
-  const names = await sourceFileNames([resolve(workspacesRoot(), "tools/alpha/tsconfig.json")]);
+  const { root, names } = await sourceFileNames([
+    resolve(workspacesRoot(), "tools/alpha/tsconfig.json"),
+  ]);
   // The main config excludes tests; the probe must reflect that exactly.
-  expect(names).toEqual(["tools/alpha/src/a.ts", "tools/alpha/src/b.ts"]);
+  // NOTE the paths: `root` is commonRootDir of the OPENED configs, which for a
+  // single workspace config is that workspace's own directory -- so these are
+  // NOT repo-relative. `openProject` does the same with the same argument.
+  expect(root).toBe(resolve(workspacesRoot(), "tools/alpha"));
+  expect(names).toEqual(["src/a.ts", "src/b.ts"]);
 });
 
 it("sees the file the sibling test config adds", async () => {
@@ -663,11 +669,7 @@ it("sees the file the sibling test config adds", async () => {
     resolve(workspacesRoot(), "tools/alpha/tsconfig.json"),
     resolve(workspacesRoot(), "tools/alpha/tsconfig.test.json"),
   ]);
-  expect(names).toEqual([
-    "tools/alpha/src/a.test.ts",
-    "tools/alpha/src/a.ts",
-    "tools/alpha/src/b.ts",
-  ]);
+  expect(names).toEqual(["src/a.test.ts", "src/a.ts", "src/b.ts"]);
 });
 ```
 
@@ -700,7 +702,14 @@ return the program's files, which is the transitive closure — `a.test.ts` impo
  * sibling that contributes only excluded files is a rounding error against a
  * second full program load.
  */
-export async function sourceFileNames(configs: readonly string[]): Promise<string[]> {
+export interface ProbeResult {
+  /** Absolute, POSIX-separated; exactly what `openProject` would report. */
+  root: string;
+  /** Relative to `root`, POSIX, deduped, sorted with `compareStrings`. */
+  names: string[];
+}
+
+export async function sourceFileNames(configs: readonly string[]): Promise<ProbeResult> {
   const api = new API({ cwd: commonRootDir(configs) });
   try {
     const { snapshot, configs: opened } = await expandReferences(api, [...configs]);
@@ -896,17 +905,34 @@ export async function configsFor(
 > ~35 ms of fixed cost each, so N probes is N × 35 ms of pure overhead.
 >
 > Both point the same way: **probe once over all primaries, not once per
-> workspace.** The root then lands at the repo root and the paths are directly
-> comparable to `scanSourceFiles`.
+> workspace.**
+>
+> **(c) But batching does NOT guarantee the repo root — this is the trap.** The
+> root is `commonRootDir` of whatever configs were passed. If every selected
+> workspace lives under `tools/`, the root is `tools/`; and `--filter` narrowing
+> the selection to a *single* workspace collapses it to exactly case (a) again —
+> so the landmine is reachable through a user-facing flag, not just through a
+> careless implementation. Never assume the probe's root; read it. The signature
+> returns `{ root, names }` for precisely this reason, and step 3 below has to
+> rebase against it.
 
 Revised algorithm — two probes total, not N:
 
 1. Per selected workspace, take `tsconfig.json`, or the first `tsconfig*.json`
    in `compareStrings` order if there is none. Collect them all.
-2. **One** `sourceFileNames(allPrimaries)` call.
-3. Gap = `scanSourceFiles(root)` minus covered. Attribute each gapped file to the
-   workspace directory that contains it — the deepest one, so a nested workspace
-   claims its own files rather than its parent's (Task 4 made nesting reachable).
+2. **One** `sourceFileNames(allPrimaries)` call, destructured as
+   `{ root: probeRoot, names }`.
+3. Rebase before comparing: a probe name is repo-relative only after prefixing
+   `relative(repoRoot, probeRoot)`. Assert the result stays inside the repo — a
+   probe root *above* the repo root means a reference escaped, which is the one
+   case repo-relative paths cannot express (`src/extract/ts-adapter.ts`). Gap =
+   `scanSourceFiles(repoRoot)` minus the rebased set. Attribute each gapped file
+   to the workspace directory that contains it — the deepest one, so a nested
+   workspace claims its own files rather than its parent's (Task 4 made nesting
+   reachable).
+   **Test this with `--filter` narrowed to one workspace**, which is the shape
+   that makes `probeRoot !== repoRoot` and would otherwise silently report the
+   whole repo as a gap.
 4. For each workspace with a gap and unloaded siblings, add that workspace's
    siblings as candidates. If none, stop.
 5. **One** further `sourceFileNames(allPrimaries + candidates)` call. Keep only
