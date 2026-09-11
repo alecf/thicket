@@ -18,9 +18,27 @@
 
 ---
 
-### Task 1: Workspace fixture
+### Task 1: Workspace fixtures
 
 The fixture deliberately uses `tools/` and `libs/` — **not** `apps/`, `packages/`, or `services/`. A hardcoded directory name must fail these tests rather than pass by luck.
+
+**The governing rule for every element below: if deleting the feature it exists
+to test leaves the fixture behaving identically, it is not pulling its weight.**
+Four properties are here only to satisfy that test — `deep/a/b/gamma` (a `**`
+glob), a `node_modules` decoy, a `tsconfig.json` on the negation-excluded
+workspace, and `tools/alpha/src/b.ts` (keeping `tsconfig.build.json` a *proper*
+subset). Each is noted where it appears.
+
+Two fixtures are built here. `tests/fixtures/workspaces-solution/` is small but
+not optional: Task 7 asserts that the root's coverage check is scoped to files
+in no workspace, and that guard is untestable against the main fixture, whose
+root has no sibling config to be wrongly picked up.
+
+Use `module`/`moduleResolution` `"nodenext"` throughout, matching every other
+fixture in the repo. (An earlier draft said `"bundler"`; under bundler
+resolution an extensionless relative specifier resolves, which would make this
+fixture a weaker test of the AGENTS.md rule that `resolveImport` *throws* on an
+unresolved specifier.)
 
 **Files:**
 - Create: `tests/fixtures/workspaces/package.json`
@@ -357,16 +375,39 @@ git commit -am "feat: read workspace globs from pnpm-workspace.yaml"
 describe("discoverWorkspaces", () => {
   it("finds workspaces under non-conventional directory names", () => {
     expect(discoverWorkspaces(workspacesRoot())).toEqual([
+      { dir: "deep/a/b/gamma", name: "@fix/gamma" },
       { dir: "libs/beta", name: "beta" },
       { dir: "tools/alpha", name: "@fix/alpha" },
+      { dir: "tools/cfgonly", name: "@fix/cfgonly" },
     ]);
   });
 
   // The negation glob is the only thing excluding `libs/ignored`; it has a
-  // package.json like the others. Delete the negation handling and this fails.
+  // package.json AND a tsconfig.json like the others, so honouring the negation
+  // is the only thing keeping its source out of the analyzed set. Delete the
+  // negation handling and this fails -- and so does the coverage figure.
   it("honours negation globs", () => {
     const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
     expect(dirs).not.toContain("libs/ignored");
+  });
+
+  // `deep/a/b/gamma` is reachable only through the `deep/**` glob. Every other
+  // workspace sits at depth 2 under a `dir/*` glob, so without this one a naive
+  // single-level expansion passes every test here -- and the decision to walk
+  // for package.json and MATCH, rather than expand globs into paths, would be
+  // asserted by nothing.
+  it("matches a workspace nested below a ** glob", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs).toContain("deep/a/b/gamma");
+  });
+
+  // Delete the node_modules skip in the package walk and `dep` becomes a
+  // workspace. `.gitignore` carries a `!tests/fixtures/**/node_modules/`
+  // carve-out so the decoy is actually tracked -- the same trick the repo
+  // already uses to keep a fixture `dist/` alive.
+  it("never treats a package inside node_modules as a workspace", () => {
+    const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
+    expect(dirs.some((d) => d.includes("node_modules"))).toBe(false);
   });
 });
 ```
@@ -726,6 +767,14 @@ it("contributes no config for a workspace that has none", async () => {
 // zero files and delegates. Scoping the root's coverage check to the whole
 // tree would show every workspace's files as the ROOT's gap, and then hunt for
 // a root sibling to close a gap that is not the root's to close.
+//
+// This needs `tests/fixtures/workspaces-solution/`, built in Task 1. The main
+// `workspaces` fixture CANNOT substitute: its root has no sibling
+// `tsconfig*.json`, so deleting the scoping changes nothing observable there --
+// the root's gap would grow, `configsForOne` would find no sibling, and the
+// answer would be identical. The solution fixture's root DOES carry a
+// `tsconfig.build.json` reaching into `tools/**`, which is what makes the
+// mis-scoped behaviour visible.
 it("scopes the root's own coverage check to files in no workspace", async () => {
   const chosen = await configsFor(solutionWorkspacesRoot(), [{ dir: "tools/alpha" }]);
   expect(chosen).not.toContain("tsconfig.build.json");
