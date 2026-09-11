@@ -58,11 +58,11 @@ artifacts of the missing 97%.
 
 `untried:` lists the `tsconfig*.json` files in that directory the run has **not**
 already opened — candidates to rerun with, in path order, not a ranking. A line
-that ends at the file count, like `scripts` above, has nothing to offer: every
-config there was already loaded, or was opened and found to cover none of these
-files. No flag closes that gap; those files are outside every project in the
-tree, and the report is telling you so rather than repeating an instruction you
-have already followed.
+that ends at the file count, like `scripts` above, has nothing to offer: that
+directory holds no tsconfig at all, or every config in it was already loaded,
+or one was opened and found to cover none of these files. No flag closes that
+gap; those files are outside every project in the tree, and the report is
+telling you so rather than repeating an instruction you have already followed.
 
 ---
 

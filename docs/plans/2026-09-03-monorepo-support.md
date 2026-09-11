@@ -1115,20 +1115,29 @@ git commit -am "feat: thicket [dir], --filter, --no-workspaces; pin the cache to
 
 > **BUILT, and the probe route was taken.** `ScopeGap.config?: string` is now
 > `configs: string[]`: every `tsconfig*.json` in the owning directory, sorted,
-> minus the ones this run already tried. Two `ScanOptions` fields feed it and
-> both are subtracted identically, kept apart because their provenance differs
-> and their names have to stay true — `analyzedConfigs` (what the program was
-> built from, threaded from `run.ts`) and `rejectedConfigs` (what the probe
-> opened and declined).
+> minus the ones this run already tried. One `ScanOptions` field feeds it,
+> `triedConfigs`, carrying both provenances — the configs the program was built
+> from and the candidates the probe opened and declined. They were two fields
+> for one commit; nothing downstream reads the provenance, so the split was
+> documentation wearing an API's clothes.
 >
 > The design note's preferred route was reachable, but not for free:
 > `configsFor` discarded its declined candidates, so it now returns
-> `{ configs, rejected }` and `Discovery` carries `rejected` through. That is
-> sound rather than a heuristic — a declined candidate was measured against
-> that workspace's gap AT PROBE TIME, and the gap surviving into the report is
-> a subset of it, so a config that covered none of the first covers none of the
-> second. The cost was mechanical: ten `const chosen = await configsFor(...)`
-> call sites became `const { configs: chosen } = ...`.
+> `{ configs, rejected }` and `Discovery` carries `rejected` through. The cost
+> was mechanical: ten `const chosen = await configsFor(...)` call sites became
+> `const { configs: chosen } = ...`.
+>
+> **What the declined list does and does not prove.** A declined candidate
+> covers none of the files ITS OWN WORKSPACE was charged with. It is not a
+> proof about the gap the report prints, because the two are grouped by
+> different rules — `deepestScope` (deepest containing workspace) at probe
+> time, `owningDir` (nearest ancestor holding a tsconfig) in the report — and
+> those disagree when a nested workspace has no tsconfig of its own. A sibling
+> declined against the parent's gap is then subtracted from a gap it was never
+> measured against, and may cover part of it. The failure is silence where
+> advice existed, which is still strictly better than the confident wrong
+> advice this task removes; aligning the two groupings is an attribution change
+> and belongs to whoever owns that boundary, not here.
 >
 > On the sample monorepo the probe route changes nothing — every gapped
 > directory there holds exactly one `tsconfig.json`, which the run had already

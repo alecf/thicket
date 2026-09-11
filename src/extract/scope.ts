@@ -18,21 +18,19 @@ export interface ScanOptions {
   bannerScan?: boolean;
   exclude?: readonly string[];
   /**
-   * The tsconfigs the program was built from, repo-relative POSIX. A gap never
-   * suggests one of these: the run already loaded it, and it is that config's
-   * own `include`/`exclude` leaving the files out.
-   */
-  analyzedConfigs?: readonly string[];
-  /**
-   * Tsconfigs `configsFor` opened as candidates and declined, repo-relative
-   * POSIX. Declined means the probe found none of the gapped files in them, so
-   * suggesting one is the same dead end as suggesting a config that was passed
-   * -- the reader would load it and the gap would not move.
+   * Tsconfigs this run has already put to the question, repo-relative POSIX. A
+   * gap suggests none of them. Two provenances, one behaviour:
    *
-   * Separate from `analyzedConfigs` because the provenance differs and only
-   * the workspace path can supply it; both are subtracted the same way.
+   *  - The configs the program was BUILT FROM. The run loaded one already, and
+   *    it is that config's own `include`/`exclude` leaving the files out.
+   *  - The candidate siblings `configsFor` OPENED AND DECLINED. The probe
+   *    found none of that workspace's missing files in them.
+   *
+   * One field rather than two, because nothing downstream reads the
+   * provenance: the difference would only be worth keeping if the report
+   * worded the two cases differently, and it prints neither.
    */
-  rejectedConfigs?: readonly string[];
+  triedConfigs?: readonly string[];
 }
 
 /** How much of a file to read when looking for a generator's banner. */
@@ -69,7 +67,9 @@ export interface ScopeGap {
   /**
    * The `tsconfig*.json` files in `dir` that this run has not already tried,
    * sorted. Empty is the common answer once workspace discovery has run, and
-   * it means "nothing here is worth suggesting" -- not "no config exists".
+   * it means "nothing here is worth suggesting" -- which covers three cases
+   * the reader need not tell apart: the directory holds no config, every
+   * config in it was loaded, or a probe opened one and it covered nothing.
    *
    * Untried candidates, deliberately unranked. Knowing which one COVERS the
    * gap needs a program load, and this function is synchronous by design, so
@@ -187,9 +187,7 @@ export function analysisScope(
     byDir.set(dir, (byDir.get(dir) ?? 0) + 1);
   }
 
-  const tried = new Set(
-    [...(opts.analyzedConfigs ?? []), ...(opts.rejectedConfigs ?? [])].map(toPosix),
-  );
+  const tried = new Set((opts.triedConfigs ?? []).map(toPosix));
   const gaps: ScopeGap[] = [...byDir.entries()]
     .map(([dir, fileCount]) => ({
       dir,

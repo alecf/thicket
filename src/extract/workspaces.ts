@@ -462,11 +462,23 @@ export interface ChosenConfigs {
   configs: string[];
   /**
    * The candidate siblings that were opened and declined, repo-relative POSIX,
-   * sorted. Declined means the probe found none of that workspace's missing
-   * files in the config, so it cannot close the gap that survives into the
-   * report -- the surviving gap is a subset of the one it was measured
-   * against. That is the one thing the coverage section cannot work out for
-   * itself, and without it the section offers configs already proven useless.
+   * sorted. Declined means the probe found none of the files ITS OWN WORKSPACE
+   * was charged with in it, which is the one thing the coverage section cannot
+   * work out for itself -- it is synchronous and loads no program.
+   *
+   * THE CLAIM IS EXACTLY THAT, AND NO WIDER. The gap this was measured against
+   * is grouped by `deepestScope` (deepest containing WORKSPACE); the gap the
+   * report prints is grouped by `owningDir` (nearest ancestor holding a
+   * TSCONFIG). The two disagree when a nested workspace has no tsconfig of its
+   * own -- its files are then charged to the parent directory, and a sibling
+   * declined against the parent workspace's gap is subtracted from a gap it
+   * was never measured against. It may cover part of that one.
+   *
+   * So this can be silent where advice existed. That is the safe direction --
+   * the alternative was a confident `--config` that provably did nothing --
+   * but it is not a proof that the config closes nothing, and it must not be
+   * written down as one. Aligning the two groupings is a change to
+   * attribution, not to this list.
    */
   rejected: string[];
 }

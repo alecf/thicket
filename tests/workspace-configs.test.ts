@@ -355,6 +355,37 @@ describe("configsFor", () => {
     ]);
   });
 
+  it("loads the first config by code unit when a workspace has no tsconfig.json", async () => {
+    // `tsconfig.json` is a convention, and a workspace holding only
+    // `tsconfig-base.json` and `tsconfig.app.json` has to pick one to LOAD.
+    // The rule is "first in `compareStrings` order", so it is the listing
+    // order -- pinned in `tests/scope.test.ts` -- that decides, and nothing
+    // pinned the other half: taking the LAST of the list instead left every
+    // test green while changing which program gets built.
+    //
+    // Both configs name the same single file, so whichever loses is left out
+    // for adding nothing rather than for being second: the workspace ends up
+    // with exactly one config, and which one is the whole answer.
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-primary-")));
+    try {
+      const config = JSON.stringify({
+        compilerOptions: { target: "es2022", module: "nodenext", strict: true, noEmit: true },
+        include: ["src/**/*.ts"],
+      });
+      await mkdir(join(dir, "pkg/a/src"), { recursive: true });
+      await writeFile(join(dir, "package.json"), JSON.stringify({ name: "primary-root" }));
+      await writeFile(join(dir, "pkg/a/tsconfig-base.json"), config);
+      await writeFile(join(dir, "pkg/a/tsconfig.app.json"), config);
+      await writeFile(join(dir, "pkg/a/src/a.ts"), "export const a = 1;\n");
+
+      const pkg = [{ dir: "pkg/a" }];
+      const { configs } = await configsFor(dir, { selected: pkg, discovered: pkg });
+      expect(configs).toEqual(["pkg/a/tsconfig-base.json"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a probe root above the repository root", async () => {
     // A repo-relative path cannot express a file outside the repo, so a probe
     // whose root sits above the repository root has nothing to rebase

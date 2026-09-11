@@ -572,12 +572,16 @@ export async function runReport(
         includeGenerated,
         bannerScan,
         exclude,
-        // Repo-relative, because that is what the gaps speak. Measured from
-        // `project.root` rather than from `dir`: a config reaching above the
-        // directory named moves the root, and a path measured from the other
-        // one matches no gap and quietly reinstates the advice this removes.
-        analyzedConfigs: discovery.configs.map((c) => toPosix(relative(project.root, c))),
-        rejectedConfigs: discovery.rejected,
+        // What was loaded, then what the probe opened and declined. Both are
+        // repo-relative, because that is what the gaps speak, and both are
+        // measured from `project.root` rather than from `dir`: a config
+        // reaching above the directory named moves the root, and a path
+        // measured from the other one matches no gap and quietly reinstates
+        // the advice this removes.
+        triedConfigs: [
+          ...discovery.configs.map((c) => toPosix(relative(project.root, c))),
+          ...discovery.rejected,
+        ],
       },
     );
     // Here rather than in discovery: "this workspace has no tsconfig" is only
