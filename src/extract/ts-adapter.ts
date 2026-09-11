@@ -308,7 +308,7 @@ function bindingCountsBySpecifier(
  * `/repo/package` share `/repo` rather than `/repo/pack`.
  */
 export function commonRootDir(configs: readonly string[]): string {
-  if (configs.length === 0) throw new Error("openProject requires at least one tsconfig path");
+  if (configs.length === 0) throw new Error("at least one tsconfig path is required");
   const dirs = configs.map((c) => toPosix(dirname(isAbsolute(c) ? c : resolve(c))).split("/"));
   let common = dirs[0]!;
   for (const segs of dirs.slice(1)) {
@@ -417,6 +417,33 @@ export interface ExcludedCounts {
   pattern: number;
 }
 
+/**
+ * True for a program file that is not analyzable source.
+ *
+ * One predicate, used by `openProject` and by `sourceFileNames`, because the
+ * probe's whole job is to predict what the real load will contribute: two
+ * copies of these rules that drift apart make it propose a sibling config
+ * whose every file `openProject` then discards.
+ *
+ * `.json` is excluded because `resolveJsonModule` puts every imported data
+ * file into the program and the API parses it into a real Array/ObjectLiteral
+ * AST. On one application a 126,000-line LOINC code table produced six of the
+ * top findings -- clusters of identical array literals inside a single data
+ * file, which is duplication only in the sense that a phone book repeats
+ * itself -- and contributed those 126k lines to the reported LOC. Resolution
+ * is unaffected: this drops the file from ANALYSIS, not from the program.
+ *
+ * `.d.ts` is doing more work than "skip hand-written declarations": every
+ * program lists the ~63 default lib files, so a two-file project comes back
+ * with 65 names. Where those libs live is not a constant -- installed into the
+ * project they carry a `node_modules` segment, resolved from a global install
+ * cache (bun's, pnpm's store) they carry none -- so neither rule can be said
+ * to be the one that catches them, and both have to stay.
+ */
+function isSkippedSourceName(name: string): boolean {
+  return name.includes("node_modules") || name.endsWith(".d.ts") || name.endsWith(".json");
+}
+
 export async function openProject(
   configs: string | string[],
   opts: OpenProjectOptions = {},
@@ -453,21 +480,7 @@ export async function openProject(
   for (const project of snapshot.getProjects()) {
     const checker = project.checker as unknown as Checker;
     for (const name of await project.program.getSourceFileNames()) {
-      // `.json` is excluded because `resolveJsonModule` puts every imported
-      // data file into the program and the API parses it into a real
-      // Array/ObjectLiteral AST. On one application a 126,000-line LOINC code
-      // table produced six of the top findings -- clusters of identical array
-      // literals inside a single data file, which is duplication only in the
-      // sense that a phone book repeats itself -- and contributed those 126k
-      // lines to the reported LOC. Resolution is unaffected: this drops the
-      // file from ANALYSIS, not from the program.
-      if (
-        name.includes("node_modules") ||
-        name.endsWith(".d.ts") ||
-        name.endsWith(".json")
-      ) {
-        continue;
-      }
+      if (isSkippedSourceName(name)) continue;
       if (seen.has(name)) continue;
       seen.add(name);
       // Segment-matched against the REPO-RELATIVE path: a checkout that lives
@@ -713,4 +726,58 @@ export async function openProject(
     importsOf: (file: FileHandle) => importDetailsOf(file).map((d) => d.target),
     close: () => api.close(),
   };
+}
+
+/**
+ * Paths of a project's source files, without materializing any of them.
+ *
+ * `openProject` awaits `getSourceFile` per name, which builds the AST; this
+ * stops at `getSourceFileNames`. It exists to decide whether a workspace's
+ * sibling tsconfig contributes files worth loading, which is a question about
+ * WHICH files, not about what is in them -- and answering it with a second
+ * full program load costs about as much as the analysis it is trying to
+ * justify.
+ *
+ * Paths are POSIX and relative to the same root `openProject` would report for
+ * the same configs: the common ancestor of every config actually OPENED, which
+ * a reference reaching outside the requested config's directory moves upwards.
+ * Root it at the requested configs instead and a probe of a solution config
+ * answers in `../`-prefixed paths, which match nothing the caller holds.
+ *
+ * That root moves with the ARGUMENT, so these paths are repo-relative only
+ * when the call covers the repo. Probe one workspace's tsconfig on its own and
+ * the answers are relative to that workspace -- comparing them against a list
+ * gathered at the repo root finds nothing in common, which reads as "this
+ * config covers no files" rather than "these two lists are measured from
+ * different places".
+ *
+ * Applies the same skip rules as `openProject` so the two agree about what a
+ * "source file" is -- a probe that counted `.d.ts` would propose a sibling
+ * that adds nothing analyzable, and would count the default lib besides.
+ *
+ * Deliberately does NOT apply the generated-directory, banner or `--exclude`
+ * rules: the banner sniff needs file text, which is the cost this exists to
+ * avoid, and a sibling that contributes only excluded files is a rounding
+ * error against a second full program load.
+ */
+export async function sourceFileNames(configs: readonly string[]): Promise<string[]> {
+  const list = configs.map((c) => (isAbsolute(c) ? c : resolve(c)));
+  const api = new API({ cwd: commonRootDir(list) });
+  try {
+    const { snapshot, configs: opened } = await expandReferences(api, list);
+    const root = commonRootDir(opened);
+    const seen = new Set<string>();
+    for (const project of snapshot.getProjects()) {
+      for (const name of await project.program.getSourceFileNames()) {
+        if (isSkippedSourceName(name)) continue;
+        seen.add(toPosix(relative(root, name)));
+      }
+    }
+    return [...seen].sort(compareStrings);
+  } finally {
+    // The API holds an open connection to the `tsgo` child it spawned, and
+    // that connection keeps the event loop alive. Leak it and nothing is
+    // visible in the answer -- the caller's process simply never exits.
+    await api.close();
+  }
 }
