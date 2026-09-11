@@ -321,6 +321,19 @@ export function commonRootDir(configs: readonly string[]): string {
 }
 
 /**
+ * `pin` when it contains `derived`, and `derived` otherwise.
+ *
+ * Containment is tested on whole segments -- `${pin}/` -- because `/repo/pack`
+ * is not an ancestor of `/repo/package`, the same trap `commonRootDir` compares
+ * segments to avoid.
+ */
+function pinnedRoot(pin: string | undefined, derived: string): string {
+  if (pin === undefined) return derived;
+  const abs = toPosix(resolve(pin));
+  return derived === abs || derived.startsWith(`${abs}/`) ? abs : derived;
+}
+
+/**
  * How many rounds of reference expansion to attempt. A solution config that
  * points at solution configs is already unusual; ten levels is far past any
  * real layout and bounds the loop even if the visited set is somehow defeated.
@@ -408,6 +421,25 @@ export interface OpenProjectOptions {
    * The escape hatch for generated code that declares nothing.
    */
   exclude?: readonly string[];
+  /**
+   * The directory every repo-relative path is measured from, when the caller
+   * knows it. Defaults to `commonRootDir` of the configs actually opened.
+   *
+   * That default is DERIVED from the config set, which makes it move when the
+   * config set does: narrow a monorepo run to one workspace and the root
+   * collapses into that workspace, so the same file is `src/a.ts` in one run
+   * and `tools/alpha/src/a.ts` in the next. Those paths are the cache keys,
+   * the module names finding ids derive from, and what the report prints, so
+   * a caller that knows the root of the tree it was pointed at should say so
+   * and get the same answers at every scope.
+   *
+   * Honoured only when it CONTAINS the derived root. A pin below it would put
+   * `../` on the paths of everything above, which repo-relative paths cannot
+   * express (see `commonRootDir`); the derived root wins instead, and the
+   * caller can see that it did by comparing `Project.root` with what it
+   * passed.
+   */
+  root?: string;
 }
 
 /** What `openProject` dropped, by the rule that dropped it. */
@@ -457,8 +489,10 @@ export async function openProject(
   const { snapshot, configs: opened } = await expandReferences(api, list);
   // Rooted at the ancestor of everything actually opened: a reference may sit
   // outside the requested config's directory, and a file above the root would
-  // get a `../`-prefixed path, breaking the repo-relative-path contract.
-  const root = commonRootDir(opened);
+  // get a `../`-prefixed path, breaking the repo-relative-path contract. A
+  // caller may pin it higher -- to the directory it was pointed at -- but
+  // never lower, for the same reason.
+  const root = pinnedRoot(opts.root, commonRootDir(opened));
 
   // A file present in several tsconfig projects is returned once per project.
   // Dedupe on absolute path; the unit of analysis is the FILE, not (project,file).

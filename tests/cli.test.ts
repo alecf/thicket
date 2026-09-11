@@ -1,16 +1,26 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cachePathFor } from "../src/cache/db.js";
 import { main } from "../src/cli.js";
 import {
   emptyConfig,
+  filterWorkspacesRoot,
   fixtureConfig,
   fixtureRoot,
   nestedConfig,
   generatedConfig,
   solutionConfig,
+  workspacesRoot,
 } from "./helpers.js";
 
 /**
@@ -49,6 +59,48 @@ afterEach(() => {
   vi.restoreAllMocks();
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
 });
+
+/**
+ * A throwaway tree written file by file.
+ *
+ * Written rather than committed because two of the cases below need a
+ * `package.json` that does not parse, and an unparseable manifest checked into
+ * `tests/fixtures/` is a trap for every tool that walks this repository.
+ */
+function scratchTree(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "thicket-cli-tree-"));
+  temps.push(root);
+  for (const [name, text] of Object.entries(files)) {
+    const path = join(root, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  }
+  return root;
+}
+
+const TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "es2022",
+    module: "nodenext",
+    moduleResolution: "nodenext",
+    strict: true,
+    noEmit: true,
+  },
+  include: ["src/**/*.ts"],
+});
+
+/** A root project of two files beside one workspace of one. */
+function miniMonorepo(): string {
+  return scratchTree({
+    "package.json": JSON.stringify({ name: "tree-root", private: true, workspaces: ["pkg/*"] }),
+    "tsconfig.json": TSCONFIG,
+    "src/a.ts": "export const a = 1;\n",
+    "src/b.ts": "export const b = 2;\n",
+    "pkg/one/package.json": JSON.stringify({ name: "one", version: "0.0.0" }),
+    "pkg/one/tsconfig.json": TSCONFIG,
+    "pkg/one/src/c.ts": "export const c = 3;\n",
+  });
+}
 
 describe("main", () => {
   it("exits 0 and prints a report for a config with source files", async () => {
@@ -216,6 +268,248 @@ describe("main", () => {
     expect(await main(["cache", "burn", "--config", fixtureConfig()])).not.toBe(0);
     expect(io.stdout()).toBe("");
     expect(io.stderr()).toMatch(/unknown command/);
+  });
+});
+
+describe("main [dir]", () => {
+  it("analyzes the directory named as a positional", async () => {
+    // Every workspace contributes: the root's `scripts/`, alpha's three files
+    // (its sibling test config included), beta's and gamma's one each. Six is
+    // the whole point -- a run that ignored the positional would analyze this
+    // repository's own tsconfig instead, and one that skipped discovery would
+    // report 1.
+    const io = capture();
+    expect(await main([workspacesRoot(), "--no-cache"])).toBe(0);
+    expect(io.stdout()).toMatch(/\b6 files \//);
+  });
+
+  it("errors, naming the nearest ancestor with a project, when a directory has none", async () => {
+    // No upward search: thicket analyzes exactly where it is pointed. Saying
+    // where the nearest project IS costs nothing and is the next command the
+    // reader will type.
+    const io = capture();
+    expect(await main([join(workspacesRoot(), "tools/alpha/src")])).toBe(1);
+    expect(io.stdout()).toBe("");
+    // The ancestor is the END of the line. Merely `toContain` that path would
+    // pass on a message that names only the directory asked for, which
+    // contains it as a prefix.
+    expect(io.stderr().trimEnd().endsWith(join(workspacesRoot(), "tools/alpha"))).toBe(true);
+    expect(io.stderr()).toMatch(/nearest directory above it/);
+  });
+
+  it("rejects a positional that is not a directory", async () => {
+    const io = capture();
+    expect(await main([join(workspacesRoot(), "tsconfig.json")])).toBe(1);
+    expect(io.stderr()).toMatch(/not a directory/);
+  });
+
+  it("--config suppresses discovery, because the caller asked for something specific", async () => {
+    // The root config covers `scripts/` alone. Discovery would make this 6.
+    const io = capture();
+    expect(await main(["--config", join(workspacesRoot(), "tsconfig.json"), "--no-cache"])).toBe(
+      0,
+    );
+    expect(io.stdout()).toMatch(/\b1 files \//);
+  });
+
+  it("--no-workspaces turns off just that opinion, leaving --exclude in force", async () => {
+    const root = miniMonorepo();
+    const all = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(all.stdout()).toMatch(/\b3 files \//);
+
+    vi.restoreAllMocks();
+    const off = capture();
+    expect(await main([root, "--no-workspaces", "--no-cache"])).toBe(0);
+    expect(off.stdout()).toMatch(/\b2 files \//);
+
+    vi.restoreAllMocks();
+    const both = capture();
+    expect(await main([root, "--no-workspaces", "--exclude", "src/b.ts", "--no-cache"])).toBe(0);
+    expect(both.stdout()).toMatch(/\b1 files \//);
+    expect(both.stdout()).toMatch(/1 matching --exclude/);
+  });
+
+  it("--filter narrows the run to the workspaces it names", async () => {
+    const io = capture();
+    expect(await main([workspacesRoot(), "--filter", "@fix/alpha", "--no-cache"])).toBe(0);
+    // alpha's three files plus the root's one; beta and gamma are out.
+    expect(io.stdout()).toMatch(/\b4 files \//);
+  });
+
+  it("--filter that matches nothing errors, listing what is available", async () => {
+    const io = capture();
+    expect(await main([workspacesRoot(), "--filter", "nope", "--no-cache"])).toBe(1);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/nope/);
+    expect(io.stderr()).toMatch(/@fix\/alpha/);
+  });
+
+  it("refuses --filter beside --config rather than ignoring it", async () => {
+    const io = capture();
+    expect(
+      await main(["--config", join(workspacesRoot(), "tsconfig.json"), "--filter", "@fix/alpha"]),
+    ).toBe(1);
+    expect(io.stderr()).toMatch(/--filter/);
+    expect(io.stderr()).toMatch(/--config/);
+  });
+
+  it("refuses --filter beside --no-workspaces rather than ignoring it", async () => {
+    const io = capture();
+    expect(await main([workspacesRoot(), "--filter", "@fix/alpha", "--no-workspaces"])).toBe(1);
+    expect(io.stderr()).toMatch(/--no-workspaces/);
+  });
+
+  it("says nothing on stderr when every workspace is analyzed", async () => {
+    const io = capture();
+    expect(await main([filterWorkspacesRoot(), "--no-cache"])).toBe(0);
+    expect(io.stderr()).toBe("");
+  });
+
+  it("names the workspace it skipped for having no tsconfig", async () => {
+    // `tools/cfgonly` publishes shared compiler settings and owns no source.
+    // Contributing zero configs is correct; doing it silently leaves a reader
+    // to discover from the coverage figure that a workspace is missing.
+    const io = capture();
+    await main([workspacesRoot(), "--no-cache"]);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain("@fix/cfgonly");
+  });
+
+  it("warns once when a manifest exists but could not be read", async () => {
+    // `workspaceGlobs` answers undefined for absent, unreadable and
+    // unparseable alike, so the coverage banner blames scope and an
+    // unreadable `package.json` reads as "not a monorepo".
+    const root = scratchTree({
+      "package.json": '{ "name": "broken", "workspaces": ["pkg/*"',
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stdout()).toMatch(/\b1 files \//);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain(join(root, "package.json"));
+  });
+
+  it("warns when a manifest declares workspaces in a shape it cannot read", async () => {
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "odd", workspaces: { globs: ["pkg/*"] } }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain("workspaces");
+  });
+
+  it("warns when a pnpm manifest holds a glob it refused to read", async () => {
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "pnpm-ish", private: true }),
+      "pnpm-workspace.yaml": "packages:\n  - 'pkg/*\n",
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain("pnpm-workspace.yaml");
+  });
+
+  it("a directory named like a command is reachable as a path", async () => {
+    // `cache` and `diff` are checked FIRST, so they stay unambiguous; `./diff`
+    // is how someone with a directory of that name gets at it.
+    const root = scratchTree({
+      "diff/tsconfig.json": TSCONFIG,
+      "diff/src/a.ts": "export const a = 1;\n",
+    });
+    const io = capture();
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      expect(await main(["./diff", "--no-cache"])).toBe(0);
+    } finally {
+      process.chdir(cwd);
+    }
+    expect(io.stdout()).toMatch(/\b1 files \//);
+  });
+
+  it("warns about a workspaces entry that is not a string, and uses the rest", async () => {
+    // `workspaceGlobs` drops these silently, which analyzes a subset of the
+    // tree and reports it as the whole of it.
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*", 7] }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/one/package.json": JSON.stringify({ name: "one" }),
+      "pkg/one/tsconfig.json": TSCONFIG,
+      "pkg/one/src/c.ts": "export const c = 3;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stdout()).toMatch(/\b2 files \//);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toMatch(/not a string/);
+  });
+
+  it("names a workspace with no tsconfig even when one of its children has one", async () => {
+    // `pkg/parent` and `pkg/parent/child` are both workspaces under `pkg/**`.
+    // Test containment by prefix alone and the child's config counts as the
+    // parent's, so the parent's source goes unanalyzed and unmentioned.
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/**"] }),
+      "tsconfig.json": TSCONFIG,
+      "src/a.ts": "export const a = 1;\n",
+      "pkg/parent/package.json": JSON.stringify({ name: "parent" }),
+      "pkg/parent/src/p.ts": "export const p = 1;\n",
+      "pkg/parent/child/package.json": JSON.stringify({ name: "child" }),
+      "pkg/parent/child/tsconfig.json": TSCONFIG,
+      "pkg/parent/child/src/c.ts": "export const c = 3;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(0);
+    expect(io.stderr().trim().split("\n")).toHaveLength(1);
+    expect(io.stderr()).toContain("parent");
+  });
+
+  it("errors when a workspace root holds no tsconfig anywhere", async () => {
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "tree-root", workspaces: ["pkg/*"] }),
+      "pkg/one/package.json": JSON.stringify({ name: "one" }),
+      "pkg/one/src/c.ts": "export const c = 3;\n",
+    });
+    const io = capture();
+    expect(await main([root, "--no-cache"])).toBe(1);
+    expect(io.stdout()).toBe("");
+    // Named with the root, because the per-workspace warning above it also
+    // says "no tsconfig" and would satisfy a looser assertion.
+    expect(io.stderr()).toContain(`no tsconfig in ${root}`);
+  });
+
+  it("errors when --filter is given a directory that declares no workspaces", async () => {
+    // Otherwise the filter is a silent no-op and the report reads as the
+    // narrowed run the caller asked for.
+    const io = capture();
+    expect(await main([fixtureRoot(), "--filter", "anything", "--no-cache"])).toBe(1);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(/--filter/);
+  });
+
+  it("cache clear needs no tsconfig beside it", async () => {
+    // The cache is pinned to the analyzed directory, so clearing it must not
+    // route through a config that may not exist -- a monorepo root whose
+    // compiler settings live in its packages has no tsconfig.json at all.
+    const root = scratchTree({ "src/a.ts": "export const a = 1;\n" });
+    const io = capture();
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      expect(await main(["cache", "clear"])).toBe(0);
+    } finally {
+      process.chdir(cwd);
+    }
+    expect(io.stderr()).toMatch(/no cache/);
   });
 });
 

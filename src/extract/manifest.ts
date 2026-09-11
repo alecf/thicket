@@ -33,12 +33,22 @@ export function workspaceGlobs(root: string): string[] | undefined {
 
 function globsFromPackageJson(root: string): string[] | undefined {
   const parsed = readJson(join(root, "package.json"));
-  const ws = (parsed as { workspaces?: unknown })?.workspaces;
-  // npm/bun/yarn-berry take an array; yarn v1 takes { packages: [...] }.
-  if (Array.isArray(ws)) return strings(ws);
+  const list = declaredList((parsed as { workspaces?: unknown })?.workspaces);
+  return list === undefined ? undefined : strings(list);
+}
+
+/**
+ * The `workspaces` value as a list, in either spelling, or `undefined`.
+ *
+ * npm/bun/yarn-berry take an array; yarn v1 takes `{ packages: [...] }`. Read
+ * here rather than in each caller so `manifestProblems` cannot come to
+ * disagree with the reader about which shapes are understood -- the whole
+ * value of that diagnostic is that it describes THIS function's answer.
+ */
+function declaredList(ws: unknown): readonly unknown[] | undefined {
+  if (Array.isArray(ws)) return ws;
   const packages = (ws as { packages?: unknown })?.packages;
-  if (Array.isArray(packages)) return strings(packages);
-  return undefined;
+  return Array.isArray(packages) ? packages : undefined;
 }
 
 /**
@@ -230,4 +240,85 @@ export function readJson(path: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A manifest sitting at `root` that exists and declares nothing usable.
+ *
+ * `path` is absolute; `reason` is one clause, written to follow it.
+ */
+export interface ManifestProblem {
+  path: string;
+  reason: string;
+}
+
+/**
+ * The manifests at `root` that a reader would expect to declare workspaces and
+ * that this file could not read.
+ *
+ * Purely diagnostic, and deliberately separate from `workspaceGlobs`, which
+ * answers `undefined` for absent, unreadable and unparseable alike. That is
+ * the right answer there -- nothing under `src/extract/` writes to stderr, and
+ * every one of those cases means the same thing to discovery: no declaration
+ * to read. It is the wrong answer for a reader, because the coverage banner
+ * blames SCOPE: a `package.json` with a missing brace makes a monorepo analyze
+ * as a single project and the report says the tree is barely covered, naming
+ * no cause. The caller that owns stderr asks this instead, and gets one line
+ * per manifest.
+ *
+ * Silence is the answer for a manifest that simply declares no workspaces: a
+ * `package.json` with no `workspaces` key is an ordinary package, not a
+ * failure, and warning about one would put a line on stderr for every
+ * single-project run this tool has ever had.
+ *
+ * The three shapes that ARE reported are the ones where a reader's
+ * expectation and thicket's answer differ:
+ *
+ *  - a `package.json` that is not JSON at all;
+ *  - a `workspaces` key holding something other than a list (or a yarn-v1
+ *    `{ packages: [...] }`), which declares workspaces in a dialect this does
+ *    not read;
+ *  - `workspaces` entries that are not strings, which `workspaceGlobs` drops
+ *    silently -- the run then analyzes a subset of the tree and looks whole;
+ *  - a `pnpm-workspace.yaml` whose `packages:` list this refused, which is the
+ *    whole reason that file exists.
+ */
+export function manifestProblems(root: string): ManifestProblem[] {
+  const out: ManifestProblem[] = [];
+  const pkg = join(root, "package.json");
+  if (existsSync(pkg)) {
+    const parsed = readJson(pkg);
+    if (parsed === undefined) {
+      out.push({ path: pkg, reason: "could not be read as JSON" });
+    } else {
+      const ws = (parsed as { workspaces?: unknown })?.workspaces;
+      const list = declaredList(ws);
+      if (ws !== undefined && list === undefined) {
+        out.push({ path: pkg, reason: `declares "workspaces" in a shape thicket cannot read` });
+      } else if (list !== undefined) {
+        const dropped = list.length - strings(list).length;
+        if (dropped > 0) {
+          out.push({
+            path: pkg,
+            reason: `declares ${dropped} "workspaces" ${dropped === 1 ? "entry" : "entries"} that is not a string`,
+          });
+        }
+      }
+    }
+  }
+  for (const name of ["pnpm-workspace.yaml", "pnpm-workspace.yml"]) {
+    const path = join(root, name);
+    if (!existsSync(path)) continue;
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      out.push({ path, reason: "could not be read" });
+      continue;
+    }
+    if (globsFromPnpmText(text) === undefined) {
+      out.push({ path, reason: "declares no `packages:` list this can read" });
+    }
+  }
+  return out;
 }

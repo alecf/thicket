@@ -1,6 +1,10 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
-import { analysisScope, type Scope } from "./extract/scope.js";
+import { manifestProblems, workspaceGlobs } from "./extract/manifest.js";
+import { analysisScope, type ScanOptions, type Scope } from "./extract/scope.js";
 import { openProject, type ExcludedCounts } from "./extract/ts-adapter.js";
+import { configsFor, discoverWorkspaces, selectWorkspaces } from "./extract/workspaces.js";
 import { findDuplication } from "./fingerprint/cluster.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
@@ -27,7 +31,52 @@ import {
 import { VERSION } from "./version.js";
 
 export interface RunOptions {
-  config: string | string[];
+  /**
+   * The tsconfigs to analyze. When absent they are discovered under `dir`:
+   * every selected workspace's, or the one beside it in a plain project.
+   *
+   * Naming them suppresses discovery entirely, workspaces included. The caller
+   * asked for something specific, and widening past it would change every
+   * number in the report -- the analysis is a graph computation over the file
+   * set, so a file added silently moves propagation cost, coverage and
+   * clusters, not just the finding list.
+   */
+  config?: string | string[];
+  /**
+   * The directory being analyzed, and the root every repo-relative path is
+   * measured from -- which is where `.thicket/cache.db` lives.
+   *
+   * Without it the root is `commonRootDir` of the configs actually opened,
+   * which moves with the config set: `--filter` down to one workspace
+   * collapses it into that workspace, putting the cache inside a subpackage
+   * and renaming every path in the report. Pinning it keeps one cache at the
+   * top of the tree whose rows a run of any scope can hit.
+   *
+   * Ignored -- with a warning through `warn` -- when a config reaches above
+   * it, because a file above the root cannot be named by a repo-relative path.
+   */
+  dir?: string;
+  /**
+   * Workspace `--filter` patterns, applied in order. See `selectWorkspaces`.
+   * Empty selects every discovered workspace.
+   */
+  filter?: readonly string[];
+  /**
+   * Read workspace manifests under `dir`. On by default, and its own switch:
+   * turning discovery off must not turn off `--exclude` or the banner sniff
+   * (AGENTS.md §4b).
+   */
+  workspaces?: boolean;
+  /**
+   * Where a line about the run itself goes -- a manifest that would not read,
+   * a workspace with no tsconfig, a root that could not be pinned.
+   *
+   * A sink rather than a write, because nothing below `src/cli.ts` owns a
+   * stream. Absent means those lines are dropped, which is right for a
+   * programmatic caller and wrong for a terminal, and only the caller knows
+   * which it is.
+   */
+  warn?: (message: string) => void;
   minNodes?: number;
   /** Smallest fragment worth reporting, in lines. See `ExtractOptions`. */
   minLines?: number;
@@ -230,6 +279,91 @@ const MAX_RESIDUAL_SHARE = 2 / 3;
  */
 const MAX_COPIES_COMPARED = 20;
 
+const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
+
+/**
+ * The tsconfigs to analyze under `root` when the caller named none.
+ *
+ * Workspace discovery first, a single `tsconfig.json` second, and an error
+ * third. There is deliberately NO upward search: thicket analyzes the
+ * directory it was pointed at, and a run that silently walked up would report
+ * a tree the caller did not name -- the same class of surprise as widening a
+ * filtered run. Where the nearest project actually is gets named in the error
+ * instead, because it is the next command the reader will type.
+ *
+ * Every manifest that would not read gets a line on `warn`, and so does every
+ * selected workspace with no tsconfig of its own. Both are states the coverage
+ * banner describes as SCOPE -- "this run saw 15% of the tree" -- and neither
+ * is fixable by the `--config` that banner suggests.
+ */
+async function discoverConfigs(
+  root: string,
+  opts: {
+    filter: readonly string[];
+    workspaces: boolean;
+    scan: ScanOptions;
+    warn: (message: string) => void;
+  },
+): Promise<string[]> {
+  if (opts.workspaces) {
+    for (const problem of manifestProblems(root)) {
+      opts.warn(`${problem.path} ${problem.reason}; no workspace was discovered from it`);
+    }
+    const discovered = discoverWorkspaces(root);
+    if (discovered.length > 0) {
+      // `selected` decides what is analyzed and `discovered` is attribution
+      // only -- passing the filtered list for both makes a filtered run adopt
+      // a repo-spanning root config to cover the workspaces it excluded.
+      const selected = selectWorkspaces(discovered, opts.filter);
+      const chosen = await configsFor(root, { selected, discovered }, opts.scan);
+      for (const ws of selected) {
+        if (chosen.some((c) => ownConfigOf(ws.dir, c))) continue;
+        opts.warn(
+          `${ws.name ?? `./${ws.dir}`} holds no tsconfig, so none of its source is analyzed`,
+        );
+      }
+      if (chosen.length > 0) return chosen.map((c) => resolve(root, c));
+      throw new Error(
+        `no tsconfig in ${root} or in any of the ${selected.length} workspaces selected there`,
+      );
+    }
+  }
+  if (opts.filter.length > 0) {
+    throw new Error(
+      `--filter selects workspaces, and no workspace was discovered under ${root}`,
+    );
+  }
+  const single = join(root, "tsconfig.json");
+  if (existsSync(single)) return [single];
+  throw new Error(noProjectMessage(root));
+}
+
+/** True when `config` is a tsconfig in `dir` itself, rather than below it. */
+function ownConfigOf(dir: string, config: string): boolean {
+  return config.startsWith(`${dir}/`) && !config.slice(dir.length + 1).includes("/");
+}
+
+function noProjectMessage(root: string): string {
+  const ancestor = nearestProject(root);
+  return (
+    `${root} holds no tsconfig.json and no manifest declaring workspaces` +
+    (ancestor === undefined
+      ? ` — name one with --config`
+      : ` — the nearest directory above it that does is ${ancestor}`)
+  );
+}
+
+/** The closest ancestor of `from` that is a project root, or `undefined`. */
+function nearestProject(from: string): string | undefined {
+  let dir = dirname(from);
+  for (;;) {
+    if (existsSync(join(dir, "tsconfig.json")) || workspaceGlobs(dir) !== undefined) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
 /**
  * Orchestration only. Every algorithm lives in its own module; this wires
  * extract -> duplication -> rank -> graph -> render and computes the summary
@@ -264,7 +398,34 @@ export async function runReport(
     }),
   ).slice(0, 8);
 
-  const project = await openProject(opts.config, { includeGenerated, bannerScan, exclude });
+  const warn = opts.warn ?? (() => {});
+  const scan = { includeGenerated, bannerScan, exclude };
+  // `dir` is resolved once: it is compared against `project.root`, which is
+  // absolute and POSIX, and a relative one would never match.
+  const dir = opts.dir === undefined ? undefined : toPosix(resolve(opts.dir));
+  const configs =
+    opts.config === undefined
+      ? await discoverConfigs(dir ?? toPosix(resolve(".")), {
+          filter: opts.filter ?? [],
+          workspaces: opts.workspaces !== false,
+          scan,
+          warn,
+        })
+      : opts.config;
+
+  const project = await openProject(configs, {
+    ...scan,
+    ...(dir === undefined ? {} : { root: dir }),
+  });
+  if (dir !== undefined && project.root !== dir) {
+    // The pin was declined: a config reaches above the directory named, so
+    // rooting there would put `../` on paths that cannot carry it. Say which
+    // root won, because it is also where the cache now lives.
+    warn(
+      `${dir} is not the root of what was analyzed — a tsconfig reaches above it, ` +
+        `so paths and .thicket/ are measured from ${project.root}`,
+    );
+  }
   // Opened against the project root rather than the cwd, so the cache belongs
   // to the codebase being analyzed and not to wherever the tool was invoked.
   // `openCache` answers null rather than throwing on anything it cannot use.
@@ -272,7 +433,7 @@ export async function runReport(
     opts.cache === false ? null : openCache(cachePathFor(project.root), configHash);
   try {
     const files = project.files();
-    if (files.length === 0) throw new EmptyProjectError(opts.config);
+    if (files.length === 0) throw new EmptyProjectError(configs);
     let lineCount = 0;
     let totalBytes = 0;
     for (const file of files) {

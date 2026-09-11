@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,9 +31,14 @@ const DEFAULT_DEPTH = 3;
 
 const USAGE = `thicket ${VERSION}
 
-Usage: thicket [options]
+Usage: thicket [dir] [options]
 
-  --config <path>        tsconfig to analyze; repeatable (default ./tsconfig.json)
+  [dir]                  directory to analyze (default "."); its workspaces are
+                         discovered from package.json / pnpm-workspace.yaml
+  --filter <pattern>     analyze only these workspaces, by name or ./path;
+                         repeatable, applied in order, "!" negates
+  --no-workspaces        ignore workspace manifests; analyze <dir>/tsconfig.json
+  --config <path>        tsconfig to analyze; repeatable. Suppresses discovery
   --depth <1..5>         preset: min fragment size and findings per section (default ${DEFAULT_DEPTH})
   --min-nodes <n>        override the depth preset's minimum fragment size, in AST nodes
   --min-lines <n>        override the depth preset's minimum fragment size, in lines
@@ -63,6 +68,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       args: [...argv],
       options: {
         config: { type: "string", multiple: true },
+        filter: { type: "string", multiple: true },
+        workspaces: { type: "boolean", default: true },
         depth: { type: "string" },
         "min-nodes": { type: "string" },
         "min-lines": { type: "string" },
@@ -77,8 +84,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
       },
-      // `cache clear` is the only positional form. Anything else is rejected
-      // below rather than silently ignored.
+      // `cache clear`, `diff a b`, and one directory to analyze. Anything else
+      // is rejected below rather than silently ignored.
       allowPositionals: true,
       allowNegative: true,
     });
@@ -101,27 +108,63 @@ export async function main(argv: readonly string[]): Promise<number> {
     return diffCommand(positionals.slice(1));
   }
 
-  const configs = resolveConfigs(values.config);
+  // Explicit configs are resolved up front so a bad path fails before anything
+  // is loaded; absent, they are discovered under `dir` (see `runReport`).
+  const configs = values.config === undefined ? undefined : resolveConfigs(values.config);
   if (typeof configs === "string") {
     process.stderr.write(configs);
     return 1;
   }
 
-  if (positionals.length > 0) {
-    if (positionals[0] !== "cache" || positionals[1] !== "clear" || positionals.length !== 2) {
+  if (positionals[0] === "cache") {
+    if (positionals[1] !== "clear" || positionals.length !== 2) {
       process.stderr.write(`thicket: unknown command: ${positionals.join(" ")}\n\n${USAGE}`);
       return 1;
     }
-    // The root `runReport` caches under, computed the same way from the same
-    // configs. It can differ if a project reference reaches outside them, in
-    // which case the message names the directory actually cleared rather than
-    // claiming success over one nobody asked about.
-    const root = commonRootDir(configs);
+    // Where `runReport` would have put it: the analyzed directory, or -- when
+    // configs were named instead -- the root derived from them. Derived can
+    // differ from any of them if a project reference reaches outside, so the
+    // message names the directory actually cleared rather than claiming
+    // success over one nobody asked about.
+    const root = configs === undefined ? resolve(".") : commonRootDir(configs);
     const removed = clearCache(root);
     process.stderr.write(
       removed ? `thicket: cleared the cache in ${root}\n` : `thicket: no cache in ${root}\n`,
     );
     return 0;
+  }
+
+  if (positionals.length > 1) {
+    process.stderr.write(`thicket: unknown command: ${positionals.join(" ")}\n\n${USAGE}`);
+    return 1;
+  }
+  // `cache` and `diff` are answered above, so a lone positional is the
+  // directory to analyze -- and a directory genuinely named either of those is
+  // still reachable as `./cache`. Passed on even when --config is given, since
+  // it is also the root paths and the cache are measured from.
+  const dir = positionals[0];
+  if (dir !== undefined && !isDirectory(dir)) {
+    process.stderr.write(`thicket: not a directory: ${resolve(dir)}\n`);
+    return 1;
+  }
+  // `--config` alone keeps its own root -- the ancestor of the configs opened
+  // -- rather than being pinned to the working directory. Someone who names a
+  // tsconfig in another tree means that tree, and pinning here would move its
+  // cache to wherever the command was typed and rename every path in the
+  // report. A directory named explicitly is a pin either way.
+  const analyzedDir =
+    dir !== undefined ? resolve(dir) : configs === undefined ? resolve(".") : undefined;
+
+  const filter = values.filter ?? [];
+  if (filter.length > 0 && configs !== undefined) {
+    process.stderr.write(
+      `thicket: --filter selects workspaces and --config names configs; pass one or the other\n`,
+    );
+    return 1;
+  }
+  if (filter.length > 0 && values.workspaces === false) {
+    process.stderr.write(`thicket: --filter selects workspaces, which --no-workspaces turns off\n`);
+    return 1;
   }
 
   let depth: number;
@@ -170,7 +213,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   let json: unknown;
   try {
     ({ markdown, json } = await runReport({
-      config: configs,
+      ...(configs === undefined ? {} : { config: configs }),
+      ...(analyzedDir === undefined ? {} : { dir: analyzedDir }),
+      filter,
+      workspaces: values.workspaces ?? true,
+      warn: (message) => process.stderr.write(`thicket: ${message}\n`),
       minNodes,
       minLines,
       maxFindings: preset.maxFindings,
@@ -197,9 +244,17 @@ export async function main(argv: readonly string[]): Promise<number> {
   return 0;
 }
 
+/** True for a path that exists and is a directory. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(resolve(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** The resolved config paths, or the error message to print. */
-function resolveConfigs(raw: readonly string[] | undefined): string[] | string {
-  const given = raw ?? ["./tsconfig.json"];
+function resolveConfigs(given: readonly string[]): string[] | string {
   // `resolve("")` is the cwd, which exists, so an empty --config would slip
   // past the existence check and analyze a directory as if it were a config.
   if (given.some((c) => c.trim() === "")) {
