@@ -355,6 +355,11 @@ interface DirConfigs {
  * beside the configs is not a project, and opening one as a project analyzes
  * a file set nobody asked for.
  *
+ * KNOWN GAP, recorded so it is not mistaken for a guard that holds: the
+ * `isFile()` test is unpinned. A DIRECTORY named `tsconfig.x.json` would be
+ * offered as a config and fail at the loader instead of here. Pinning it
+ * costs a fixture directory whose name is a lie, for a shape nobody has.
+ *
  * `tsconfig.json` is the primary when it exists, and otherwise the first name
  * in `compareStrings` order -- a rule, rather than a preference, because a
  * directory holding only `tsconfig.app.json` and `tsconfig.node.json` has to
@@ -436,6 +441,29 @@ function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
 }
 
 /**
+ * The two workspace lists `configsFor` needs, which are the same type and mean
+ * different things.
+ *
+ * Named rather than positional, and both required, because every way of
+ * confusing them was silent: two `Workspace[]` arguments let a caller omit
+ * `discovered` (reproducing the bug it exists to fix, since the lists are then
+ * equal by construction) or pass them the wrong way round (analyzing every
+ * workspace the filter excluded). Both answers looked plausible and neither
+ * threw. An optional `discovered` would re-open the first of those, and the
+ * only caller knows both lists, so it is required.
+ */
+export interface WorkspaceSelection {
+  /** The workspaces to analyze. What `--filter` narrowed the run to. */
+  selected: readonly Workspace[];
+  /**
+   * Every workspace the repository has, `selected` included. Read for
+   * ATTRIBUTION only -- never for selection, so a workspace named here and
+   * not in `selected` contributes no config by any route.
+   */
+  discovered: readonly Workspace[];
+}
+
+/**
  * The tsconfigs to analyze for `root` and `workspaces`, repo-relative, sorted.
  *
  * The root counts as a workspace. Its own tsconfig routinely covers files
@@ -449,6 +477,12 @@ function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
  * names a proper subset of the same main config and adds nothing. Taking
  * every sibling would load the second, which costs a whole extra program for
  * files already in the answer.
+ *
+ * The test is "does this config cover a file that is missing", not "is this
+ * config the best way to cover it": two siblings that both reach the same
+ * gapped file are BOTH kept. Nothing here can rank them -- each genuinely
+ * closes the gap -- and loading one config too many costs a program load,
+ * while picking the wrong one of the two would cost coverage.
  *
  * Decided by LOADING rather than by reading `include`/`exclude`.
  * Reimplementing tsconfig glob semantics, `extends` chains included, is a
@@ -477,21 +511,24 @@ function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
  * these names may answer "does this config contribute files" and nothing else
  * -- never the coverage numerator, never a prediction of the analyzed set.
  *
- * `discovered` is every workspace the repository HAS, and it is read for
- * attribution and nothing else. It matters only when `workspaces` is a subset
- * -- that is, under `--filter`. Without it, a file inside an unselected
+ * The two workspace lists arrive NAMED, in one object, and both are
+ * required. They are the same type and they are not interchangeable:
+ * `selected` decides what gets analyzed, `discovered` is read for attribution
+ * and nothing else. As two positional arrays, each way of getting them wrong
+ * was silent and produced a plausible answer -- omitting `discovered`
+ * reproduced the exact bug it was added to fix, and swapping the two analyzed
+ * every workspace the filter excluded. Neither is expressible now: there is
+ * no order to get wrong, and leaving one out is a type error.
+ *
+ * What `discovered` buys, and it matters only when `selected` is a subset of
+ * it -- that is, under `--filter`: without it, a file inside an unselected
  * workspace is contained by no scope, falls through to the root, and a root
- * sibling whose `include` spans the repo is then adopted to close it: the
+ * sibling whose `include` spans the repo is then adopted to close it. The
  * filtered run analyzes the workspace it was told to leave out, and because
  * every number here is computed over the file set -- propagation cost,
  * duplicated coverage, cycles, clusters -- that does not merely add findings,
  * it changes the SELECTED workspace's own. One ordinary
  * `tsconfig.eslint.json` at the root is enough to trigger it.
- *
- * It defaults to `workspaces`, which is exactly right for an unfiltered run
- * (where the two lists are equal) and is the pre-filter behaviour otherwise.
- * That default is a convenience for callers that genuinely have one list; a
- * caller that filtered and does not pass the full list gets the failure above.
  *
  * ONE GAP LEFT, deliberately: a sibling that is itself a solution config
  * (`{"files": [], "references": [...]}`) owns no files of its own, so the
@@ -506,15 +543,21 @@ function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
  */
 export async function configsFor(
   root: string,
-  workspaces: readonly Workspace[],
+  workspaces: WorkspaceSelection,
   opts: ScanOptions = {},
-  discovered: readonly Workspace[] = workspaces,
 ): Promise<string[]> {
+  // The order of what follows, before any of the reasons for it: take each
+  // directory's primary config; probe them all at once to learn what they
+  // cover; subtract that from the files on disk to get the gap; attribute
+  // each gapped file to the workspace that owns it; offer the siblings of
+  // the workspaces left with a gap; probe those; keep the ones that closed
+  // something.
+  const { selected, discovered } = workspaces;
   // Sorted and deduped: a caller may pass the root itself, or the same
   // workspace twice (two globs matching one directory), and neither may
   // change the answer -- the second is the phantom-identical-clone hazard
   // from AGENTS.md §3 reached by a different road.
-  const scopes = [...new Set([".", ...workspaces.map((w) => w.dir)])].sort(compareStrings);
+  const scopes = [...new Set([".", ...selected.map((w) => w.dir)])].sort(compareStrings);
   // Attribution runs over every workspace that EXISTS, selection over the ones
   // asked for. A workspace left out of the run still owns its files, and
   // saying so is what keeps them out of everyone else's gap. Nothing else
@@ -539,9 +582,9 @@ export async function configsFor(
   // problem to report, not an exception from config selection.
   if (primaries.length === 0) return [];
 
-  const first = await sourceFileNames(primaries.map((c) => resolve(root, c)));
-  const rebaseFirst = rebaseOnto(root, first.root);
-  const covered = new Set(first.names.map(rebaseFirst));
+  const primaryProbe = await sourceFileNames(primaries.map((c) => resolve(root, c)));
+  const rebasePrimary = rebaseOnto(root, primaryProbe.root);
+  const covered = new Set(primaryProbe.names.map(rebasePrimary));
 
   const gapOf = new Map<string, Set<string>>();
   for (const file of scanSourceFiles(root, opts)) {
@@ -569,10 +612,10 @@ export async function configsFor(
   // candidates' common ancestor, while the gap sets it is compared against
   // were measured from the first probe's. Both are rebased, so this is belt
   // and braces, and it keeps one prefix in play rather than two.
-  const second = await sourceFileNames(
+  const candidateProbe = await sourceFileNames(
     [...primaries, ...candidates.map((c) => c.config)].map((c) => resolve(root, c)),
   );
-  const rebaseSecond = rebaseOnto(root, second.root);
+  const rebaseCandidate = rebaseOnto(root, candidateProbe.root);
   const kept = candidates.filter(({ config, scope }) => {
     const gap = gapOf.get(scope);
     // `byConfig`, not the union: with two siblings beside one workspace the
@@ -586,8 +629,8 @@ export async function configsFor(
     // which is the safe direction. Fixing it means rolling a referenced
     // config's files up into the entry for the config that pulled it in,
     // inside `expandReferences`; do it there, not by unioning here.
-    const own = second.byConfig.get(resolve(root, config).toLowerCase()) ?? [];
-    return gap !== undefined && own.some((name) => gap.has(rebaseSecond(name)));
+    const own = candidateProbe.byConfig.get(resolve(root, config).toLowerCase()) ?? [];
+    return gap !== undefined && own.some((name) => gap.has(rebaseCandidate(name)));
   });
 
   return [...new Set([...primaries, ...kept.map((k) => k.config)])].sort(compareStrings);

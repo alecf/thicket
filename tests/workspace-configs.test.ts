@@ -22,6 +22,14 @@ vi.mock("../src/extract/ts-adapter.js", async (importOriginal) => {
   return { ...actual, sourceFileNames: vi.fn(actual.sourceFileNames) };
 });
 
+/** Every workspace in the main fixture, as discovery reports them. */
+const FIXTURE_WORKSPACES = [
+  { dir: "deep/a/b/gamma", name: "@fix/gamma" },
+  { dir: "libs/beta", name: "beta" },
+  { dir: "tools/alpha", name: "@fix/alpha" },
+  { dir: "tools/cfgonly", name: "@fix/cfgonly" },
+];
+
 /** Every workspace in the nested fixture, as discovery would report them. */
 const NESTED_WORKSPACES = [
   { dir: "tools/Zed", name: "@nest/zed" },
@@ -37,12 +45,10 @@ beforeEach(() => {
 
 describe("configsFor", () => {
   it("adds a sibling tsconfig only when it contributes files", async () => {
-    const chosen = await configsFor(workspacesRoot(), [
-      { dir: "deep/a/b/gamma", name: "@fix/gamma" },
-      { dir: "libs/beta", name: "beta" },
-      { dir: "tools/alpha", name: "@fix/alpha" },
-      { dir: "tools/cfgonly", name: "@fix/cfgonly" },
-    ]);
+    const chosen = await configsFor(workspacesRoot(), {
+      selected: FIXTURE_WORKSPACES,
+      discovered: FIXTURE_WORKSPACES,
+    });
     expect(chosen).toEqual([
       "deep/a/b/gamma/tsconfig.json",
       "libs/beta/tsconfig.json",
@@ -63,12 +69,10 @@ describe("configsFor", () => {
   });
 
   it("uses two probes for the whole repository, not one per workspace", async () => {
-    await configsFor(workspacesRoot(), [
-      { dir: "deep/a/b/gamma" },
-      { dir: "libs/beta" },
-      { dir: "tools/alpha" },
-      { dir: "tools/cfgonly" },
-    ]);
+    await configsFor(workspacesRoot(), {
+      selected: FIXTURE_WORKSPACES,
+      discovered: FIXTURE_WORKSPACES,
+    });
     // One over every primary config, one over the candidate siblings that
     // survived the gap check. Five workspaces including the root.
     expect(probeCalls()).toBe(2);
@@ -79,7 +83,10 @@ describe("configsFor", () => {
     // for a second probe to answer. The second probe is conditional, not
     // unconditional -- a fixed pair pays for a `tsgo` spawn nobody asked for
     // on the common case, where every workspace has exactly one config.
-    await configsFor(workspacesRoot(), [{ dir: "libs/beta", name: "beta" }]);
+    await configsFor(workspacesRoot(), {
+      selected: [{ dir: "libs/beta", name: "beta" }],
+      discovered: FIXTURE_WORKSPACES,
+    });
     expect(probeCalls()).toBe(1);
   });
 
@@ -87,9 +94,10 @@ describe("configsFor", () => {
     // A workspace can exist to publish shared compiler settings and own no
     // source: `tools/cfgonly` has `base.json` and a `.d.ts` and nothing else.
     // It must contribute nothing rather than throw or invent a config.
-    const chosen = await configsFor(workspacesRoot(), [
-      { dir: "tools/cfgonly", name: "@fix/cfgonly" },
-    ]);
+    const chosen = await configsFor(workspacesRoot(), {
+      selected: [{ dir: "tools/cfgonly", name: "@fix/cfgonly" }],
+      discovered: FIXTURE_WORKSPACES,
+    });
     // The exact list, so `base.json` sitting exactly where configs are looked
     // for fails here: the pattern is `tsconfig*.json`, never `*.json`, and a
     // `base.json` opened as a project analyzes a file set nobody asked for.
@@ -102,9 +110,10 @@ describe("configsFor", () => {
     // workspace's files read as the ROOT's gap, and `tsconfig.build.json`,
     // whose `include` reaches into `tools/**`, looks like the config that
     // closes it.
-    const chosen = await configsFor(solutionWorkspacesRoot(), [
-      { dir: "tools/alpha", name: "@sol/alpha" },
-    ]);
+    const chosen = await configsFor(solutionWorkspacesRoot(), {
+      selected: [{ dir: "tools/alpha", name: "@sol/alpha" }],
+      discovered: [{ dir: "tools/alpha", name: "@sol/alpha" }],
+    });
     expect(chosen).toEqual(["tools/alpha/tsconfig.json", "tsconfig.json"]);
     // Named separately because the two mis-scopes this fixture catches both
     // end here: `tools/alpha/scripts/build.ts` is alpha's gap, and alpha has
@@ -121,7 +130,10 @@ describe("configsFor", () => {
     // distinct. The hazard lives one layer lower, where the adapter expands
     // the root's `references: [{path: "tools/alpha"}]` and meets
     // `tools/alpha/tsconfig.json`, already on the list.
-    const chosen = await configsFor(solutionWorkspacesRoot(), [{ dir: "tools/alpha" }]);
+    const chosen = await configsFor(solutionWorkspacesRoot(), {
+      selected: [{ dir: "tools/alpha" }],
+      discovered: [{ dir: "tools/alpha" }],
+    });
     const project = await openProject(chosen.map((c) => resolve(solutionWorkspacesRoot(), c)));
     try {
       const paths = project.files().map((f) => f.path);
@@ -133,40 +145,76 @@ describe("configsFor", () => {
   });
 
   it("gives a gapped file to the deepest workspace that contains it", async () => {
-    const chosen = await configsFor(nestedWorkspacesRoot(), NESTED_WORKSPACES);
+    const chosen = await configsFor(nestedWorkspacesRoot(), {
+      selected: NESTED_WORKSPACES,
+      discovered: NESTED_WORKSPACES,
+    });
     expect(chosen).toEqual([
       // First, and only under code-unit order: `Z` < `a`, while `localeCompare`
       // folds case and puts `tools/alpha` ahead of it. This is the one datum
       // here that tells the two comparators apart (AGENTS.md §1).
       "tools/Zed/tsconfig.json",
-      // `sub/scripts/gen.ts` is `tools/alpha/sub`'s gap and this is the config
-      // that covers it.
+      // `sub/scripts/gen.ts` is `tools/alpha/sub`'s gap, and THIS is the
+      // config that closes it -- not the parent's `tsconfig.build.json`,
+      // which covers that file too. Blame the parent for its child's
+      // uncovered file and this entry is what disappears.
       "tools/alpha/sub/tsconfig.extra.json",
       "tools/alpha/sub/tsconfig.json",
+      // Chosen for `sub-x/gen.ts`, which is the parent's own -- see the
+      // trailing-separator test below.
+      "tools/alpha/tsconfig.build.json",
       "tools/alpha/tsconfig.json",
     ]);
-    // Blame the parent for its child's uncovered file and the parent goes
-    // looking for a sibling of its own -- and finds one whose `include`
-    // reaches into `sub/`.
-    expect(chosen).not.toContain("tools/alpha/tsconfig.build.json");
   });
 
-  it("never probes a sibling of a workspace that is missing nothing", async () => {
-    // `tools/alpha` has a sibling whose `include` reaches into `sub/`, and no
-    // gap of its own. Probing it anyway would be a whole extra program load
-    // to ask a question whose answer cannot change the result -- and the
-    // second probe's input is the only place that decision is visible, since
-    // the sibling is rejected by the keep-check either way.
-    await configsFor(nestedWorkspacesRoot(), NESTED_WORKSPACES);
+  it("does not let a workspace's name prefix-match a plain sibling directory", async () => {
+    // `tools/alpha/sub-x` is a plain directory, and its name starts with the
+    // workspace directory `tools/alpha/sub`. Test containment with
+    // `startsWith(dir)` and `sub-x/gen.ts` is handed to `tools/alpha/sub`,
+    // whose gap it is not: `tools/alpha` is then missing nothing, its sibling
+    // is never offered, and the file is analyzed by nothing at all.
+    //
+    // The `dir.length > best.length` tiebreak hides the obvious version of
+    // this -- `tools/alpha` beside `tools/alpha2` is safe because the longer
+    // scope wins anyway -- so it takes a NESTED workspace beside a plain
+    // directory to reach. `lib` beside `lib-legacy` inside a parent workspace
+    // is the same shape.
+    const chosen = await configsFor(nestedWorkspacesRoot(), {
+      selected: NESTED_WORKSPACES,
+      discovered: NESTED_WORKSPACES,
+    });
+    expect(chosen).toContain("tools/alpha/tsconfig.build.json");
+
+    // And the file reaches the program, which is the claim that matters. The
+    // path is `alpha/sub-x/gen.ts` rather than `tools/alpha/...` for the same
+    // reason this fixture exists: with no root tsconfig, `openProject` roots
+    // at the common ancestor of the configs it was handed, which is `tools`.
+    const project = await openProject(chosen.map((c) => resolve(nestedWorkspacesRoot(), c)));
+    try {
+      expect(project.files().map((f) => f.path)).toContain("alpha/sub-x/gen.ts");
+    } finally {
+      await project.close();
+    }
+  });
+
+  it("never probes a sibling of a scope that is missing nothing", async () => {
+    // The root of the filter fixture owns `scripts/` and covers it, so it is
+    // missing nothing -- while carrying `tsconfig.all.json`, a sibling that
+    // would cover half the repository. Probing it anyway is a whole extra
+    // program load to ask a question whose answer cannot change the result,
+    // and the second probe's INPUT is the only place that decision shows:
+    // the config is refused by the keep-check either way.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    await configsFor(filterWorkspacesRoot(), { selected: all, discovered: all });
     expect(probeCalls()).toBe(2);
     const second = vi.mocked(sourceFileNames).mock.calls[1]![0];
-    expect([...second].map((c) => relative(nestedWorkspacesRoot(), c))).toEqual([
-      // Every primary, sorted, then the candidates -- and `tools/alpha`'s
-      // sibling is not among them.
-      join("tools", "Zed", "tsconfig.json"),
-      join("tools", "alpha", "sub", "tsconfig.json"),
-      join("tools", "alpha", "tsconfig.json"),
-      join("tools", "alpha", "sub", "tsconfig.extra.json"),
+    expect([...second].map((c) => relative(filterWorkspacesRoot(), c))).toEqual([
+      // Every primary, sorted, then the candidates -- and the root's sibling
+      // is not among them.
+      join("pkg", "alpha", "tsconfig.json"),
+      join("pkg", "beta", "tsconfig.json"),
+      "tsconfig.json",
+      join("pkg", "beta", "tsconfig.extra.json"),
     ]);
   });
 
@@ -199,7 +247,7 @@ describe("configsFor", () => {
     const selected = selectWorkspaces(all, ["@nest/sub"]);
     expect(selected).toEqual([{ dir: "tools/alpha/sub", name: "@nest/sub" }]);
 
-    const chosen = await configsFor(nestedWorkspacesRoot(), selected);
+    const chosen = await configsFor(nestedWorkspacesRoot(), { selected, discovered: all });
     expect(chosen).toEqual([
       "tools/alpha/sub/tsconfig.extra.json",
       "tools/alpha/sub/tsconfig.json",
@@ -215,7 +263,7 @@ describe("configsFor", () => {
     const selected = selectWorkspaces(all, ["@filt/alpha"]);
     expect(selected).toEqual([{ dir: "pkg/alpha", name: "@filt/alpha" }]);
 
-    const chosen = await configsFor(filterWorkspacesRoot(), selected, {}, all);
+    const chosen = await configsFor(filterWorkspacesRoot(), { selected, discovered: all });
     expect(chosen).toEqual(["pkg/alpha/tsconfig.json", "tsconfig.json"]);
     // Both halves of "attribution only", and they fail to different
     // mutations: the root must not adopt a repo-spanning sibling to cover
@@ -256,7 +304,10 @@ describe("configsFor", () => {
     const withoutBeta = all.filter((w) => w.dir !== "pkg/beta");
     expect(withoutBeta.map((w) => w.dir)).toEqual(["pkg/alpha"]);
 
-    const chosen = await configsFor(filterWorkspacesRoot(), selected, {}, withoutBeta);
+    const chosen = await configsFor(filterWorkspacesRoot(), {
+      selected,
+      discovered: withoutBeta,
+    });
     expect(chosen).toEqual([
       // Beta's gap stays beta's: its own sibling closes it...
       "pkg/beta/tsconfig.extra.json",
@@ -276,28 +327,13 @@ describe("configsFor", () => {
     // while the root's repo-spanning sibling stays out, because the root's
     // own gap is empty either way.
     const all = discoverWorkspaces(filterWorkspacesRoot());
-    const chosen = await configsFor(filterWorkspacesRoot(), all, {}, all);
+    const chosen = await configsFor(filterWorkspacesRoot(), { selected: all, discovered: all });
     expect(chosen).toEqual([
       "pkg/alpha/tsconfig.json",
       "pkg/beta/tsconfig.extra.json",
       "pkg/beta/tsconfig.json",
       "tsconfig.json",
     ]);
-  });
-
-  it("attributes to the selected workspaces alone when told nothing more", async () => {
-    // The documented default: `discovered` defaults to `workspaces`, so an
-    // unfiltered caller -- where the two lists are equal anyway -- needs to
-    // know nothing about it. Pinned because the default is what every caller
-    // that does not filter will use, and because omitting it on a FILTERED
-    // run is the behaviour the parameter exists to replace: beta's files fall
-    // through to the root, and the repo-spanning sibling is adopted.
-    const all = discoverWorkspaces(filterWorkspacesRoot());
-    expect(await configsFor(filterWorkspacesRoot(), all)).toEqual(
-      await configsFor(filterWorkspacesRoot(), all, {}, all),
-    );
-    const filtered = selectWorkspaces(all, ["@filt/alpha"]);
-    expect(await configsFor(filterWorkspacesRoot(), filtered)).toContain("tsconfig.all.json");
   });
 
   it("refuses a probe root above the repository root", async () => {
@@ -333,7 +369,10 @@ describe("configsFor", () => {
       );
       await writeFile(join(dir, "outside/src/x.ts"), "export const x = 1;\n");
 
-      await expect(configsFor(join(dir, "repo"), [{ dir: "pkg" }])).rejects.toThrow(
+      const pkg = [{ dir: "pkg" }];
+      await expect(
+        configsFor(join(dir, "repo"), { selected: pkg, discovered: pkg }),
+      ).rejects.toThrow(
         /outside|above/i,
       );
     } finally {

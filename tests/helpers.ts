@@ -336,10 +336,15 @@ export function withRoot(files: Record<string, string>, body: (root: string) => 
  * Two properties no other fixture has, and each is invisible without the
  * other:
  *
- * - `tools/alpha/tsconfig.build.json` reaches into `sub/`. `sub/scripts/gen.ts`
- *   is the nested workspace's gap, so the parent must never go looking for a
- *   sibling to close it. Attribute a gapped file to the shallowest workspace
- *   containing it and this config is adopted.
+ * - `tools/alpha/tsconfig.build.json` reaches into `sub/` AND into `sub-x/`,
+ *   and covers one uncovered file in each. `sub/scripts/gen.ts` belongs to the
+ *   nested workspace, so this config must never be what closes it --
+ *   attribute a gapped file to the shallowest workspace containing it and it
+ *   is. `sub-x/gen.ts` belongs to `tools/alpha`, because `sub-x` is a plain
+ *   directory whose name merely starts with `sub` -- test containment without
+ *   a trailing separator and that file is handed to the nested workspace, the
+ *   parent is left missing nothing, and the file is analyzed by nothing. One
+ *   config, two attributions, failing in opposite directions.
  * - There is NO root `tsconfig.json`, which is what puts the probe's root
  *   below the repo root: the common ancestor of the primaries is `tools`, so
  *   every name the probe returns is measured from there -- and from
