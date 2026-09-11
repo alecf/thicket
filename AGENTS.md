@@ -27,6 +27,7 @@ prototypes/      research scripts (NOT the implementation — see prototypes/REA
 ```bash
 bun install
 bun run thicket --config <tsconfig>   # runs src/cli.ts live; no build step
+bun install --frozen-lockfile --os='*' --cpu='*'   # every platform's tsgo
 bun run build          # compile a binary for THIS platform into dist-bin/
 bun run build:all      # ...and for all four; one host builds the whole matrix
 bun run build:npm      # stage the npm packages (needs build:all first)
@@ -176,8 +177,14 @@ and it cannot be engineered away from this side.
   breaks, along with the determinism job, which runs from source deliberately.
 - **The tsgo version joins the config hash.** A different compiler parses and
   resolves differently, and the cache is keyed on that hash — see §5.
-- Each platform's tsgo is a plain registry tarball, so one host cross-builds the
-  whole matrix in seconds. Nothing here needs a macOS or arm runner.
+- **Let Bun fetch tsgo; do not hand-roll it.** Every platform's compiler is an
+  optional dependency of `typescript`, and `bun install --os='*' --cpu='*'`
+  installs all of them, verified against the sha512 in `bun.lock`. The build
+  copies them out of `node_modules`. A previous version downloaded them from the
+  registry itself, which meant a second cache and a second integrity check to
+  keep correct -- and reviewers found real bugs in both (a fail-open digest
+  check, and a half-extracted cache trusted forever). One host still cross-builds
+  the whole matrix in seconds; no macOS or arm runner is needed to BUILD.
 
 ## Working style
 

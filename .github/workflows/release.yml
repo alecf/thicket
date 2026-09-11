@@ -18,11 +18,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Hoisted to the job: a step's own `env:` block is not visible to that
-    # step's `if:`, so gating on the secret has to read it from here.
     env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+      # PRESENCE, not the secrets themselves. A step's own `env:` is not visible
+      # to its `if:`, so the gate has to read something job-level -- but hoisting
+      # the tokens put both publishing credentials in the environment of every
+      # step, including `bun install` (which runs lifecycle scripts) and the test
+      # run. Any dependency executing from this tag could have read them. These
+      # booleans gate the same steps and carry nothing worth stealing; the
+      # tokens appear only in the one step that publishes.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+      HAS_TAP_TOKEN: ${{ secrets.TAP_TOKEN != '' }}
       # workflow_dispatch CAN be run against a tag, in which case every publish
       # guard below would otherwise fire while the UI said "without publishing
       # anything". `inputs` is null on a tag push, so this is false there.
@@ -47,7 +52,9 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - run: bun install --frozen-lockfile
+      # Every platform's tsgo, each verified against bun.lock by Bun itself.
+      # --frozen-lockfile is what makes the shipped payload checkable against git.
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
 
       - name: The tag must match the version being released
         # A tag that disagrees with package.json ships a formula whose URLs
@@ -102,38 +109,54 @@ jobs:
       # a fork, or this repo before the npm name lands, should build and verify
       # everything above and then stop cleanly instead of failing red.
       - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != '' && env.DRY_RUN != 'true'
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_NPM_TOKEN == 'true' && env.DRY_RUN != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
 
-          # Preflight BEFORE anything is published. The unscoped `thicket` name
-          # is currently held by an unrelated package, so publishing the four
-          # platform packages first and discovering that on the last command
-          # would leave them orphaned on the registry -- pointing at a thin
-          # package that does not exist, at a version that can never be
-          # republished. Better to publish nothing.
-          name=$(node -p "require('./dist-npm/thicket/package.json').name")
           me=$(npm whoami)
-          if npm view "$name" version > /dev/null 2>&1; then
-            if ! npm owner ls "$name" 2>/dev/null | grep -qE "^$me <"; then
-              echo "::warning::npm package '$name' exists and is not owned by $me."
-              echo "::warning::Skipping ALL npm publishing; the GitHub release and tap are unaffected."
-              exit 0
+          version=$(node -p "require('./package.json').version")
+
+          # Preflight EVERY name before publishing any of them. The unscoped
+          # `thicket` is held by an unrelated package today, and a platform
+          # package could be taken too -- publishing four and failing on the
+          # fifth would strand them on the registry at a version that can never
+          # be republished, pointing at a thin package that does not exist.
+          for dir in dist-npm/*/; do
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name" version > /dev/null 2>&1; then
+              if ! npm owner ls "$name" 2>/dev/null | grep -qE "^$me <"; then
+                echo "::warning::npm package '$name' exists and is not owned by $me."
+                echo "::warning::Skipping ALL npm publishing; the GitHub release and tap are unaffected."
+                exit 0
+              fi
             fi
-          fi
+          done
 
           # Platform packages first: the thin package's optionalDependencies
           # name versions that must already resolve when someone installs it.
-          for dir in dist-npm/thicket-*; do
+          publish() {
+            local dir=$1
+            local name
+            name=$(node -p "require('./$dir/package.json').name")
+            # Idempotent, so a run that failed halfway can be retried rather
+            # than needing a version bump to get unstuck.
+            if npm view "$name@$version" version > /dev/null 2>&1; then
+              echo "$name@$version is already published; skipping."
+              return
+            fi
             (cd "$dir" && npm publish --access public)
-          done
-          (cd dist-npm/thicket && npm publish --access public)
+          }
+          for dir in dist-npm/thicket-*; do publish "$dir"; done
+          publish dist-npm/thicket
 
       - name: Push the formula to the Homebrew tap
-        if: startsWith(github.ref, 'refs/tags/v') && env.TAP_TOKEN != '' && env.DRY_RUN != 'true'
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_TAP_TOKEN == 'true' && env.DRY_RUN != 'true'
         env:
+          # The token lives HERE and nowhere else, so no other step in this job
+          # -- notably `bun install` and the test run -- has it in scope.
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
           # A shared personal tap, not a per-tool one: a tap holds any number
           # of formulae, and renaming later forces every user to re-tap. Only
           # Formula/thicket.rb is written and staged below, by name, so a

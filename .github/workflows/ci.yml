@@ -63,7 +63,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4"
-      - run: bun install --frozen-lockfile
+      # `--os/--cpu '*'` installs every platform's tsgo as an optional dependency
+      # of `typescript`, each verified against bun.lock by Bun. The build copies
+      # them out of node_modules rather than fetching anything itself.
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
 
       - name: Render the reference report from source
         run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
@@ -168,6 +171,66 @@ jobs:
           echo "$out" | grep -q "npm install typescript@" \
             || { echo "::error::failed without saying what to install"; echo "$out"; exit 1; }
           echo "Refused correctly: exit $code"
+
+      # Handed to the smoke matrix below, which runs each of these on a machine
+      # that can actually execute it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: |
+            dist-bin/*.tar.gz
+            from-source.md
+          retention-days: 1
+
+  # Cross-compiling four binaries proves they LINK, not that they run. A
+  # target-specific tsgo packaging fault would ship three artifacts nobody had
+  # ever executed -- which is the exact failure this whole branch exists to
+  # stop, one level up. Every target is therefore run on a machine of its own
+  # kind, against the report the ubuntu job rendered from source: identical
+  # bytes across four platforms is also the determinism thicket promises.
+  smoke:
+    needs: package
+    name: run the ${{ matrix.target }} artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-latest
+          - target: darwin-x64
+            runs-on: macos-13
+          - target: linux-x64
+            runs-on: ubuntu-latest
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: artifacts
+
+      - name: Install it the way Homebrew does, far from any node_modules
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
+          tar -xzf "thicket-$version-${{ matrix.target }}.tar.gz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+
+      - name: It must run, and agree byte for byte with the source run
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-binary.md
+          diff -u from-source.md from-binary.md \
+            || { echo "::error::${{ matrix.target }} disagrees with the source run"; exit 1; }
+          echo "${{ matrix.target }}: byte-identical."
 
   # thicket's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide

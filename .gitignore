@@ -9,7 +9,6 @@ node_modules/
 .DS_Store
 site/dist/
 
-# compiled binaries and their per-platform tsgo payloads
+# compiled binaries and the npm packages staged from them
 dist-bin/
-.build-cache/
 dist-npm/
