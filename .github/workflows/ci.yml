@@ -68,8 +68,12 @@ jobs:
       - name: Render the reference report from source
         run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
 
-      - name: Build the host artifact
-        run: bun run build
+      - name: Build every target
+        # Not just the host: the formula names all four tarballs and their
+        # sha256s, so generating it below needs all four to exist. Cross-
+        # compiling here also keeps the other three targets from rotting
+        # unnoticed between releases.
+        run: bun run build:all
 
       - name: Install it the way Homebrew does, far from any node_modules
         run: |
