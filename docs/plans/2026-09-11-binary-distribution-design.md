@@ -108,7 +108,7 @@ from a Mac.
 | linux-x64 | 83.2 MB | 46.5 MB |
 | linux-arm64 | 83.2 MB | 45.6 MB |
 
-**Homebrew** — a custom tap (`alecf/homebrew-thicket`); homebrew-core will not
+**Homebrew** — a shared personal tap (`alecf/homebrew-tap`); homebrew-core will not
 take an unknown 0.1.0. The formula is *generated* from `dist-bin/checksums.txt`
 rather than kept as a template with holes: it must name four URLs and four
 sha256s matching bytes the build just produced, and a template is the restated

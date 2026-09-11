@@ -13,7 +13,7 @@ thicket never judges, never edits, never opens PRs. It produces **ranked candida
 ## Install
 
 ```bash
-brew install alecf/thicket/thicket
+brew install alecf/tap/thicket
 ```
 
 Or download a tarball from [Releases](https://github.com/alecf/thicket/releases), extract it, and put the `thicket` binary on your `PATH` — a symlink is fine, it finds its own files through it. Prebuilt for macOS and Linux on arm64 and x64.
