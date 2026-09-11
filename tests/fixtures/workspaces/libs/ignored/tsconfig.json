@@ -1,0 +1,8 @@
+{
+  // `libs/ignored` owns source and a working config, so it would be analyzed
+  // like any other workspace. Honouring the `!libs/ignored` negation in the
+  // root manifest is the ONLY thing that keeps it out -- without this config,
+  // deleting negation handling entirely would change no end-to-end result.
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
+  "include": ["src/**/*.ts"]
+}

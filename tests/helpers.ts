@@ -211,16 +211,26 @@ export function tangleConfig(): string {
 }
 
 /**
- * A workspace root whose own tsconfig covers only `scripts/`, beside three
+ * A workspace root whose own tsconfig covers only `scripts/`, beside four
  * workspaces and one excluded by a negation glob. Directory names are
  * deliberately `tools/` and `libs/`: any hardcoded `apps`/`packages` name
- * fails here instead of passing by luck. `tools/alpha` carries a sibling
- * `tsconfig.test.json` covering the one file its main config excludes, and a
- * `tsconfig.build.json` that covers a proper subset of files the main config
- * already has -- so "add every sibling" and "add the siblings that contribute
- * files" are distinguishable. `tools/cfgonly` is a workspace that publishes
- * shared config and owns no tsconfig and no source; it must yield zero configs
- * rather than throwing, and its lone `.d.ts` keeps it out of the denominator.
+ * fails here instead of passing by luck.
+ *
+ * Each member is a trap for one way workspace discovery goes wrong:
+ * - `tools/alpha` carries two siblings, and they must be told apart by the
+ *   files they add: `tsconfig.test.json` adds the one file the main config
+ *   excludes, `tsconfig.build.json` names a proper subset and adds nothing.
+ * - `tools/cfgonly` publishes shared config and owns no tsconfig and no
+ *   source; it must yield zero configs rather than throwing, and its lone
+ *   `.d.ts` keeps it out of the denominator. Its `base.json` is a non-tsconfig
+ *   JSON file sitting where configs are looked for -- glob `*.json` instead of
+ *   `tsconfig*.json` and it gets loaded as a project.
+ * - `libs/ignored` has a working config and source, so the negation glob is
+ *   the only thing keeping it out of the analyzed set.
+ * - `deep/a/b/gamma` is reachable only through a `**` glob, two levels below
+ *   where every other workspace sits, so one-level expansion misses it.
+ * - `tools/alpha/node_modules/dep` is a package the walk must not treat as a
+ *   workspace.
  */
 export function workspacesRoot(): string {
   return resolve(here, "fixtures/workspaces");
