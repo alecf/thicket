@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { globsFromPnpmText, workspaceGlobs } from "../src/extract/workspaces.js";
+import { globsFromPnpmText, workspaceGlobs } from "../src/extract/manifest.js";
 import { pnpmWorkspacesRoot, withRoot, workspacesRoot } from "./helpers.js";
 
 describe("workspaceGlobs", () => {
