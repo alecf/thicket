@@ -781,11 +781,24 @@ it("scopes the root's own coverage check to files in no workspace", async () => 
 });
 
 // The root config may `reference` a workspace that discovery also selects.
-// Loading the same config twice is a wasted program load, and AGENTS.md §3
-// hazard 3 is that a file in N projects gets visited N times.
-it("names each config once even when the root references a workspace", async () => {
+// AGENTS.md §3 hazard 3 is that a file in N tsconfig projects gets visited N
+// times, which surfaces as phantom identical clones.
+//
+// Assert on the FILE set, not on `chosen`. `expect(new Set(chosen).size)
+// .toBe(chosen.length)` cannot fail: `configsFor` iterates distinct
+// directories and each emits configs from its own directory, so a duplicate
+// config path is impossible by construction. The hazard lives one layer
+// lower, when the adapter expands the root's `references: [{path:
+// "tools/alpha"}]` and meets `tools/alpha/tsconfig.json` already on the list.
+it("analyzes each file once when the root references a workspace", async () => {
   const chosen = await configsFor(solutionWorkspacesRoot(), [{ dir: "tools/alpha" }]);
-  expect(new Set(chosen).size).toBe(chosen.length);
+  const project = await openProject(chosen.map((c) => resolve(solutionWorkspacesRoot(), c)));
+  try {
+    const paths = project.files().map((f) => f.path);
+    expect(paths).toEqual([...new Set(paths)].sort(compareStrings));
+  } finally {
+    project.close();
+  }
 });
 ```
 
@@ -988,6 +1001,16 @@ app — it is about not shredding the small packages. Sample D makes the case
 concrete: it has workspaces of 1, 3, 5 and 12 source files. A per-workspace
 `[8, 64]` clamp would try to cut a 1-file workspace into 8 modules; size
 targeting resolves each to exactly one, which is the honest answer.
+
+> **Before you write a cross-workspace assertion, read this.** The `workspaces`
+> fixture has **zero** cross-workspace imports, so its module graph has no
+> inter-workspace edges at all. Adding one means a bare specifier
+> (`@fix/alpha`), which under `"type": "module"` + `nodenext` will not resolve
+> without a `paths` mapping or a real `node_modules` link — and AGENTS.md §2 is
+> explicit that a specifier arriving at `resolveImport` unresolved is a **bug
+> that throws**, not a missing module. So the first cross-workspace edge you add
+> gets you a crash, not a quietly absent edge. Add the `paths` mapping to the
+> consuming workspace's tsconfig at the same time you add the import.
 
 **Files:** Modify `src/graph/granularity.ts`, `tests/granularity.test.ts`
 
