@@ -20,6 +20,12 @@
 
 ### Task 1: Workspace fixtures
 
+> **BUILT — the fixture on disk is the source of truth.** This section records
+> intent, and it took three review rounds to get right; each round added
+> something because the previous version could not falsify the rule it stood
+> for. Where this text and `tests/fixtures/workspaces/` disagree, the fixture
+> wins, and the disagreement is a bug in this document.
+
 The fixture deliberately uses `tools/` and `libs/` — **not** `apps/`, `packages/`, or `services/`. A hardcoded directory name must fail these tests rather than pass by luck.
 
 **The governing rule for every element below: if deleting the feature it exists
@@ -46,7 +52,12 @@ unresolved specifier.)
 - Create: `tests/fixtures/workspaces/scripts/root-util.ts`
 - Create: `tests/fixtures/workspaces/tools/alpha/{package.json,tsconfig.json,tsconfig.test.json,tsconfig.build.json,src/a.ts,src/b.ts,src/a.test.ts}`
 - Create: `tests/fixtures/workspaces/libs/beta/{package.json,tsconfig.json,src/b.ts}`
-- Create: `tests/fixtures/workspaces/libs/ignored/{package.json,src/c.ts}`
+- Create: `tests/fixtures/workspaces/libs/ignored/{package.json,tsconfig.json,src/c.ts}`
+- Create: `tests/fixtures/workspaces/tools/cfgonly/{package.json,base.json,global.d.ts}`
+- Create: `tests/fixtures/workspaces/deep/a/b/gamma/{package.json,tsconfig.json,src/g.ts}`
+- Create: `tests/fixtures/workspaces/deep/a/b/gamma/node_modules/dep/package.json` (a decoy)
+- Create: `tests/fixtures/workspaces-solution/` (see Step 6)
+- Modify: `.gitignore` — a `!tests/fixtures/**/node_modules/` carve-out, so the decoy is tracked
 
 **Step 1: Root manifest and config**
 
@@ -55,14 +66,14 @@ unresolved specifier.)
 {
   "name": "fixture-root",
   "private": true,
-  "workspaces": ["tools/*", "libs/*", "!libs/ignored"]
+  "workspaces": ["tools/*", "libs/*", "deep/**", "!libs/ignored"]
 }
 ```
 
 `tests/fixtures/workspaces/tsconfig.json` — covers only `scripts/`, mirroring a real root config that excludes every workspace directory:
 ```json
 {
-  "compilerOptions": { "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "strict": true, "noEmit": true },
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
   "include": ["scripts/**/*.ts"]
 }
 ```
@@ -81,7 +92,7 @@ export function rootUtil(n: number): number {
 `tools/alpha/tsconfig.json` — excludes tests, the shape that loses files:
 ```json
 {
-  "compilerOptions": { "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "strict": true, "noEmit": true },
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
 }
@@ -130,7 +141,16 @@ export function ignored(): string {
   return "should never be analyzed";
 }
 ```
-`libs/ignored` deliberately has **no tsconfig.json** — it must be excluded by the negation glob, not by accident of having no config.
+`libs/ignored/tsconfig.json`: same shape as `libs/beta`'s, covering `src/**/*.ts`.
+
+**It must have a working tsconfig**, and this is the point of it. An earlier
+draft of this plan said the opposite — that it should have *no* config, so that
+the negation glob was the only thing excluding it. That reasoning was inverted:
+with no config, `configsFor` yields nothing for it either way, so deleting the
+negation handling entirely produced byte-identical output end to end and the
+fixture asserted nothing. With a working config, honouring the negation is the
+only thing keeping its source out of the analyzed set, and deleting that
+handling moves the coverage figure.
 
 **Step 3b: `tools/cfgonly` — a workspace that provides configs and owns no source**
 
@@ -158,7 +178,7 @@ a coverage gap.
 In `tests/helpers.ts`, append:
 ```ts
 /**
- * A workspace root whose own tsconfig covers only `scripts/`, beside two
+ * A workspace root whose own tsconfig covers only `scripts/`, beside three
  * workspaces and one excluded by a negation glob. Directory names are
  * deliberately `tools/` and `libs/`: any hardcoded `apps`/`packages` name
  * fails here instead of passing by luck. `tools/alpha` carries a sibling
