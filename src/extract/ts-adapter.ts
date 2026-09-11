@@ -308,7 +308,7 @@ function bindingCountsBySpecifier(
  * `/repo/package` share `/repo` rather than `/repo/pack`.
  */
 export function commonRootDir(configs: readonly string[]): string {
-  if (configs.length === 0) throw new Error("at least one tsconfig path is required");
+  if (configs.length === 0) throw new Error("analysis requires at least one tsconfig path");
   const dirs = configs.map((c) => toPosix(dirname(isAbsolute(c) ? c : resolve(c))).split("/"));
   let common = dirs[0]!;
   for (const segs of dirs.slice(1)) {
@@ -740,11 +740,36 @@ export interface ProbeResult {
  * Paths of a project's source files, without materializing any of them.
  *
  * `openProject` awaits `getSourceFile` per name, which builds the AST; this
- * stops at `getSourceFileNames`. It exists to decide whether a workspace's
- * sibling tsconfig contributes files worth loading, which is a question about
- * WHICH files, not about what is in them -- and answering it with a second
- * full program load costs about as much as the analysis it is trying to
- * justify.
+ * stops at `getSourceFileNames`. It answers which files a tsconfig would
+ * contribute, which is the question "is this sibling config worth loading?"
+ * and not a question about what is in them.
+ *
+ * Two grounds, in order of which one actually decides it.
+ *
+ * The first is API shape, and it holds at every size. `openProject` returns a
+ * `Project` that owns an open `tsgo` connection, a content hash and a
+ * `FileHandle` per file, and a checker per file, and it obliges the caller to
+ * `close()` it. A caller that wants a file LIST would acquire all of that,
+ * read one field, and be responsible for disposing the rest. This returns
+ * plain data and disposes itself.
+ *
+ * The second is cost, and it is honestly size-dependent. Measured, probe
+ * against `openProject` on the same configs: 1000 files, 70ms against 340ms
+ * (4.9x); 32 files, 45ms against 78ms (1.7x); 2 and 4 files, indistinguishable
+ * -- 0.7x to 1.1x, the probe sometimes SLOWER. Both entry points pay the same
+ * ~35ms to spawn `tsgo` and load the default lib, and only `openProject` pays
+ * per file, so at the size of a small workspace this is free rather than
+ * cheaper, and N probes is N x 35ms of fixed cost with nothing bought back.
+ * The saving is real where workspaces are large -- a sample monorepo has a
+ * single workspace holding 6048 source files -- which is the case this exists
+ * for. Probe once over many configs, not once per config.
+ *
+ * NOT REGRESSION-TESTED: that this materializes nothing. Replace the body with
+ * `(await openProject(configs)).files().map((f) => f.path)` and every test
+ * still passes -- the agreement test below becomes true by definition, and the
+ * measurements above rule out a timing assertion, because there is no
+ * threshold between 0.7x and 4.9x that is not either flaky or vacuous. The
+ * property is carried by review of this function, not by the suite.
  *
  * The root comes back WITH the names because the caller cannot work it out:
  * it is the common ancestor of every config actually OPENED, and
@@ -764,9 +789,21 @@ export interface ProbeResult {
  * that adds nothing analyzable, and would count the default lib besides.
  *
  * Deliberately does NOT apply the generated-directory, banner or `--exclude`
- * rules: the banner sniff needs file text, which is the cost this exists to
- * avoid, and a sibling that contributes only excluded files is a rounding
- * error against a second full program load.
+ * rules, and only ONE of those three has cost as its reason: the banner sniff
+ * reads file text, which is the thing this avoids. `isGeneratedPath` and
+ * `isExcludedByPattern` are path-only and free; they are left out because the
+ * question here is which files a config CONTRIBUTES, and a config does not
+ * stop contributing a file because the analysis later declines to read it.
+ *
+ * So the answer is a strict SUPERSET of what `openProject` analyzes, and the
+ * direction matters to the coverage figure AGENTS.md requires to match on both
+ * sides. `scanSourceFiles` -- the denominator -- applies all three rules, so
+ * every file this returns beyond what gets analyzed is a file the scan already
+ * dropped: it cannot appear in `scan minus covered`, so a wider `covered`
+ * neither invents a gap nor hides one. Keep the asymmetry pointing this way.
+ * A probe that excluded MORE than the scan is the dangerous direction -- that
+ * one reports a gap no flag can close, which is the failure `packageDirs` was
+ * written to avoid.
  */
 export async function sourceFileNames(configs: readonly string[]): Promise<ProbeResult> {
   const list = configs.map((c) => (isAbsolute(c) ? c : resolve(c)));

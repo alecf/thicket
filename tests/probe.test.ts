@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openProject, sourceFileNames } from "../src/extract/ts-adapter.js";
-import { monorepoConfigs, solutionWorkspacesRoot, workspacesRoot } from "./helpers.js";
+import {
+  generatedConfig,
+  monorepoConfigs,
+  solutionWorkspacesRoot,
+  workspacesRoot,
+} from "./helpers.js";
 
 const alphaConfig = resolve(workspacesRoot(), "tools/alpha/tsconfig.json");
 const alphaTestConfig = resolve(workspacesRoot(), "tools/alpha/tsconfig.test.json");
@@ -165,6 +170,42 @@ describe("sourceFileNames agrees with openProject", () => {
       expect(probed.root).toBe(project.root);
       expect(probed.names).toEqual(project.files().map((f) => f.path));
       expect(probed.names).toEqual(["a/src/index.ts", "b/src/index.ts", "shared/src/util.ts"]);
+    } finally {
+      await project.close();
+    }
+  });
+
+  // The other half of the agreement: where the probe is MEANT to diverge, by
+  // how much, and in which direction. `fixtures/generated` holds one file per
+  // rule the probe skips -- `dist/` and `packages/a/.next/` for the directory
+  // rule, `table.gen.ts` and `widgets/badge.ts` for the banner sniff.
+  //
+  // Direction is the load-bearing part, not the count. The probe must be a
+  // strict SUPERSET: `scanSourceFiles` applies all three rules too, so a file
+  // the probe reports and the analysis drops is a file the scan never counted,
+  // and it can neither invent nor hide a gap. A probe that dropped MORE than
+  // the scan would report a gap no flag can close. Assert both subsets, so a
+  // change in either direction fails here rather than in Task 7's arithmetic.
+  it("reports the generated files openProject drops, and nothing less", async () => {
+    const probed = await sourceFileNames([generatedConfig()]);
+    const project = await openProject(generatedConfig());
+    try {
+      const analyzed = project.files().map((f) => f.path);
+      expect(analyzed).toEqual([
+        "src/distance/measure.ts",
+        "src/handwritten.ts",
+        "src/mentions.ts",
+        "src/outbound.ts",
+      ]);
+      // Nothing analyzed is missing from the probe: the safe direction.
+      expect(analyzed.filter((p) => !probed.names.includes(p))).toEqual([]);
+      // And the excess is exactly the files the two exclusion rules dropped.
+      expect(probed.names.filter((p) => !analyzed.includes(p))).toEqual([
+        "dist/emitted.ts",
+        "packages/a/.next/validator.ts",
+        "src/table.gen.ts",
+        "src/widgets/badge.ts",
+      ]);
     } finally {
       await project.close();
     }
