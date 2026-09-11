@@ -214,8 +214,13 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
+          # upload-artifact roots a multi-path artifact at the least common
+          # ancestor of those paths, so `dist-bin/*.tar.gz` plus a workspace-root
+          # file lands the tarballs under dist-bin/ rather than at the top.
+          tarball="dist-bin/thicket-$version-${{ matrix.target }}.tar.gz"
+          test -f "$tarball" || { echo "::error::no $tarball"; find . -name '*.tar.gz'; exit 1; }
           mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
-          tar -xzf "thicket-$version-${{ matrix.target }}.tar.gz" -C "$RUNNER_TEMP"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP"
           mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
           ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
 
