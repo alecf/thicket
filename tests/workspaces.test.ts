@@ -265,6 +265,16 @@ describe("globsFromPnpmText", () => {
     expect(globsFromPnpmText("packages:\r\n  - a/* # c\r\n")).toEqual(["a/*"]);
   });
 
+  it("reads a manifest that starts with a byte order mark", () => {
+    // The BOM defeats `/^packages:\s*$/` on the very first line, so the whole
+    // manifest is discarded and a pnpm monorepo reads as a plain single
+    // project -- the same silent symptom the BOM strip on `package.json`
+    // exists to prevent, and thicket-specific: YAML permits a leading BOM and
+    // pnpm reads the file fine. Stripped here rather than at the read, so this
+    // pure function is correct on its own and the case needs no filesystem.
+    expect(globsFromPnpmText("\uFEFFpackages:\n  - a/*\n")).toEqual(["a/*"]);
+  });
+
   it("stops at the next top-level key", () => {
     expect(
       globsFromPnpmText("packages:\n  - a/*\ncatalog:\n  react: ^18\nignoredKey:\n  - b/*\n"),
@@ -353,6 +363,27 @@ describe("discoverWorkspaces", () => {
   it("never treats a package inside node_modules as a workspace", () => {
     const dirs = discoverWorkspaces(workspacesRoot()).map((w) => w.dir);
     expect(dirs.some((d) => d.includes("node_modules"))).toBe(false);
+  });
+
+  it("subtracts a negation wherever in the list it appears", () => {
+    // `workspaceGlobs` preserves declaration order because `--filter` reads it
+    // that way, and its docstring used to claim negation was order-sensitive
+    // too -- a spec the code never had. Exclusions are subtracted from the
+    // whole match, so position cannot matter. Pinned rather than asserted,
+    // because that is how the wrong claim survived: nothing contradicted it.
+    const files = {
+      "libs/beta/package.json": JSON.stringify({ name: "beta" }),
+      "libs/ignored/package.json": JSON.stringify({ name: "ignored" }),
+    };
+    const dirs = (globs: string[]) => {
+      let out: string[] = [];
+      withRoot({ ...files, "package.json": JSON.stringify({ workspaces: globs }) }, (root) => {
+        out = discoverWorkspaces(root).map((w) => w.dir);
+      });
+      return out;
+    };
+    expect(dirs(["libs/*", "!libs/ignored"])).toEqual(["libs/beta"]);
+    expect(dirs(["!libs/ignored", "libs/*"])).toEqual(["libs/beta"]);
   });
 
   // `deep/**` matches `deep/a` and `deep/a/b` too, and neither is a package.

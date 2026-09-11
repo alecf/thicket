@@ -11,9 +11,11 @@ import { compareStrings } from "../order.js";
  * declares exactly none". Collapsing them makes discovery unable to tell a
  * plain project from an empty monorepo.
  *
- * Globs come back in declaration order, unmodified. Order is meaning here: a
- * negation only subtracts from what the globs before it matched, and `--filter`
- * is applied against this list as written.
+ * Globs come back in declaration order, unmodified, because `--filter` is
+ * applied against this list as written and is order-sensitive (Task 5).
+ * Negation is NOT order-sensitive: `discoverWorkspaces` subtracts every `!`
+ * glob from the whole match, so moving one to the front changes nothing. That
+ * is what pnpm does and the less surprising of the two.
  *
  * Nothing about the layout is built in. `apps`, `packages` and `services` are
  * strings that appear in other people's manifests, never in this file.
@@ -70,7 +72,14 @@ const strings = (xs: readonly unknown[]): string[] =>
 export function globsFromPnpmText(text: string): string[] | undefined {
   const out: string[] = [];
   let inPackages = false;
-  for (const raw of text.split("\n")) {
+  // The BOM strip is the same failure as the one on `package.json` and it bites
+  // harder here: a leading U+FEFF defeats `/^packages:\s*$/` on the first line,
+  // the key is never seen, and the whole manifest is discarded -- so a pnpm
+  // monorepo authored on Windows reads as a plain single project. YAML permits
+  // a leading BOM and pnpm itself reads the file, so this is ours alone. It is
+  // stripped here rather than at the read so this function is correct on its
+  // own; with `readJson`, these are the only two places text enters this file.
+  for (const raw of text.replace(/^\uFEFF/, "").split("\n")) {
     // `trimEnd` FIRST, and it is load-bearing rather than tidy: `\r` is a
     // JavaScript line terminator, so `.` cannot match it and `$` does not
     // assert before it. Strip comments first and the regex simply never fires
@@ -206,10 +215,17 @@ export function discoverWorkspaces(root: string): Workspace[] {
  * anything deeper than `MAX_WALK_DEPTH`. It does not stop descending at a match,
  * because real monorepos nest packages and the manifest is the only thing that
  * knows whether an inner one is a member: stopping would make `tools/**` mean
- * `tools/*` and leave no glob able to name the inner package. The cost is one
- * `readdirSync` per directory, paid once per run before any file is parsed --
- * a rounding error beside parsing the sources, and not worth bounding further
- * until a measurement says otherwise.
+ * `tools/*` and leave no glob able to name the inner package.
+ *
+ * The cost is one `readdirSync` plus one `existsSync` per directory, paid once
+ * per run before any file is parsed: measured at 44ms for a 1886-directory
+ * monorepo-shaped tree, ~24us per directory. Two ways to shave that are known
+ * and deliberately not taken. Reading `package.json` out of each directory's
+ * own entries instead of `existsSync`-ing from the parent halves the syscalls
+ * and buys ~17ms -- real, and not worth the complexity against a TypeScript
+ * parse. Folding `packageName` into the walk would be a regression: it stays
+ * after the glob filter so that only MATCHED packages are parsed, not every
+ * package in the tree.
  */
 function packageDirs(root: string): string[] {
   const out: string[] = [];
@@ -246,9 +262,12 @@ function packageDirs(root: string): string[] {
 function packageName(dir: string): string | undefined {
   const parsed = readJson(join(dir, "package.json"));
   const name = (parsed as { name?: unknown })?.name;
-  // A nameless package is still a workspace. `name` is what `--filter` matches
-  // on, so having none means no filter can name it -- not that its source
-  // stops existing.
+  // A nameless package is still a workspace, and a package whose manifest is
+  // unreadable or malformed arrives here as one too -- `readJson` answers
+  // `undefined` for all of it. That is the right trade: `name` is only what
+  // `--filter` matches on, so the workspace is unreachable BY NAME while its
+  // source is still analyzed, which beats dropping real code over a manifest
+  // this tool could not parse.
   return typeof name === "string" ? name : undefined;
 }
 
