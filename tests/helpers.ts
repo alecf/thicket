@@ -229,8 +229,15 @@ export function tangleConfig(): string {
  *   the only thing keeping it out of the analyzed set.
  * - `deep/a/b/gamma` is reachable only through a `**` glob, two levels below
  *   where every other workspace sits, so one-level expansion misses it.
- * - `tools/alpha/node_modules/dep` is a package the walk must not treat as a
- *   workspace.
+ * - `deep/a/b/gamma/node_modules/dep` is a package the walk must skip. It sits
+ *   under `deep/**` because that is the only glob here that crosses separators:
+ *   anywhere under `tools/*` or `libs/*` the include filter rejects it on path
+ *   depth alone, so the walk's own skip would never be what excluded it and
+ *   deleting that skip would change nothing.
+ *
+ * `tools/cfgonly` is also the one workspace with no `"type": "module"`, which
+ * is deliberate rather than an oversight: it owns a single `.d.ts` and no
+ * module ever resolves against it.
  */
 export function workspacesRoot(): string {
   return resolve(here, "fixtures/workspaces");
