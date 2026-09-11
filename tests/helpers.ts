@@ -269,3 +269,25 @@ export function workspacesRoot(): string {
 export function solutionWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-solution");
 }
+
+/**
+ * A third workspace root, declared the pnpm way. Its `package.json` carries no
+ * `workspaces` key at all, so `pnpm-workspace.yaml` is the only thing here that
+ * can answer -- read the globs from the wrong file and this root looks like a
+ * plain single project.
+ *
+ * The YAML is shaped after a real pnpm monorepo's, because the details that
+ * break a hand-written parser are the ones nobody writes into an example:
+ * entries that are single-quoted, double-quoted and bare; an entry that is a
+ * plain directory name rather than a pattern; comments both above `packages:`
+ * and inside its list; and later top-level keys, one holding a nested mapping
+ * and one holding a list of its own. The parser must stop at the first of those
+ * keys and absorb nothing from either.
+ *
+ * Only `libs/gamma` exists on disk. Nothing expands these globs -- this root is
+ * read by the manifest parser and by nothing else -- so the rest deliberately
+ * match nothing.
+ */
+export function pnpmWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-pnpm");
+}
