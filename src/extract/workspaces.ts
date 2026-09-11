@@ -187,16 +187,39 @@ const MAX_WALK_DEPTH = 8;
  * exponentially under node's JavaScript glob implementation and is
  * constant-time under bun's native one. Measured end to end on this function --
  * one 40-character package directory, a ten-star glob, the SAME `dist/`
- * JavaScript both times: 6.28s under node 24, 0.000s under bun 1.4, growing
- * ~2.7x per further star, so fourteen stars is minutes and twenty is out of
- * reach. The primitive alone measures 6.38s and 0.000s on that input, and `bun
- * run thicket`, which loads `src/` directly, answers in 0.010s -- so the
- * immunity is a property of the RUNTIME, not of how the module is loaded.
+ * JavaScript both times: 6.28s under node 24, 0.000s under bun 1.4. The
+ * primitive alone measures 6.38s and 0.000s on that input, and `bun run
+ * thicket`, which loads `src/` directly, answers in 0.010s -- so the immunity
+ * is a property of the RUNTIME, not of how the module is loaded.
  *
- * thicket targets bun, so there is deliberately no cap on glob complexity here:
- * on the supported runtime the exponential case cannot be reached, and a limit
- * that can never fire is a guard that guards nothing. The one configuration
- * that does inherit it is the built JavaScript run under node.
+ * The node curve grows 3.1-4.0x per further star (0.52s, 2.05s, 6.38s at eight,
+ * nine and ten), so fourteen stars is a quarter of an hour and twenty is out of
+ * reach. `matchesNameGlob` quotes ~2.7x for a curve that looks the same and is
+ * not: that one is a compiled RegExp, a different implementation with a
+ * different constant, measured separately. Do not reconcile the two numbers.
+ *
+ * There is no cap on glob complexity here, and that is a decision rather than
+ * an oversight. One was designed and measured: a limit on `*` characters per
+ * glob, refusing the individual entry so a single hostile glob could not
+ * discard the rest of the manifest. It was dropped because a star count is a
+ * poor proxy for cost. The conventional node_modules exclusion -- a `**` on
+ * either side of a directory name, which cannot be written literally in a
+ * block comment -- carries four stars and matches in 0.02ms, because what
+ * actually explodes is a literal that occurs at many positions, and the cost
+ * rises with the length of the directory NAME as well -- which the same
+ * repository also controls. So a cap loose enough to admit
+ * real four-star globs does not bound a hostile repo, and one tight enough to
+ * bound it refuses plausible layouts. Every workspace glob in a survey of real
+ * manifests carried one or two.
+ *
+ * What makes that trade acceptable is bun, where the exponential case does not
+ * arise at all. But node is a supported install target TODAY -- `package.json`
+ * declares `engines.node` and points `bin` at `dist/`, and AGENTS.md says the
+ * built output runs under Node 24 for anyone who installs the bin -- so that
+ * path is exposed right now, and calling it an edge case would be wrong. bun is
+ * the intended runtime and is immune. If node support persists or returns, this
+ * is the decision to revisit, and the cap above is the designed alternative
+ * along with the reason it lost.
  */
 export function discoverWorkspaces(root: string): Workspace[] {
   const globs = workspaceGlobs(root);
@@ -333,7 +356,9 @@ function readJson(path: string): unknown {
  * make the answer depend on whether the caller assembled `all` from one source
  * or two, which nothing in the signature says it must -- and two entries for
  * one directory is the phantom-identical-clone hazard from AGENTS.md, reached
- * by a different road.
+ * by a different road. When two entries do share a `dir`, last wins, so which
+ * `name` survives follows the order of the caller's array: input order is the
+ * caller's to define, not something this function imposes.
  */
 export function selectWorkspaces(
   all: readonly Workspace[],
@@ -374,9 +399,10 @@ export function selectWorkspaces(
  * 465 characters of unbroken prose -- and 14 is small -- while truncation would
  * elide exactly the entry the reader is missing, since the one they cannot
  * find is the one they did not guess. The message exists to be read once, by
- * someone who is stuck; length is not what is expensive about that. The pattern is quoted because the patterns most likely
- * to match nothing are the ones you cannot see: an empty string, or one that
- * arrived from a shell with whitespace attached.
+ * someone who is stuck; length is not what is expensive about that. The
+ * pattern is quoted because the patterns most likely to match nothing are the
+ * ones you cannot see: an empty string, or one that arrived from a shell with
+ * whitespace attached.
  */
 function noMatch(filter: string, all: readonly Workspace[]): string {
   const known = all
@@ -420,8 +446,10 @@ function matchesFilter(ws: Workspace, pattern: string): boolean {
  * - `*` compiles to `.*`, and a pattern of alternating stars and literals is
  *   the textbook catastrophic backtrack. Measured on the compiled form against
  *   a 40-character name, `*a` repeated ten times plus a `b`: 8.1s under node 24
- *   and 1.2s under bun 1.4, each roughly tripling per further star -- so
- *   fourteen stars is about a minute on bun and several on node. The filter is
+ *   and 1.2s under bun 1.4, each growing ~2.7x per further star (both runtimes
+ *   measured at ten and eleven) -- so fourteen stars is about a minute on bun
+ *   and several on node. `discoverWorkspaces` quotes 3.1-4.0x for the glob
+ *   matcher, which is a different implementation, not a disagreement. The filter is
  *   typed by the person running the tool, so this is a foot-gun rather than an
  *   attack, but "thicket hung" is the worst available way to report a pattern
  *   that simply matches nothing. This walk is linear in the name per segment.

@@ -765,6 +765,28 @@ describe("selectWorkspaces", () => {
     expect(selectWorkspaces(twins, ["a*c*c"]).map((w) => w.dir)).toEqual(["a/acc"]);
   });
 
+  // A BOUNDARY PIN, not another example of the case above it. This is the only
+  // case where the prefix/suffix guard sits exactly at `at === end`: `@fix/` is
+  // five characters and `alpha` is five, so a ten-character name leaves the
+  // star an EMPTY run to match -- which `at > end` allows and `at >= end` would
+  // refuse. Nothing else here is near that boundary; `beta*beta` against `beta`
+  // sits at at=4, end=0, four characters clear of it, so the overlap case
+  // cannot be extended to cover this.
+  //
+  // Why it is worth its own case: the interior guard four lines below compares
+  // against the same `end` with the same `>`, and IS pinned at its boundary by
+  // `a*c*c` against `acc` (2 > 2). Two sibling comparisons, one protected. The
+  // likeliest edit anyone makes here is normalizing them to match, which flips
+  // whichever one is unpinned.
+  it("lets a star match an empty run between prefix and suffix", () => {
+    expect(
+      selectWorkspaces([{ dir: "d", name: "@fix/alpha" }], ["@fix/*alpha"]).map((w) => w.dir),
+    ).toEqual(["d"]);
+    // The twin, so the case cannot pass by matching everything: the prefix is
+    // genuinely required, and a name missing it is still refused.
+    expect(() => selectWorkspaces([{ dir: "d", name: "@fixalpha" }], ["@fix/*alpha"])).toThrow();
+  });
+
   it("matches a bare * and a ** alike, and an empty pattern only against nothing", () => {
     const ws: Workspace[] = [{ dir: "libs/beta", name: "beta" }];
     expect(selectWorkspaces(ws, ["**"]).map((w) => w.dir)).toEqual(["libs/beta"]);
