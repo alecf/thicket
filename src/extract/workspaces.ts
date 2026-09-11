@@ -297,3 +297,145 @@ function readJson(path: string): unknown {
     return undefined;
   }
 }
+
+/**
+ * The workspaces `filters` selects, sorted by directory.
+ *
+ * A pattern is a PATH pattern when it starts with `./`, `../` or `/`, and a
+ * NAME pattern otherwise. That is turbo's own rule, and it is what stops a
+ * scoped package name -- which contains a slash -- being read as a directory.
+ *
+ * Filters apply in order and a `!` prefix removes. With no filters, or with a
+ * negation first, selection starts from everything; otherwise it starts empty.
+ *
+ * A filter that matches nothing throws rather than removing nothing or
+ * selecting nothing. Both silent outcomes produce a short, clean-looking report
+ * over a tree that was never analyzed, which reads as good news.
+ *
+ * Selection is keyed on `dir` rather than on object identity. Identity would
+ * make the answer depend on whether the caller assembled `all` from one source
+ * or two, which nothing in the signature says it must -- and two entries for
+ * one directory is the phantom-identical-clone hazard from AGENTS.md, reached
+ * by a different road.
+ */
+export function selectWorkspaces(
+  all: readonly Workspace[],
+  filters: readonly string[],
+): Workspace[] {
+  const selected = new Map<string, Workspace>();
+  const first = filters[0];
+  if (first === undefined || first.startsWith("!")) for (const w of all) selected.set(w.dir, w);
+  for (const filter of filters) {
+    const negated = filter.startsWith("!");
+    const pattern = negated ? filter.slice(1) : filter;
+    const hits = all.filter((w) => matchesFilter(w, pattern));
+    // Before the negated/positive split on purpose: a `!` that matches nothing
+    // removes nothing, so a typo in an exclusion leaves the workspace it meant
+    // to drop in the analyzed set and announces that nowhere.
+    if (hits.length === 0) throw new Error(noMatch(filter, all));
+    for (const hit of hits) {
+      if (negated) selected.delete(hit.dir);
+      else selected.set(hit.dir, hit);
+    }
+  }
+  // Sorted here rather than relying on `all` arriving sorted and insertion
+  // preserving it: `--filter '@scope/*' --filter beta` inserts two `tools/`
+  // workspaces before one from `libs/`, so Map order is filter order and
+  // filter order is the reader's. The no-filter path takes this sort too, so
+  // no caller has to know which path produced its list.
+  return [...selected.values()].sort((a, b) => compareStrings(a.dir, b.dir));
+}
+
+/**
+ * The message for a filter that matched nothing.
+ *
+ * Every workspace's BOTH addresses, because the one the reader typed is
+ * usually the other one: a directory `evals` publishing as `@scope/evals`
+ * makes `--filter evals` match nothing, and `./evals` is right there.
+ *
+ * One per line and never truncated. Joined with commas, a 14-workspace list is
+ * 465 characters of unbroken prose -- and 14 is small -- while truncation would
+ * elide exactly the entry the reader is missing, since the one they cannot
+ * find is the one they did not guess. The message exists to be read once, by
+ * someone who is stuck; length is not what is expensive about that. The pattern is quoted because the patterns most likely
+ * to match nothing are the ones you cannot see: an empty string, or one that
+ * arrived from a shell with whitespace attached.
+ */
+function noMatch(filter: string, all: readonly Workspace[]): string {
+  const known = all
+    .map((w) => (w.name === undefined ? `./${w.dir}` : `${w.name} (./${w.dir})`))
+    .sort(compareStrings);
+  return `--filter "${filter}" matched no workspace.\nAvailable workspaces:\n  ${known.join("\n  ")}`;
+}
+
+function matchesFilter(ws: Workspace, pattern: string): boolean {
+  if (pattern.startsWith("./") || pattern.startsWith("../") || pattern.startsWith("/")) {
+    // A PATH is matched as a path: `/` is a separator, so `./tools/*` does not
+    // reach `tools/a/b`. `posix.matchesGlob`, never the bare export, which is
+    // the win32 implementation on Windows -- see `discoverWorkspaces` for the
+    // measurement and the premise test that pins it.
+    return posix.matchesGlob(ws.dir, pattern.replace(/^\.\//, ""));
+  }
+  // A NAME is matched as a string. `matchesGlob` would treat the `/` in a
+  // scoped name as a separator, so `*` would silently skip every scoped
+  // package -- selecting part of the repo and reporting it as if whole.
+  return ws.name !== undefined && matchesNameGlob(ws.name, pattern);
+}
+
+/**
+ * `name` against a pattern in which `*` matches any run of characters, `/`
+ * included, and every other character is a literal.
+ *
+ * Matched by walking the literal segments rather than by compiling a RegExp,
+ * which is what the obvious implementation does. Two reasons, and the second
+ * is the load-bearing one:
+ *
+ * - A RegExp built from a CLI string has to escape twelve metacharacters, and
+ *   the one that gets missed does not fail -- `--filter 'a.b'` quietly selects
+ *   `axb` as well.
+ * - `*` compiles to `.*`, and a pattern of alternating stars and literals is
+ *   the textbook catastrophic backtrack. `posix.matchesGlob` is no escape --
+ *   it backtracks too. Measured against a 40-character name with `*a` repeated
+ *   ten times plus a `b`: 9.4s compiled, 7.3s through `matchesGlob`, each
+ *   tripling per further repeat. The filter is typed by the person running the
+ *   tool, so this is a foot-gun rather than an attack -- but "thicket hung" is
+ *   the worst available way to report a pattern that simply matches nothing.
+ *   This walk is linear in the name per segment.
+ *
+ * The `matchesGlob` half of that measurement is runtime-dependent, which is the
+ * reason it is worth writing down: the same call is microseconds under bun and
+ * seconds under node 24, so a foot-gun placed here would be invisible in
+ * development and live only in the `dist/` build. Determinism (AGENTS.md §1) is
+ * about the answer rather than the clock, but "which runtime am I on" is not a
+ * thing this file should be sensitive to either way.
+ *
+ * The PATH branch above still goes through `posix.matchesGlob` and keeps that
+ * exposure, deliberately: it needs real `**`-versus-`*` separator semantics,
+ * which this walk does not implement, and `discoverWorkspaces` has run manifest
+ * globs through the same matcher since it was written.
+ *
+ * Taking the EARLIEST occurrence of each interior segment is exact, not a
+ * heuristic: with `*` the only wildcard, a later occurrence leaves strictly
+ * less room for the segments after it.
+ */
+function matchesNameGlob(name: string, pattern: string): boolean {
+  const parts = pattern.split("*");
+  // No `*` at all: the pattern is one literal, and an exact comparison is the
+  // whole of it.
+  if (parts.length === 1) return name === pattern;
+  const prefix = parts[0]!;
+  const suffix = parts[parts.length - 1]!;
+  if (!name.startsWith(prefix) || !name.endsWith(suffix)) return false;
+  let at = prefix.length;
+  const end = name.length - suffix.length;
+  // The window between prefix and suffix, which is also what stops the two
+  // overlapping: `a*a` must not match `a` by matching the same character
+  // twice.
+  if (at > end) return false;
+  for (const part of parts.slice(1, -1)) {
+    const found = name.indexOf(part, at);
+    if (found < 0 || found + part.length > end) return false;
+    at = found + part.length;
+  }
+  return true;
+}

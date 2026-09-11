@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   discoverWorkspaces,
   globsFromPnpmText,
+  selectWorkspaces,
   workspaceGlobs,
+  type Workspace,
 } from "../src/extract/workspaces.js";
 import { pnpmWorkspacesRoot, workspacesRoot } from "./helpers.js";
 
@@ -556,4 +558,255 @@ describe("discoverWorkspaces", () => {
       );
     },
   );
+});
+
+/**
+ * Three workspaces whose directory order and name order disagree, so a case
+ * that means to assert one of them cannot pass on the other by luck.
+ */
+const WS: Workspace[] = [
+  { dir: "libs/beta", name: "beta" },
+  { dir: "tools/alpha", name: "@fix/alpha" },
+  { dir: "tools/omega", name: "@fix/omega" },
+];
+
+describe("selectWorkspaces", () => {
+  it("selects by exact name", () => {
+    expect(selectWorkspaces(WS, ["beta"]).map((w) => w.dir)).toEqual(["libs/beta"]);
+  });
+
+  it("globs on the name, and a scoped name is not read as a path", () => {
+    expect(selectWorkspaces(WS, ["@fix/*"]).map((w) => w.dir)).toEqual([
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  // THE BUG THIS TEST EXISTS FOR. `matchesGlob` treats `/` as a path
+  // separator, so a scoped package name never matches `*`. Measured on a
+  // sample monorepo, `--filter=*` silently selected 3 of 10 workspaces and
+  // reported a clean-looking result over 30% of the tree; on another, where
+  // every name is scoped, it errored instead. A partial selection that does
+  // not announce itself is the worse of the two. Name patterns are matched as
+  // STRINGS, where `/` is an ordinary character.
+  it("selects every workspace for `*`, scoped names included", () => {
+    expect(selectWorkspaces(WS, ["*"]).map((w) => w.dir)).toEqual([
+      "libs/beta",
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  it("treats a ./-prefixed pattern as a path glob", () => {
+    expect(selectWorkspaces(WS, ["./tools/*"]).map((w) => w.dir)).toEqual([
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  // A path pattern is matched as a PATH -- `/` is a separator -- while a name
+  // pattern is matched as a string. `deep/a/b/gamma` is what tells the two
+  // apart: `./deep/*` must not reach it and `./deep/**` must.
+  it("does not let a single-star path pattern cross a separator", () => {
+    const deep: Workspace[] = [{ dir: "deep/a/b/gamma", name: "@fix/gamma" }];
+    expect(() => selectWorkspaces(deep, ["./deep/*"])).toThrow(/matched no workspace/);
+    expect(selectWorkspaces(deep, ["./deep/**"]).map((w) => w.dir)).toEqual(["deep/a/b/gamma"]);
+  });
+
+  // A leading negation starts from everything; otherwise selection starts empty.
+  it("starts from all when the first filter is a negation", () => {
+    expect(selectWorkspaces(WS, ["!beta"]).map((w) => w.dir)).toEqual([
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  it("applies filters in order", () => {
+    expect(selectWorkspaces(WS, ["@fix/*", "!@fix/omega"]).map((w) => w.dir)).toEqual([
+      "tools/alpha",
+    ]);
+  });
+
+  it("selects everything when there are no filters at all", () => {
+    expect(selectWorkspaces(WS, []).map((w) => w.dir)).toEqual([
+      "libs/beta",
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  // Silently empty is the failure mode that wastes an afternoon: the report
+  // looks clean because nothing was analyzed.
+  it("throws naming what is available when a filter matches nothing", () => {
+    expect(() => selectWorkspaces(WS, ["nope"])).toThrow(/nope/);
+    expect(() => selectWorkspaces(WS, ["nope"])).toThrow(/beta/);
+  });
+
+  // The same rule for an exclusion, which is where it is easier to argue
+  // yourself out of: a `!` that matches nothing removes nothing, so a typo in
+  // one leaves the workspace it meant to drop in the analyzed set and says so
+  // nowhere. The check has to run before the negated/positive split.
+  it("throws for a negation that matches nothing", () => {
+    expect(() => selectWorkspaces(WS, ["*", "!@fix/nope"])).toThrow(/@fix\/nope/);
+  });
+
+  // A workspace whose directory name differs from its package name is normal:
+  // a directory `evals` publishing as `@scope/evals` makes `--filter=evals`
+  // match nothing. That is turbo's behavior too and we keep it -- but the error
+  // has to resolve to the thing, so it lists BOTH addresses of every workspace
+  // and the reader can see `./evals` works.
+  it("lists both the name and the path of each workspace when it fails", () => {
+    expect(() => selectWorkspaces(WS, ["alpha"])).toThrow(/@fix\/alpha/);
+    expect(() => selectWorkspaces(WS, ["alpha"])).toThrow(/\.\/tools\/alpha/);
+  });
+
+  // The pattern is quoted in the message because the patterns most likely to
+  // match nothing are the ones you cannot see: an empty string, or one a shell
+  // handed over with whitespace still attached.
+  it("quotes the failing pattern so an invisible one is still visible", () => {
+    expect(() => selectWorkspaces(WS, ["  "])).toThrow('--filter "  " matched no workspace');
+  });
+
+  // A nameless workspace is unreachable BY NAME -- that is `packageName`'s
+  // stated contract -- so `*` skips it and the error says so by printing the
+  // path form, which does reach it. Both halves are pinned: the first is a
+  // silent partial selection if `*` ever starts matching nameless workspaces
+  // by treating a missing name as "", and the second is the only thing telling
+  // the reader what to type instead.
+  it("cannot reach a nameless workspace by name, and says what does", () => {
+    const nameless: Workspace[] = [{ dir: "libs/nameless" }];
+    expect(() => selectWorkspaces(nameless, ["*"])).toThrow(/\.\/libs\/nameless/);
+    // Typed back exactly as the message prints it, so the message is pinned
+    // to be an instruction rather than a description: `./*` would NOT work
+    // here, because a path pattern's `*` does not cross a separator.
+    expect(selectWorkspaces(nameless, ["./libs/nameless"]).map((w) => w.dir)).toEqual([
+      "libs/nameless",
+    ]);
+  });
+
+  // The output is sorted, and this is the only case that can tell the sort
+  // from the order the filters happened to insert in: `@fix/*` selects both
+  // `tools/` workspaces before `beta` joins from `libs/`, so insertion order
+  // and sorted order are different lists. The plain `*` case above cannot
+  // catch a deleted sort -- its insertion order is already sorted.
+  it("sorts by directory, not by the order filters selected in", () => {
+    expect(selectWorkspaces(WS, ["@fix/*", "beta"]).map((w) => w.dir)).toEqual([
+      "libs/beta",
+      "tools/alpha",
+      "tools/omega",
+    ]);
+  });
+
+  // The no-filter path sorts too, so a caller never has to know which path it
+  // took to know what it got. `discoverWorkspaces` already sorts, so this is
+  // the only input shape that can assert it.
+  it("sorts an unsorted input even with no filters", () => {
+    const unsorted: Workspace[] = [{ dir: "tools/alpha" }, { dir: "libs/beta" }];
+    expect(selectWorkspaces(unsorted, []).map((w) => w.dir)).toEqual(["libs/beta", "tools/alpha"]);
+  });
+
+  // The result is the caller's to keep, and the caller's array is not ours to
+  // hand back: `configs` is built by mutating what comes out of here.
+  it("returns a fresh array rather than the one it was given", () => {
+    const out = selectWorkspaces(WS, []);
+    out.pop();
+    expect(WS).toHaveLength(3);
+  });
+
+  // Selection is keyed on `dir`, not on object identity. Two entries for one
+  // directory would be analyzed twice -- the phantom-identical-clone hazard in
+  // AGENTS.md -- and identity keying cannot collapse them, because nothing in
+  // the signature says the caller may not build its list from two sources.
+  it("yields one entry per directory even if the input repeats one", () => {
+    const twice: Workspace[] = [
+      { dir: "libs/beta", name: "beta" },
+      { dir: "libs/beta", name: "beta" },
+    ];
+    expect(selectWorkspaces(twice, ["beta"]).map((w) => w.dir)).toEqual(["libs/beta"]);
+  });
+
+  // A name pattern is matched as a string, so everything but `*` is a literal
+  // character. Each pair is a pattern beside the name a REGEX built from it
+  // would also have matched -- which is what a metacharacter left unescaped
+  // buys you: `--filter 'a.b'` quietly selecting `axb` as well.
+  it.each([
+    ["a.b", "axb"],
+    ["a+b", "aab"],
+    ["a|b", "a"],
+    ["a(b)", "ab"],
+    ["a[b]", "ab"],
+    ["a{1}", "a"],
+    ["a?b", "b"],
+    ["a$", "a"],
+    ["a^b", undefined],
+    ["a\\b", undefined],
+  ])("matches %j literally, never as a regular expression", (pattern, regexTwin) => {
+    const ws: Workspace[] = [{ dir: "a/literal", name: pattern }];
+    if (regexTwin !== undefined) ws.push({ dir: "b/regex", name: regexTwin });
+    expect(selectWorkspaces(ws, [pattern]).map((w) => w.dir)).toEqual(["a/literal"]);
+  });
+
+  // The literal segments have to fit between prefix and suffix without reusing
+  // a character. `beta*beta` names two occurrences of `beta` and a workspace
+  // called `beta` has one; `a*c*c` needs two `c`s after the `a`. Both positive
+  // twins are here so the case cannot pass by rejecting everything.
+  it("does not let two segments of one pattern match the same characters", () => {
+    const ws: Workspace[] = [
+      { dir: "libs/beta", name: "beta" },
+      { dir: "a/abc", name: "abc" },
+    ];
+    expect(() => selectWorkspaces(ws, ["beta*beta"])).toThrow(/matched no workspace/);
+    expect(() => selectWorkspaces(ws, ["a*c*c"])).toThrow(/matched no workspace/);
+    const twins: Workspace[] = [
+      { dir: "libs/twice", name: "betaXbeta" },
+      { dir: "a/acc", name: "acc" },
+    ];
+    expect(selectWorkspaces(twins, ["beta*beta"]).map((w) => w.dir)).toEqual(["libs/twice"]);
+    expect(selectWorkspaces(twins, ["a*c*c"]).map((w) => w.dir)).toEqual(["a/acc"]);
+  });
+
+  it("matches a bare * and a ** alike, and an empty pattern only against nothing", () => {
+    const ws: Workspace[] = [{ dir: "libs/beta", name: "beta" }];
+    expect(selectWorkspaces(ws, ["**"]).map((w) => w.dir)).toEqual(["libs/beta"]);
+    expect(() => selectWorkspaces(ws, [""])).toThrow(/matched no workspace/);
+  });
+
+  // Not a style preference, and not a hypothetical. `*a*a*...*ab` against a
+  // name of 40 `a`s is the textbook catastrophic backtrack, and BOTH obvious
+  // implementations take it: measured under node 24, a compiled `^.*a.*a...ab$`
+  // takes 9.4s at 10 repeats and `posix.matchesGlob` 7.3s, each roughly
+  // tripling per further repeat. A filter is a CLI string, so the cost lands on
+  // whoever typed it -- but "thicket hung" is the worst available way to report
+  // a pattern that simply matches nothing.
+  //
+  // Ten repeats rather than twenty on purpose: twenty makes a regressed
+  // implementation run for hours, and a test that hangs the suite reports the
+  // regression far worse than one that fails in nine seconds. The correct
+  // implementation answers in microseconds, so the budget has four orders of
+  // magnitude of room.
+  it("answers a pathological star pattern immediately", () => {
+    const ws: Workspace[] = [
+      { dir: "x", name: "x" },
+      { dir: "a/lit", name: "a".repeat(40) },
+    ];
+    const started = performance.now();
+    expect(() => selectWorkspaces(ws, ["*a".repeat(10) + "b"])).toThrow(/matched no workspace/);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  // The two halves of this file compose or neither is worth anything. The
+  // fixture is what makes `*` discriminating: three of its four workspaces are
+  // scoped, so a name matched as a path selects `beta` alone.
+  it("selects over what discoverWorkspaces actually found", () => {
+    const all = discoverWorkspaces(workspacesRoot());
+    expect(selectWorkspaces(all, ["*"]).map((w) => w.dir)).toEqual([
+      "deep/a/b/gamma",
+      "libs/beta",
+      "tools/alpha",
+      "tools/cfgonly",
+    ]);
+    expect(selectWorkspaces(all, ["./tools/*", "!@fix/cfgonly"]).map((w) => w.dir)).toEqual([
+      "tools/alpha",
+    ]);
+  });
 });
