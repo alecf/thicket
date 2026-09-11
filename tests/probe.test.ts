@@ -16,13 +16,13 @@ describe("sourceFileNames", () => {
     // the program also lists the 63 default lib files, which live wherever the
     // toolchain was installed, and one that survived the skip rules arrives as
     // a `../../..` path that matches nothing the caller holds.
-    const names = await sourceFileNames([alphaConfig]);
+    const { names } = await sourceFileNames([alphaConfig]);
     // The main config excludes tests; the probe must reflect that exactly.
     expect(names).toEqual(["src/a.ts", "src/b.ts"]);
   });
 
   it("sees the file the sibling test config adds", async () => {
-    const names = await sourceFileNames([alphaConfig, alphaTestConfig]);
+    const { names } = await sourceFileNames([alphaConfig, alphaTestConfig]);
     // `a.ts` appears in both programs -- the test config pulls it in through
     // `a.test.ts`'s import -- so this also pins the dedupe.
     //
@@ -38,7 +38,7 @@ describe("sourceFileNames", () => {
     // stopped at the requested config would report zero files here, and a
     // caller comparing that against the tree would conclude the config covers
     // nothing rather than that the probe never looked.
-    const names = await sourceFileNames([resolve(solutionWorkspacesRoot(), "tsconfig.json")]);
+    const { names } = await sourceFileNames([resolve(solutionWorkspacesRoot(), "tsconfig.json")]);
     expect(names).toEqual(["tools/alpha/src/a.ts"]);
   });
 
@@ -73,7 +73,10 @@ describe("sourceFileNames", () => {
       );
       await writeFile(join(dir, "pkg/src/x.ts"), "export const x = 1;\n");
 
-      const names = await sourceFileNames([join(dir, "build/tsconfig.json")]);
+      const { root, names } = await sourceFileNames([join(dir, "build/tsconfig.json")]);
+      // The root is REPORTED, not assumed: the caller never sees the config
+      // set `expandReferences` opened, so it cannot compute this itself.
+      expect(root).toBe(dir);
       expect(names).toEqual(["pkg/src/x.ts"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -92,6 +95,14 @@ describe("sourceFileNames", () => {
       await mkdir(join(dir, "types"), { recursive: true });
       await writeFile(join(dir, "types/global.d.ts"), "declare const AMBIENT: number;\n");
       await writeFile(join(dir, "main.ts"), "export const n = AMBIENT;\n");
+      // The CAPITAL in `Util.ts` is load-bearing -- do not rename this file to
+      // something tidier. It is the only datum in these tests whose order
+      // differs between code-unit comparison and collation: `compareStrings`
+      // puts `Util.ts` first (`U` < `m`), while `localeCompare` folds case and
+      // puts `main.ts` first. Without it, swapping the comparator leaves every
+      // probe test green, and the determinism rule in AGENTS.md §1 is pinned
+      // as "some sort happens" rather than as the order it names.
+      await writeFile(join(dir, "Util.ts"), "export const u = 1;\n");
       await writeFile(
         join(dir, "tsconfig.json"),
         JSON.stringify({
@@ -102,8 +113,8 @@ describe("sourceFileNames", () => {
         }),
       );
 
-      const names = await sourceFileNames([join(dir, "tsconfig.json")]);
-      expect(names).toEqual(["main.ts"]);
+      const { names } = await sourceFileNames([join(dir, "tsconfig.json")]);
+      expect(names).toEqual(["Util.ts", "main.ts"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -130,7 +141,7 @@ describe("sourceFileNames", () => {
         }),
       );
 
-      const names = await sourceFileNames([join(dir, "tsconfig.json")]);
+      const { names } = await sourceFileNames([join(dir, "tsconfig.json")]);
       expect(names).toEqual(["main.ts"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -145,12 +156,15 @@ describe("sourceFileNames agrees with openProject", () => {
   // identical rather than merely compatible, and it opens two configs in
   // sibling directories so both agree on a root neither config's own
   // directory would give.
-  it("returns exactly the files openProject analyzes", async () => {
+  it("returns exactly the files openProject analyzes, measured from the same root", async () => {
     const probed = await sourceFileNames(monorepoConfigs());
     const project = await openProject(monorepoConfigs());
     try {
-      expect(probed).toEqual(project.files().map((f) => f.path));
-      expect(probed).toEqual(["a/src/index.ts", "b/src/index.ts", "shared/src/util.ts"]);
+      // Both halves matter: identical lists measured from different roots
+      // would still be two different answers.
+      expect(probed.root).toBe(project.root);
+      expect(probed.names).toEqual(project.files().map((f) => f.path));
+      expect(probed.names).toEqual(["a/src/index.ts", "b/src/index.ts", "shared/src/util.ts"]);
     } finally {
       await project.close();
     }

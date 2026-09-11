@@ -57,7 +57,7 @@ describe("the thicket process", () => {
       [
         "-e",
         `const { sourceFileNames } = await import("./src/extract/ts-adapter.ts");\n` +
-          `console.log(JSON.stringify(await sourceFileNames([${JSON.stringify(fixtureConfig())}])));\n`,
+          `console.log(JSON.stringify((await sourceFileNames([${JSON.stringify(fixtureConfig())}])).names));\n`,
       ],
       60_000,
     );

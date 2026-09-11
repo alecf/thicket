@@ -728,6 +728,14 @@ export async function openProject(
   };
 }
 
+/** What a probe found: the file list, and the root those paths are measured from. */
+export interface ProbeResult {
+  /** Absolute, POSIX-separated, exactly what `openProject` would report. */
+  root: string;
+  /** Paths relative to `root`, POSIX, deduped, sorted with `compareStrings`. */
+  names: string[];
+}
+
 /**
  * Paths of a project's source files, without materializing any of them.
  *
@@ -738,18 +746,18 @@ export async function openProject(
  * full program load costs about as much as the analysis it is trying to
  * justify.
  *
- * Paths are POSIX and relative to the same root `openProject` would report for
- * the same configs: the common ancestor of every config actually OPENED, which
- * a reference reaching outside the requested config's directory moves upwards.
- * Root it at the requested configs instead and a probe of a solution config
- * answers in `../`-prefixed paths, which match nothing the caller holds.
- *
- * That root moves with the ARGUMENT, so these paths are repo-relative only
- * when the call covers the repo. Probe one workspace's tsconfig on its own and
- * the answers are relative to that workspace -- comparing them against a list
- * gathered at the repo root finds nothing in common, which reads as "this
- * config covers no files" rather than "these two lists are measured from
+ * The root comes back WITH the names because the caller cannot work it out:
+ * it is the common ancestor of every config actually OPENED, and
+ * `expandReferences` may open configs the caller never named, so a reference
+ * reaching outside the requested config's directory moves the root upwards
+ * without the call site ever seeing it. Returning a bare `string[]` would make
+ * the list's meaning depend on a value invisible at the call site -- and two
+ * lists measured from different roots have no paths in common at all, which
+ * reads as "this config covers no files" rather than "these were measured from
  * different places".
+ *
+ * Root it at the REQUESTED configs instead and a probe of a solution config
+ * answers in `../`-prefixed paths, which match nothing the caller holds.
  *
  * Applies the same skip rules as `openProject` so the two agree about what a
  * "source file" is -- a probe that counted `.d.ts` would propose a sibling
@@ -760,7 +768,7 @@ export async function openProject(
  * avoid, and a sibling that contributes only excluded files is a rounding
  * error against a second full program load.
  */
-export async function sourceFileNames(configs: readonly string[]): Promise<string[]> {
+export async function sourceFileNames(configs: readonly string[]): Promise<ProbeResult> {
   const list = configs.map((c) => (isAbsolute(c) ? c : resolve(c)));
   const api = new API({ cwd: commonRootDir(list) });
   try {
@@ -773,7 +781,10 @@ export async function sourceFileNames(configs: readonly string[]): Promise<strin
         seen.add(toPosix(relative(root, name)));
       }
     }
-    return [...seen].sort(compareStrings);
+    // `compareStrings`, never `localeCompare`: under `en-US` collation folds
+    // case, so `src/Util.ts` sorts AFTER `src/alpha.ts` and two machines emit
+    // differently ordered lists from identical source. See `src/order.ts`.
+    return { root, names: [...seen].sort(compareStrings) };
   } finally {
     // The API holds an open connection to the `tsgo` child it spawned, and
     // that connection keeps the event loop alive. Leak it and nothing is
