@@ -1,5 +1,6 @@
 {
   "name": "fixture-root",
   "private": true,
+  "type": "module",
   "workspaces": ["tools/*", "libs/*", "deep/**", "!libs/ignored"]
 }

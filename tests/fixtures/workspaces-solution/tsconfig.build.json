@@ -4,6 +4,6 @@
   // file this config names belongs to `tools/alpha`. Scope that check to the
   // whole tree instead and this config starts looking like the thing that
   // covers `tools/alpha` -- which is the mistake it exists to catch.
-  "compilerOptions": { "target": "es2023", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
   "include": ["tools/**/*.ts"]
 }

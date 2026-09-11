@@ -1,5 +1,6 @@
 {
   "name": "solution-fixture-root",
   "private": true,
+  "type": "module",
   "workspaces": ["tools/*"]
 }

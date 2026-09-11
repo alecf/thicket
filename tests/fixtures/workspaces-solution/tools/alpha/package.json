@@ -1,1 +1,1 @@
-{ "name": "@sol/alpha", "version": "0.0.0" }
+{ "name": "@sol/alpha", "version": "0.0.0", "type": "module" }

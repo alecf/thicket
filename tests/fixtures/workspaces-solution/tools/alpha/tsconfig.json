@@ -1,4 +1,4 @@
 {
-  "compilerOptions": { "target": "es2023", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
   "include": ["src/**/*.ts"]
 }

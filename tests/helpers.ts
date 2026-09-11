@@ -248,6 +248,16 @@ export function workspacesRoot(): string {
  * root has no sibling at all, so a coverage check scoped to the whole tree
  * rather than to files in no workspace passes there by construction. Here it
  * adopts a config that covers only another workspace's files.
+ *
+ * `tools/alpha/scripts/build.ts` closes the other way that check can be wrong.
+ * Scope the root's gap GLOBALLY -- "files no config chosen so far covers" --
+ * and with every `tools/` file already covered by alpha's own config the
+ * residual is `scripts/root-only.ts` alone, which the sibling does not cover,
+ * so the sibling is declined for a reason unrelated to scoping. `build.ts`
+ * sits outside alpha's `src/**` and inside the sibling's `tools/**`, so it
+ * survives into a global residual and the sibling covers it. Both mis-scopes
+ * now adopt it; the correct check looks for a sibling inside `tools/alpha`,
+ * finds none, and reports alpha's gap as permanent.
  */
 export function solutionWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-solution");
