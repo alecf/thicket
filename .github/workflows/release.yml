@@ -26,7 +26,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4"
+          # Pinned exactly, unlike ci.yml's floating "1.4". `bun build
+          # --compile` embeds the Bun runtime, so this is not a build detail --
+          # it is a component of the artifact users download, and "1.4" would
+          # mean the released binary's runtime is whatever setup-bun happened
+          # to resolve that day. CI stays floating so a Bun regression surfaces
+          # on a PR rather than in a release.
+          #
+          # Bumping this is a deliberate act: rebuild, re-run the `package`
+          # job's byte-identical check, then raise the pin. 1.4.0 -> 1.4.2 was
+          # verified to leave the report unchanged.
+          bun-version: "1.4.2"
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
