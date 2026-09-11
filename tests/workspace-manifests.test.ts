@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { globsFromPnpmText, workspaceGlobs } from "../src/extract/manifest.js";
+import {
+  globsFromPnpmText,
+  manifestProblems,
+  workspaceGlobs,
+} from "../src/extract/manifest.js";
 import { pnpmWorkspacesRoot, withRoot, workspacesRoot } from "./helpers.js";
 
 describe("workspaceGlobs", () => {
@@ -342,5 +346,67 @@ describe("globsFromPnpmText", () => {
     // Not a list of scalars. Reading the keys as globs would hand back
     // `["libs"]`, an answer with no relationship to what the manifest says.
     expect(globsFromPnpmText("packages:\n  libs:\n    - a/*\n")).toBeUndefined();
+  });
+});
+
+/**
+ * The diagnostic split. `workspaceGlobs` answers `undefined` for absent,
+ * unreadable and unparseable alike -- right there, wrong for a reader, because
+ * the coverage banner then blames SCOPE for a manifest that would not read.
+ */
+describe("manifestProblems", () => {
+  // The drift this exists to catch: `manifestProblems` and the reader share
+  // `declaredList`, so they cannot disagree about which shapes are understood
+  // -- but re-inlining `Array.isArray(ws) ? ws : undefined` here is silent, and
+  // its effect is a warning that CONTRADICTS a reader handling the file fine.
+  // Every yarn v1 monorepo would be told its manifest cannot be read while its
+  // workspaces were being analyzed. A wrong statement is worse than none.
+  it("reports nothing for a yarn v1 manifest the reader accepts", () => {
+    withRoot(
+      {
+        "package.json": JSON.stringify({
+          workspaces: { packages: ["libs/*"], nohoist: ["**/x"] },
+        }),
+      },
+      (root) => {
+        expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+        expect(manifestProblems(root)).toEqual([]);
+      },
+    );
+  });
+
+  it("reports nothing for an ordinary package that declares no workspaces", () => {
+    // The single-project case, which is every run this tool had before
+    // discovery existed. A line here would be on stderr for all of them.
+    withRoot({ "package.json": JSON.stringify({ name: "plain" }) }, (root) =>
+      expect(manifestProblems(root)).toEqual([]),
+    );
+  });
+
+  it("reports nothing when there is no manifest at all", () => {
+    withRoot({}, (root) => expect(manifestProblems(root)).toEqual([]));
+  });
+
+  it("names a package.json that is not JSON", () => {
+    withRoot({ "package.json": '{ "workspaces": ["libs/*"' }, (root) => {
+      const problems = manifestProblems(root);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]!.path).toBe(join(root, "package.json"));
+    });
+  });
+
+  it("names the entries it dropped, which the reader drops silently", () => {
+    withRoot({ "package.json": JSON.stringify({ workspaces: ["libs/*", 7] }) }, (root) => {
+      expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+      expect(manifestProblems(root)).toHaveLength(1);
+    });
+  });
+
+  it("names a pnpm manifest whose packages list it refused", () => {
+    withRoot({ "pnpm-workspace.yaml": "packages:\n  - 'libs/a/*\n" }, (root) => {
+      const problems = manifestProblems(root);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]!.path).toBe(join(root, "pnpm-workspace.yaml"));
+    });
   });
 });

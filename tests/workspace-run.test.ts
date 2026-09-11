@@ -1,6 +1,6 @@
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cachePathFor } from "../src/cache/db.js";
 import { runReport } from "../src/run.js";
@@ -27,6 +27,29 @@ function scratchCopy(from: string): string {
   });
   return root;
 }
+
+/** A throwaway directory holding exactly `files`, keyed by relative name. */
+function scratchTree(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "thicket-ws-tree-"));
+  temps.push(root);
+  for (const [name, text] of Object.entries(files)) {
+    const path = join(root, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  }
+  return root;
+}
+
+const TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "es2022",
+    module: "nodenext",
+    moduleResolution: "nodenext",
+    strict: true,
+    noEmit: true,
+  },
+  include: ["src/**/*.ts"],
+});
 
 afterEach(() => {
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
@@ -102,6 +125,32 @@ describe("runReport over a workspace root", () => {
    * which repo-relative paths cannot express -- so the derived root wins and
    * the run says which one it used.
    */
+  /**
+   * The same decline, reached by the boundary rather than by depth. `pack` is a
+   * string prefix of `package` and an ancestor of nothing, so a raw
+   * `derived.startsWith(abs)` accepts the pin: every analyzed file then gets a
+   * `../package/`-prefixed path -- the one thing repo-relative paths may never
+   * carry -- and the warning that would have said so never fires. The same trap
+   * `commonRootDir` compares whole segments to avoid.
+   */
+  it("declines a pin that is a string prefix of the real root, not an ancestor", async () => {
+    const outer = scratchTree({
+      "package/tsconfig.json": TSCONFIG,
+      "package/src/a.ts": "export const a = 1;\n",
+    });
+    mkdirSync(join(outer, "pack"));
+    const warnings: string[] = [];
+    const { json } = await runReport({
+      config: [join(outer, "package/tsconfig.json")],
+      dir: join(outer, "pack"),
+      cache: false,
+      warn: (message) => warnings.push(message),
+    });
+    expect(json.fileCount).toBe(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(join(outer, "package"));
+  });
+
   it("declines the pin, loudly, when a config reaches above the analyzed dir", async () => {
     const warnings: string[] = [];
     const { json } = await runReport({

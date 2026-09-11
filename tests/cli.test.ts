@@ -145,8 +145,8 @@ describe("main", () => {
     const on = capture();
     await main(["--config", generatedConfig(), "--include-generated"]);
     // 4 hand-written, plus 2 generated directories and 2 banner-marked files.
-    expect(offFiles).toMatch(/4 files/);
-    expect(on.stdout()).toMatch(/8 files/);
+    expect(offFiles).toMatch(/\b4 files \//);
+    expect(on.stdout()).toMatch(/\b8 files \//);
   });
 
   it("states what it did not analyze, so a thinned corpus is visible", async () => {
@@ -162,7 +162,7 @@ describe("main", () => {
   it("--exclude drops matching files and says so", async () => {
     const io = capture();
     await main(["--config", generatedConfig(), "--exclude", "**/distance/**"]);
-    expect(io.stdout()).toMatch(/3 files/);
+    expect(io.stdout()).toMatch(/\b3 files \//);
     expect(io.stdout()).toMatch(/1 matching --exclude/);
   });
 
@@ -173,7 +173,7 @@ describe("main", () => {
     const io = capture();
     await main(["--config", generatedConfig(), "--no-banner-scan"]);
     // The 4 hand-written files plus the 2 the banner rule was dropping.
-    expect(io.stdout()).toMatch(/6 files/);
+    expect(io.stdout()).toMatch(/\b6 files \//);
     expect(io.stdout()).toMatch(/2 in generated directories/);
     expect(io.stdout()).not.toMatch(/banner comment/);
   });
@@ -187,7 +187,7 @@ describe("main", () => {
       "--exclude",
       "**/distance/**",
     ]);
-    expect(io.stdout()).toMatch(/7 files/);
+    expect(io.stdout()).toMatch(/\b7 files \//);
   });
 
   it("--granularity dir names modules at their own depth", async () => {
@@ -226,7 +226,7 @@ describe("main", () => {
   it("analyzes a solution-style config rather than reporting it empty", async () => {
     const io = capture();
     expect(await main(["--config", solutionConfig()])).toBe(0);
-    expect(io.stdout()).toMatch(/3 files/);
+    expect(io.stdout()).toMatch(/\b3 files \//);
   });
 
   it("--no-cache leaves no cache behind and reports the same thing", async () => {
