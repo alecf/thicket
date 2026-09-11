@@ -12,3 +12,4 @@ site/dist/
 # compiled binaries and their per-platform tsgo payloads
 dist-bin/
 .build-cache/
+dist-npm/
