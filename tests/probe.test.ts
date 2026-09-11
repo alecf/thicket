@@ -38,6 +38,23 @@ describe("sourceFileNames", () => {
     expect(names).toEqual(["src/a.test.ts", "src/a.ts", "src/b.ts"]);
   });
 
+  it("splits the names by the config that contributed them", async () => {
+    // The union cannot answer "which of these two siblings added the file",
+    // and that is the question sibling selection asks. `tsconfig.build.json`
+    // names a PROPER subset of `tsconfig.json`, so it adds nothing to the
+    // union at all -- read the union alone and it is indistinguishable from
+    // `tsconfig.test.json`, which adds the one file the main config excludes.
+    const buildConfig = resolve(workspacesRoot(), "tools/alpha/tsconfig.build.json");
+    const { names, byConfig } = await sourceFileNames([alphaConfig, buildConfig, alphaTestConfig]);
+    expect(names).toEqual(["src/a.test.ts", "src/a.ts", "src/b.ts"]);
+    // Keys are lower-cased absolute paths; tsconfig paths reach us with host
+    // casing, and `expandReferences` folds case for the same reason.
+    expect(byConfig.get(alphaConfig.toLowerCase())).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(byConfig.get(buildConfig.toLowerCase())).toEqual(["src/a.ts"]);
+    // The transitive closure, not the `include`: `a.test.ts` imports `a.ts`.
+    expect(byConfig.get(alphaTestConfig.toLowerCase())).toEqual(["src/a.test.ts", "src/a.ts"]);
+  });
+
   it("expands references, so a solution config does not answer 'no files'", async () => {
     // `{"files": [], "references": [...]}` owns nothing itself. A probe that
     // stopped at the requested config would report zero files here, and a

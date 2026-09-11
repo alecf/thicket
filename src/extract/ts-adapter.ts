@@ -734,6 +734,33 @@ export interface ProbeResult {
   root: string;
   /** Paths relative to `root`, POSIX, deduped, sorted with `compareStrings`. */
   names: string[];
+  /**
+   * The same names again, split by the config that contributed them: key is
+   * the config's absolute path LOWER-CASED, value is that config's own list,
+   * sorted the same way.
+   *
+   * Look values up; never iterate this. Map order is insertion order, which
+   * here is whatever order the API handed its projects back in, and nothing
+   * downstream may depend on it (AGENTS.md §1).
+   *
+   * `names` cannot answer "which of these configs added that file", and the
+   * question matters: a workspace with two sibling configs needs to keep the
+   * one that closes its gap and drop the one that adds nothing. Asking by
+   * probing each config alone costs ~35ms of `tsgo` spawn apiece, which is
+   * the cost batching exists to avoid, so the breakdown rides along with the
+   * union instead.
+   *
+   * Lower-cased because tsconfig paths reach us with host casing and the same
+   * config can arrive spelled two ways; `expandReferences` folds case for its
+   * visited set for the same reason.
+   *
+   * Keys are every config actually OPENED, `expandReferences`'s additions
+   * included, so a config the caller never named can appear here. The inverse
+   * is the one to keep in mind: a solution config owning no files of its own
+   * maps to an EMPTY list, and what it delegates to is listed under the
+   * config that owns it.
+   */
+  byConfig: Map<string, string[]>;
 }
 
 /**
@@ -812,16 +839,21 @@ export async function sourceFileNames(configs: readonly string[]): Promise<Probe
     const { snapshot, configs: opened } = await expandReferences(api, list);
     const root = commonRootDir(opened);
     const seen = new Set<string>();
+    const byConfig = new Map<string, string[]>();
     for (const project of snapshot.getProjects()) {
+      const own = new Set<string>();
       for (const name of await project.program.getSourceFileNames()) {
         if (isSkippedSourceName(name)) continue;
-        seen.add(toPosix(relative(root, name)));
+        const rel = toPosix(relative(root, name));
+        seen.add(rel);
+        own.add(rel);
       }
+      byConfig.set(project.configFileName.toLowerCase(), [...own].sort(compareStrings));
     }
     // `compareStrings`, never `localeCompare`: under `en-US` collation folds
     // case, so `src/Util.ts` sorts AFTER `src/alpha.ts` and two machines emit
     // differently ordered lists from identical source. See `src/order.ts`.
-    return { root, names: [...seen].sort(compareStrings) };
+    return { root, names: [...seen].sort(compareStrings), byConfig };
   } finally {
     // The API holds an open connection to the `tsgo` child it spawned, and
     // that connection keeps the event loop alive. Leak it and nothing is

@@ -1,7 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join, posix } from "node:path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { compareStrings } from "../order.js";
 import { readJson, workspaceGlobs } from "./manifest.js";
+import { type ScanOptions, scanSourceFiles } from "./scope.js";
+import { sourceFileNames } from "./ts-adapter.js";
+
+const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 
 export interface Workspace {
   /** Repo-relative POSIX directory. */
@@ -328,4 +332,217 @@ function matchesNameGlob(name: string, pattern: string): boolean {
     at = found + part.length;
   }
   return true;
+}
+
+/** One directory's tsconfigs: the one that is loaded, and the ones that must earn it. */
+interface DirConfigs {
+  /** Repo-relative POSIX path of the config loaded unconditionally. */
+  primary: string;
+  /** The rest, repo-relative POSIX, sorted. Loaded only if they close a gap. */
+  siblings: string[];
+}
+
+/**
+ * The `tsconfig*.json` files in one directory, or `undefined` when it has
+ * none.
+ *
+ * `undefined` is a real answer, not a failure: a workspace may exist to
+ * publish shared compiler settings and own no source at all. Throwing, or
+ * inventing `<dir>/tsconfig.json`, turns a legitimate layout into an error or
+ * into a config path that does not exist.
+ *
+ * `tsconfig*.json`, never `*.json`. A `base.json` or a `package.json` sitting
+ * beside the configs is not a project, and opening one as a project analyzes
+ * a file set nobody asked for.
+ *
+ * `tsconfig.json` is the primary when it exists, and otherwise the first name
+ * in `compareStrings` order -- a rule, rather than a preference, because a
+ * directory holding only `tsconfig.app.json` and `tsconfig.node.json` has to
+ * pick one and the answer may not depend on `readdirSync` order, which is a
+ * property of the filesystem.
+ */
+function configsIn(root: string, dir: string): DirConfigs | undefined {
+  let entries;
+  try {
+    entries = readdirSync(dir === "." ? root : join(root, dir), { withFileTypes: true });
+  } catch {
+    // An unreadable directory is a permissions problem, not a configuration.
+    // Answering "no configs" degrades to analyzing less; throwing would make
+    // one unreadable workspace end the run.
+    return undefined;
+  }
+  const names = entries
+    .filter((e) => e.isFile() && e.name.startsWith("tsconfig") && e.name.endsWith(".json"))
+    .map((e) => e.name)
+    .sort(compareStrings);
+  if (names.length === 0) return undefined;
+  const primary = names.includes("tsconfig.json") ? "tsconfig.json" : names[0]!;
+  const rel = (name: string) => (dir === "." ? name : `${dir}/${name}`);
+  return { primary: rel(primary), siblings: names.filter((n) => n !== primary).map(rel) };
+}
+
+/**
+ * The deepest directory in `scopes` that contains `file`, or `"."`.
+ *
+ * Deepest, not first: `tools/**` yields both `tools/alpha` and
+ * `tools/alpha/sub`, so a file under the nested workspace is contained by
+ * both. Blaming the parent sends it looking for a sibling config of its own
+ * to close a gap that is not the parent's -- and a parent's build config
+ * reaching into its child's directory will happily close it.
+ *
+ * Longest wins because every directory containing `file` is a prefix of every
+ * deeper one, so string length orders them exactly.
+ */
+function deepestScope(scopes: readonly string[], file: string): string {
+  let best = ".";
+  for (const dir of scopes) {
+    if (dir === "." || !file.startsWith(`${dir}/`)) continue;
+    if (best === "." || dir.length > best.length) best = dir;
+  }
+  return best;
+}
+
+/**
+ * Turns a probe's names into repo-relative ones.
+ *
+ * A probe measures its paths from `commonRootDir` of the configs it actually
+ * opened, which is NOT the repo root whenever the selected workspaces share a
+ * deeper ancestor -- one workspace under `--filter`, or a repo whose root has
+ * no tsconfig of its own. Diff those against a repo-relative scan unrebased
+ * and nothing overlaps at all: the entire tree reads as a gap, every workspace
+ * looks uncovered, and every sibling config in the repo becomes a candidate.
+ *
+ * A probe root ABOVE the repo root throws instead. It means a config
+ * `references` one outside the tree, and a repo-relative path cannot express
+ * a file outside the repo -- there is no prefix to rebase by, so the honest
+ * answer is to say so rather than to emit `../` paths that match nothing on
+ * either side of the coverage figure.
+ */
+function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
+  const prefix = toPosix(relative(resolve(root), probeRoot));
+  if (prefix === ".." || prefix.startsWith("../") || isAbsolute(prefix)) {
+    throw new Error(
+      `the tsconfigs under ${root} resolved to files outside it (common root ${probeRoot}); ` +
+        `a project reference reaches above the analyzed root, which repo-relative paths cannot express`,
+    );
+  }
+  return prefix === "" ? (name) => name : (name) => `${prefix}/${name}`;
+}
+
+/**
+ * The tsconfigs to analyze for `root` and `workspaces`, repo-relative, sorted.
+ *
+ * The root counts as a workspace. Its own tsconfig routinely covers files
+ * that live in no workspace at all -- scripts, tooling, config -- and dropping
+ * it trades one coverage hole for another.
+ *
+ * Every workspace's primary config is loaded. A SIBLING config is loaded only
+ * when the workspace has source that no primary reaches and that sibling is
+ * what reaches it. Both halves matter: `tools/alpha/tsconfig.test.json` adds
+ * the test file its main config excludes, while `tools/alpha/tsconfig.build.json`
+ * names a proper subset of the same main config and adds nothing. Taking
+ * every sibling would load the second, which costs a whole extra program for
+ * files already in the answer.
+ *
+ * Decided by LOADING rather than by reading `include`/`exclude`.
+ * Reimplementing tsconfig glob semantics, `extends` chains included, is a
+ * silent-wrongness trap of the kind AGENTS.md §3 catalogues, and the sibling
+ * shapes in the wild differ: one is disjoint from its main config, the other
+ * a superset of it.
+ *
+ * TWO probes, never one per workspace. A probe is not the per-workspace
+ * saving it looks like: `sourceFileNames` carries the measurements, and the
+ * short version is that its cost is dominated by a fixed `tsgo` spawn that a
+ * program load pays too, so at workspace size a probe is free rather than
+ * cheap and N of them is N spawns bought for nothing. The primaries go in one
+ * call and the candidate siblings in one more, and the second call is skipped
+ * entirely when no workspace is missing anything -- the common case, where
+ * every workspace has exactly one config.
+ *
+ * The gap is computed ONCE, globally, and each gapped file is attributed to
+ * the deepest workspace that contains it. That is what keeps a directory from
+ * being blamed for a file it does not own -- the root for a workspace's
+ * source, or a parent workspace for its nested child's -- and it is why no
+ * scope needs to be told which directories to skip.
+ *
+ * Probe names are a strict SUPERSET of what analysis will keep: the probe
+ * skips the generated-directory, banner and `--exclude` rules, which
+ * `scanSourceFiles` applies. The asymmetry is safe only in this direction, so
+ * these names may answer "does this config contribute files" and nothing else
+ * -- never the coverage numerator, never a prediction of the analyzed set.
+ *
+ * KNOWN LIMIT, and it is reachable through `--filter`: a file inside a
+ * workspace that was DISCOVERED but not selected is contained by no scope
+ * here, so it lands in the root's gap. The root's own sibling configs are
+ * then judged against it, and one whose `include` spans the repo would be
+ * adopted -- widening a filtered run back out. Closing it needs the
+ * unselected workspaces, which this signature does not carry; every fixture
+ * root here has no sibling beside its primary, so nothing exercises it today.
+ */
+export async function configsFor(
+  root: string,
+  workspaces: readonly Workspace[],
+  opts: ScanOptions = {},
+): Promise<string[]> {
+  // Sorted and deduped: a caller may pass the root itself, or the same
+  // workspace twice (two globs matching one directory), and neither may
+  // change the answer -- the second is the phantom-identical-clone hazard
+  // from AGENTS.md §3 reached by a different road.
+  const scopes = [...new Set([".", ...workspaces.map((w) => w.dir)])].sort(compareStrings);
+
+  const owned = new Map<string, DirConfigs>();
+  for (const dir of scopes) {
+    const configs = configsIn(root, dir);
+    if (configs !== undefined) owned.set(dir, configs);
+  }
+  const primaries = scopes
+    .map((dir) => owned.get(dir)?.primary)
+    .filter((c): c is string => c !== undefined)
+    .sort(compareStrings);
+  // Nothing to load, so nothing to probe. `sourceFileNames([])` would throw on
+  // an empty common root, and "this tree holds no tsconfig" is a caller's
+  // problem to report, not an exception from config selection.
+  if (primaries.length === 0) return [];
+
+  const first = await sourceFileNames(primaries.map((c) => resolve(root, c)));
+  const rebaseFirst = rebaseOnto(root, first.root);
+  const covered = new Set(first.names.map(rebaseFirst));
+
+  const gapOf = new Map<string, Set<string>>();
+  for (const file of scanSourceFiles(root, opts)) {
+    if (covered.has(file)) continue;
+    const dir = deepestScope(scopes, file);
+    const gap = gapOf.get(dir);
+    if (gap === undefined) gapOf.set(dir, new Set([file]));
+    else gap.add(file);
+  }
+
+  const candidates: { config: string; scope: string }[] = [];
+  for (const dir of scopes) {
+    const configs = owned.get(dir);
+    if (configs === undefined || (gapOf.get(dir)?.size ?? 0) === 0) continue;
+    for (const config of configs.siblings) candidates.push({ config, scope: dir });
+  }
+  if (candidates.length === 0) return primaries;
+
+  // The primaries go in again. Not for the keep-check below -- `byConfig` is
+  // per-project and does not change with what else is open -- but so that both
+  // probes measure from the same root: a candidate-only probe roots at the
+  // candidates' common ancestor, while the gap sets it is compared against
+  // were measured from the first probe's. Both are rebased, so this is belt
+  // and braces, and it keeps one prefix in play rather than two.
+  const second = await sourceFileNames(
+    [...primaries, ...candidates.map((c) => c.config)].map((c) => resolve(root, c)),
+  );
+  const rebaseSecond = rebaseOnto(root, second.root);
+  const kept = candidates.filter(({ config, scope }) => {
+    const gap = gapOf.get(scope);
+    // `byConfig`, not the union: with two siblings beside one workspace the
+    // union says only that SOMETHING closed the gap, and keeping both is
+    // exactly the "adds nothing" config this check exists to refuse.
+    const own = second.byConfig.get(resolve(root, config).toLowerCase()) ?? [];
+    return gap !== undefined && own.some((name) => gap.has(rebaseSecond(name)));
+  });
+
+  return [...new Set([...primaries, ...kept.map((k) => k.config)])].sort(compareStrings);
 }

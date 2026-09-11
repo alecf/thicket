@@ -1,0 +1,10 @@
+{
+  // A sibling of the PARENT workspace whose `include` reaches into the NESTED
+  // one. Nothing may pick it up: `sub/scripts/gen.ts` is `tools/alpha/sub`'s
+  // gap, not `tools/alpha`'s, so the parent never goes looking for a sibling
+  // to close it. Attribute a gapped file to the shallowest workspace that
+  // contains it instead of the deepest and this config is adopted -- the same
+  // mis-scoping `workspaces-solution` catches at the root, one level down.
+  "extends": "./tsconfig.json",
+  "include": ["sub/**/*.ts"]
+}

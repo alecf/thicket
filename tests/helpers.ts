@@ -327,3 +327,35 @@ export function withRoot(files: Record<string, string>, body: (root: string) => 
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+/**
+ * A fourth workspace root, and the only one where a workspace sits INSIDE
+ * another. `tools/**` matches both `tools/alpha` and `tools/alpha/sub`, which
+ * is the nesting Task 4 made reachable.
+ *
+ * Two properties no other fixture has, and each is invisible without the
+ * other:
+ *
+ * - `tools/alpha/tsconfig.build.json` reaches into `sub/`. `sub/scripts/gen.ts`
+ *   is the nested workspace's gap, so the parent must never go looking for a
+ *   sibling to close it. Attribute a gapped file to the shallowest workspace
+ *   containing it and this config is adopted.
+ * - There is NO root `tsconfig.json`, which is what puts the probe's root
+ *   below the repo root: the common ancestor of the primaries is `tools`, so
+ *   every name the probe returns is measured from there -- and from
+ *   `tools/alpha/sub` alone once `--filter` narrows the run to one workspace.
+ *   Diff those against a repo-relative scan without rebasing and the whole
+ *   tree reads as a gap -- and `sub/tsconfig.extra.json`, the one sibling that
+ *   genuinely contributes, is then rejected because its names match nothing.
+ *
+ * A root with no config of its own is not a contrivance for that: a pnpm
+ * monorepo that keeps its compiler settings in the packages routinely has one.
+ *
+ * `tools/Zed` is here for its capital letter and nothing else: it is the only
+ * name in these fixtures that sorts differently under code-unit order and
+ * under collation, so it is what fails when `compareStrings` is swapped for
+ * `localeCompare` (AGENTS.md §1).
+ */
+export function nestedWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-nested");
+}

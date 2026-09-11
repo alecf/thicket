@@ -1,0 +1,6 @@
+{
+  "name": "nested-fixture-root",
+  "private": true,
+  "type": "module",
+  "workspaces": ["tools/**"]
+}
