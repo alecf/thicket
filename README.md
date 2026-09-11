@@ -95,7 +95,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config c3a4de98 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 66fac093 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
