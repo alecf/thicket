@@ -15,15 +15,30 @@
 
 <section class="prose">
   <h2 id="quick-start">Quick start</h2>
-  <pre><code class="language-bash">npm install
-npm run build
+  <pre><code class="language-bash">brew install alecf/tap/thicket
 
-node dist/cli.js --config tsconfig.json &gt; thicket.md</code></pre>
+thicket --config tsconfig.json &gt; thicket.md</code></pre>
   <p>
-    Node 24 or newer, because the cache uses the built-in <code>node:sqlite</code>. Point
-    <code>--config</code> at each <code>tsconfig.json</code> you want covered; the report says
-    plainly which files it did <em>not</em> reach and what argument would reach them.
+    Or download a tarball from
+    <a href="https://github.com/alecf/thicket/releases">Releases</a> and put the
+    <code>thicket</code> binary on your <code>PATH</code> — a symlink is fine, it finds its own
+    files through one. Prebuilt for macOS and Linux, on arm64 and x64; nothing to compile and no
+    runtime to install, because the binary carries its own.
   </p>
+  <p>
+    Point <code>--config</code> at each <code>tsconfig.json</code> you want covered; the report
+    says plainly which files it did <em>not</em> reach and what argument would reach them.
+  </p>
+  <blockquote>
+    <p>
+    The download is a <em>directory</em>, not a lone file. thicket analyzes through the
+    TypeScript compiler's native <code>tsgo</code> binary, which it spawns as a child process, so
+    the tarball carries <code>tsgo/</code> beside the executable. Keep them together — thicket
+    locates <code>tsgo/</code> relative to itself, resolving through symlinks, so installing
+    anywhere and linking onto your <code>PATH</code> works; copying the binary out on its own
+    does not.
+    </p>
+  </blockquote>
 
   <h2 id="for-agents">Built to be handed to an agent</h2>
   <p>
