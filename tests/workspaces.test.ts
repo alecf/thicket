@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { globsFromPnpmText, workspaceGlobs } from "../src/extract/workspaces.js";
 import { pnpmWorkspacesRoot, workspacesRoot } from "./helpers.js";
@@ -18,12 +18,17 @@ import { pnpmWorkspacesRoot, workspacesRoot } from "./helpers.js";
  * exercising a branch another test already covers.
  *
  * Files are named rather than implied, because which manifest wins when a root
- * holds two of them is itself under test.
+ * holds two of them is itself under test. A name may carry directories, since
+ * a workspace root's members live in subdirectories of it.
  */
 function withRoot(files: Record<string, string>, body: (root: string) => void): void {
   const root = mkdtempSync(join(tmpdir(), "thicket-ws-"));
   try {
-    for (const [name, text] of Object.entries(files)) writeFileSync(join(root, name), text);
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(root, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
     body(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -155,6 +160,38 @@ describe("workspaceGlobs", () => {
     );
   });
 
+  it("lets an empty package.json declaration win over a pnpm manifest", () => {
+    // `[]` is not nullish, so the pnpm file is never consulted -- and that is
+    // the right answer, not an accident of `??`. An explicit empty declaration
+    // is still a declaration: a root saying "I have no workspaces" must not be
+    // overruled by a second manifest left behind by a half-finished migration.
+    withRoot(
+      {
+        "package.json": JSON.stringify({ workspaces: [] }),
+        "pnpm-workspace.yaml": "packages:\n  - libs/*\n",
+      },
+      (root) => expect(workspaceGlobs(root)).toEqual([]),
+    );
+  });
+
+  it("reads a root whose members are on disk beside the manifest", () => {
+    // The answer comes from the manifest alone -- what is on disk neither adds
+    // to it nor subtracts from it at this layer -- so this is also the one case
+    // that builds a nested path through `withRoot`. Task 4 expands globs
+    // against real directories and needs the helper to express one; without the
+    // recursive mkdir the write throws ENOENT, and this is where that surfaces.
+    withRoot(
+      {
+        "pnpm-workspace.yaml": "packages:\n  - libs/*\n",
+        "libs/beta/package.json": JSON.stringify({ name: "beta" }),
+      },
+      (root) => {
+        expect(existsSync(join(root, "libs", "beta", "package.json"))).toBe(true);
+        expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+      },
+    );
+  });
+
   it("finds the .yml spelling of the pnpm manifest", () => {
     // Both spellings are in the wild and pnpm accepts either. Checking only
     // `.yaml` reports a `.yml` monorepo as a plain single project.
@@ -205,6 +242,23 @@ describe("globsFromPnpmText", () => {
     // "this is a workspace root with no members", which is exactly the wrong
     // thing to say about a root declaring two.
     expect(globsFromPnpmText("packages:\n- 'libs/*'\n- tools/*\n")).toEqual(["libs/*", "tools/*"]);
+  });
+
+  it("reads a manifest with CRLF line endings", () => {
+    // `\r` is a JavaScript line terminator, so `.` cannot match it and `$` does
+    // not assert before it: a comment regex applied before `trimEnd` never
+    // fires on a CRLF line. Both halves of that are silent. A trailing comment
+    // survives into the glob -- `a/* # c` is well-formed and matches nothing,
+    // so one workspace vanishes from discovery while the rest are reported
+    // confidently -- and a full-line comment inside the list becomes an
+    // unparseable line, discarding the whole manifest. Git for Windows defaults
+    // to `core.autocrlf=true` and this repo has no `.gitattributes`, so a
+    // Windows checkout of the fixture beside this file takes the second path.
+    // Both symptoms, because they are separate failures: the first line has a
+    // full-line comment (undefined before the fix) and the second a trailing
+    // one (`["a/* # c"]` before the fix).
+    expect(globsFromPnpmText("packages:\r\n  # why\r\n  - a/* # trailing\r\n")).toEqual(["a/*"]);
+    expect(globsFromPnpmText("packages:\r\n  - a/* # c\r\n")).toEqual(["a/*"]);
   });
 
   it("stops at the next top-level key", () => {

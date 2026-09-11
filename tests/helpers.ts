@@ -281,8 +281,12 @@ export function solutionWorkspacesRoot(): string {
  * entries that are single-quoted, double-quoted and bare; an entry that is a
  * plain directory name rather than a pattern; comments both above `packages:`
  * and inside its list; and later top-level keys, one holding a nested mapping
- * and one holding a list of its own. The parser must stop at the first of those
- * keys and absorb nothing from either.
+ * and one holding a list of its own. The parser must stop at the FIRST of those
+ * keys, which makes everything after it unreachable by construction -- the
+ * second key is realism, not coverage, and the output is identical with those
+ * lines deleted. The shape that would actually leak, a later key whose own list
+ * is flush against the margin, is pinned in `tests/workspaces.test.ts` where it
+ * can be read beside the regex it constrains.
  *
  * Only `libs/gamma` exists on disk. Nothing expands these globs -- this root is
  * read by the manifest parser and by nothing else -- so the rest deliberately

@@ -71,16 +71,33 @@ const strings = (xs: readonly unknown[]): string[] =>
  * at all -- answers `undefined`, which degrades to today's behavior instead of
  * guessing. A wrong glob list would analyze the wrong tree silently; no glob
  * list just means no discovery.
+ *
+ * One known divergence from YAML, left alone deliberately: a quoted scalar
+ * containing ` #` loses comment protection, so `- 'libs/a #1/*'` comes back as
+ * `'libs/a`. YAML suspends comment rules inside quotes and this does not. The
+ * result carries a stray quote, so it fails visibly at expansion rather than
+ * quietly matching a different directory -- which is the trade this whole
+ * function is built around.
  */
 export function globsFromPnpmText(text: string): string[] | undefined {
   const out: string[] = [];
   let inPackages = false;
   for (const raw of text.split("\n")) {
-    // YAML starts a comment at `#` only at line start or after whitespace, so
-    // a `#` inside a glob survives. Stripping every `#` would truncate
-    // `libs/c#1/*` to `libs/c`, which is still a valid glob naming a different
-    // directory -- a wrong answer that looks like a right one.
-    const line = raw.replace(/(^|\s)#.*$/, "$1").trimEnd();
+    // `trimEnd` FIRST, and it is load-bearing rather than tidy: `\r` is a
+    // JavaScript line terminator, so `.` cannot match it and `$` does not
+    // assert before it. Strip comments first and the regex simply never fires
+    // on a CRLF checkout -- a trailing comment rides into the glob (`a/* # c`
+    // is well-formed and matches nothing, so that workspace vanishes from
+    // discovery while the rest are reported confidently) and a full-line
+    // comment becomes an unparseable line that discards the whole manifest.
+    //
+    // The rest: YAML starts a comment at `#` only at line start or after
+    // whitespace, so a `#` inside a glob survives. Stripping every `#` would
+    // truncate `libs/c#1/*` to `libs/c`, still a valid glob naming a different
+    // directory -- a wrong answer that looks like a right one. The space this
+    // leaves behind is absorbed by the blank check below and by `.trim()` on
+    // the captured item.
+    const line = raw.trimEnd().replace(/(^|\s)#.*$/, "$1");
     if (line.trim() === "") continue;
     if (!inPackages) {
       if (/^packages:\s*$/.test(line)) inPackages = true;
@@ -95,11 +112,17 @@ export function globsFromPnpmText(text: string): string[] | undefined {
       out.push(unquote(item[1]!.trim()));
       continue;
     }
-    // A new top-level key ends the block. Anything else under `packages:` is a
-    // shape we do not understand, and guessing is worse than not answering.
+    // A new top-level key ends the block. This runs AFTER the item test on
+    // purpose: a flush `- x` starts at column 0 too, so testing for a
+    // top-level key first would swallow every flush list.
+    //
+    // Anything else under `packages:` is a shape we do not understand, and
+    // guessing is worse than not answering.
     if (/^\S/.test(line)) break;
     return undefined;
   }
+  // The `break` above leaves `inPackages` true, so this ternary is only ever
+  // distinguishing "there was no `packages:` key at all".
   return inPackages ? out : undefined;
 }
 
