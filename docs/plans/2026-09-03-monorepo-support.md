@@ -875,7 +875,48 @@ export async function configsFor(
 }
 ```
 
-`configsForOne` reads `tsconfig*.json` from that directory (sorted, `tsconfig.json` first). **If there are none it returns `[]`** — a workspace can legitimately exist to publish shared config bases and own no source. Otherwise it probes the primary with `sourceFileNames`, diffs against `scanSourceFiles` scoped to the directory (minus `excludeDirs`), and probes-and-keeps siblings while a gap remains. Return repo-relative POSIX paths so the result is deterministic and printable.
+`configsForOne` reads `tsconfig*.json` from that directory (sorted, `tsconfig.json` first). **If there are none it returns `[]`** — a workspace can legitimately exist to publish shared config bases and own no source. Return repo-relative POSIX paths so the result is deterministic and printable.
+
+> **Two findings from Task 6 change how the probing must work. Read both before
+> writing `configsFor`.**
+>
+> **(a) A probe's paths are relative to the configs it was given, not to the
+> repo.** `sourceFileNames([tools/alpha/tsconfig.json])` answers
+> `["src/a.ts", "src/b.ts"]` — **not** `["tools/alpha/src/a.ts", …]` — because the
+> root is `commonRootDir` of the *opened* configs, which for one workspace config
+> is that workspace's own directory. `openProject` behaves identically, so the
+> two agree with each other; but a per-workspace probe diffed against
+> `scanSourceFiles` at the repo root finds **zero** overlap, reads it as "this
+> config covers nothing", and adds every sibling in the repo.
+>
+> **(b) The probe is not the saving this plan assumed.** Measured: 1.0× on a
+> 2-file project, 1.7× at 32 files, 4.9× at 1000. Both entry points pay the same
+> fixed ~35 ms to spawn `tsgo` and load the default lib; only `openProject` pays
+> per file. At workspace scale a probe is **not** cheaper than a load — it is
+> ~35 ms of fixed cost each, so N probes is N × 35 ms of pure overhead.
+>
+> Both point the same way: **probe once over all primaries, not once per
+> workspace.** The root then lands at the repo root and the paths are directly
+> comparable to `scanSourceFiles`.
+
+Revised algorithm — two probes total, not N:
+
+1. Per selected workspace, take `tsconfig.json`, or the first `tsconfig*.json`
+   in `compareStrings` order if there is none. Collect them all.
+2. **One** `sourceFileNames(allPrimaries)` call.
+3. Gap = `scanSourceFiles(root)` minus covered. Attribute each gapped file to the
+   workspace directory that contains it — the deepest one, so a nested workspace
+   claims its own files rather than its parent's (Task 4 made nesting reachable).
+4. For each workspace with a gap and unloaded siblings, add that workspace's
+   siblings as candidates. If none, stop.
+5. **One** further `sourceFileNames(allPrimaries + candidates)` call. Keep only
+   the candidates that contributed a file step 3 had in the gap.
+
+This also retires `excludeDirs`: with the gap computed once, globally, and
+attributed to the deepest containing workspace, a parent never sees its child's
+files as its own and the root never sees any workspace's. Delete that parameter
+rather than carrying it — but keep the `workspaces-solution` fixture assertions,
+which still pin the behaviour the parameter was there to produce.
 
 **Step 4: Run, confirm PASS. Step 5: Commit**
 
