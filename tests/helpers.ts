@@ -235,3 +235,20 @@ export function tangleConfig(): string {
 export function workspacesRoot(): string {
   return resolve(here, "fixtures/workspaces");
 }
+
+/**
+ * A second workspace root in the solution style a real pnpm monorepo uses: the
+ * root `tsconfig.json` declares `"files": []` and delegates to `tools/alpha`,
+ * so it legitimately owns nothing. `scripts/root-only.ts` sits in no workspace
+ * and is covered by no config -- a permanent gap, and the only honest answer
+ * is to say so.
+ *
+ * The root also carries a sibling, `tsconfig.build.json`, whose `include`
+ * reaches into `tools/**`. That is what `workspacesRoot()` cannot test: its
+ * root has no sibling at all, so a coverage check scoped to the whole tree
+ * rather than to files in no workspace passes there by construction. Here it
+ * adopts a config that covers only another workspace's files.
+ */
+export function solutionWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-solution");
+}

@@ -1,0 +1,5 @@
+{
+  "name": "solution-fixture-root",
+  "private": true,
+  "workspaces": ["tools/*"]
+}
