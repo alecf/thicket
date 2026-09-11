@@ -151,24 +151,44 @@ describe("discoverWorkspaces", () => {
     );
   });
 
-  it("stops the package walk at MAX_WALK_DEPTH", () => {
-    // A `**` glob puts no bound on how deep the walk goes, so the walk carries
-    // its own. Both sides are pinned: a bound nothing reaches is a constant
-    // pretending to be a guard, and a bound one level tighter would silently
-    // drop a legitimate workspace. Eight is past any real layout -- the
-    // deepest fixture here sits at four.
+  it("finds a workspace deeper than any fixed depth bound", () => {
+    // There was a `MAX_WALK_DEPTH = 8` here and it was a bug with a test. A
+    // workspace at twelve segments was silently never discovered, while
+    // `scanSourceFiles` -- which has no depth limit -- still counted every one
+    // of its files, so they surfaced as an unexplained hole in the coverage
+    // denominator that no flag could close. Nothing needed bounding: the walk
+    // enumerates the filesystem rather than expanding globs, so `**` cannot
+    // deepen it, and `readdirSync` reports a symlink as not-a-directory, so it
+    // cannot enter a cycle.
     const deep = (n: number) =>
       Array.from({ length: n }, (_, i) => `d${i + 1}`).join("/") + "/package.json";
     withRoot(
       {
-        [deep(8)]: JSON.stringify({ name: "at-the-bound" }),
-        [deep(9)]: JSON.stringify({ name: "past-the-bound" }),
+        [deep(12)]: JSON.stringify({ name: "deep" }),
         "package.json": JSON.stringify({ workspaces: ["**"] }),
       },
-      (root) => {
-        const dirs = discoverWorkspaces(root).map((w) => w.dir);
-        expect(dirs).toEqual(["d1/d2/d3/d4/d5/d6/d7/d8"]);
+      (root) =>
+        expect(discoverWorkspaces(root)).toEqual([
+          { dir: "d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/d12", name: "deep" },
+        ]),
+    );
+  });
+
+  it("discovers a workspace whose glob carries a quoted #", () => {
+    // The end-to-end half of the quoted-scalar case, and the reason it is not
+    // merely a parser nicety: with the `#` read as a comment the glob becomes
+    // `'libs/team`, matches nothing, and this workspace is silently absent
+    // from discovery -- no error, just a coverage gap pointing at a directory
+    // nobody excluded.
+    withRoot(
+      {
+        "pnpm-workspace.yaml": "packages:\n  - 'libs/team #1/*'\n",
+        "libs/team #1/beta/package.json": JSON.stringify({ name: "beta" }),
       },
+      (root) =>
+        expect(discoverWorkspaces(root)).toEqual([
+          { dir: "libs/team #1/beta", name: "beta" },
+        ]),
     );
   });
 

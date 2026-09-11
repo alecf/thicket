@@ -62,12 +62,20 @@ const strings = (xs: readonly unknown[]): string[] =>
  * guessing. A wrong glob list would analyze the wrong tree silently; no glob
  * list just means no discovery.
  *
- * One known divergence from YAML, left alone deliberately: a quoted scalar
- * containing ` #` loses comment protection, so `- 'libs/a #1/*'` comes back as
- * `'libs/a`. YAML suspends comment rules inside quotes and this does not. The
- * result carries a stray quote, so it fails visibly at expansion rather than
- * quietly matching a different directory -- which is the trade this whole
- * function is built around.
+ * Quoting is read, not approximated. A `#` inside a quoted scalar is content,
+ * and treating it as a comment used to return `'libs/team` for
+ * `- 'libs/team #1/*'` -- a confident wrong answer, which is the single shape
+ * this design exists to avoid, and a silent one: the workspace just vanishes
+ * from discovery and its files come back as an unexplained coverage gap. That
+ * divergence was recorded as tolerable on the grounds that a stray quote fails
+ * visibly. It does not fail at all, which is why it is gone.
+ *
+ * What is still refused, because reading it means being a YAML parser: an
+ * unterminated quote (invalid YAML, and every guess at where the scalar ends
+ * yields a glob), anything but a comment after a closing quote, and a
+ * double-quoted scalar containing `\`, whose escape table this does not
+ * implement. `''` inside a single-quoted scalar IS read, since it is that
+ * form's only escape and ignoring it ends the scalar early.
  */
 export function globsFromPnpmText(text: string): string[] | undefined {
   const out: string[] = [];
@@ -88,25 +96,30 @@ export function globsFromPnpmText(text: string): string[] | undefined {
     // discovery while the rest are reported confidently) and a full-line
     // comment becomes an unparseable line that discards the whole manifest.
     //
-    // The rest: YAML starts a comment at `#` only at line start or after
-    // whitespace, so a `#` inside a glob survives. Stripping every `#` would
-    // truncate `libs/c#1/*` to `libs/c`, still a valid glob naming a different
-    // directory -- a wrong answer that looks like a right one. The space this
-    // leaves behind is absorbed by the blank check below and by `.trim()` on
-    // the captured item.
-    const line = raw.trimEnd().replace(/(^|\s)#.*$/, "$1");
-    if (line.trim() === "") continue;
+    const line = raw.trimEnd();
     if (!inPackages) {
-      if (/^packages:\s*$/.test(line)) inPackages = true;
+      const key = stripComment(line);
+      if (key.trim() === "") continue;
+      if (/^packages:\s*$/.test(key)) inPackages = true;
       continue;
     }
     // Indentation is optional: YAML lets a block sequence sit at its key's own
     // column, and manifests in the wild are written both ways. Requiring the
     // indented form would answer `[]` for the flush form -- "a workspace root
     // with no members", stated confidently about a root declaring several.
+    //
+    // The item is matched against the RAW line and its comment stripped
+    // afterwards, by `readScalar`: whether a `#` starts a comment depends on
+    // whether the value is quoted, which cannot be known before the value has
+    // been found.
     const item = /^\s*-\s+(.*)$/.exec(line);
     if (item) {
-      out.push(unquote(item[1]!.trim()));
+      const glob = readScalar(item[1]!.trim());
+      // A scalar this cannot read confidently discards the manifest, exactly
+      // as an unparseable line does. Pushing a best guess would be the wrong
+      // answer in glob form.
+      if (glob === undefined) return undefined;
+      out.push(glob);
       continue;
     }
     // A new top-level key ends the block. This runs AFTER the item test on
@@ -115,7 +128,9 @@ export function globsFromPnpmText(text: string): string[] | undefined {
     //
     // Anything else under `packages:` is a shape we do not understand, and
     // guessing is worse than not answering.
-    if (/^\S/.test(line)) break;
+    const rest = stripComment(line);
+    if (rest.trim() === "") continue;
+    if (/^\S/.test(rest)) break;
     return undefined;
   }
   // The `break` above leaves `inPackages` true, so this ternary is only ever
@@ -123,9 +138,55 @@ export function globsFromPnpmText(text: string): string[] | undefined {
   return inPackages ? out : undefined;
 }
 
-function unquote(s: string): string {
-  const quoted = /^(['"])(.*)\1$/.exec(s);
-  return quoted ? quoted[2]! : s;
+/**
+ * A comment stripped from a line that cannot hold a quoted scalar -- keys, and
+ * the lines that end the block.
+ *
+ * YAML starts a comment at `#` only at line start or after whitespace, so a
+ * `#` inside a word survives. Stripping every `#` would truncate `libs/c#1/*`
+ * to `libs/c`, still a valid glob naming a different directory: a wrong answer
+ * that looks like a right one.
+ */
+const stripComment = (s: string): string => s.replace(/(^|\s)#.*$/, "$1");
+
+/**
+ * One block-sequence item's value, with any trailing comment removed, or
+ * `undefined` if it is a shape this cannot read.
+ *
+ * A quote only opens a scalar at the START of the value: `libs/don't/*` is a
+ * plain scalar holding an apostrophe, and tracking quote state from any quote
+ * anywhere would swallow the rest of that line -- re-introducing the bug this
+ * function was written to fix, in the opposite direction.
+ */
+function readScalar(s: string): string | undefined {
+  const quote = s[0];
+  if (quote !== "'" && quote !== '"') {
+    const plain = stripComment(s).trim();
+    // An item with no value at all (`- # comment`) is YAML null, not a glob.
+    return plain === "" ? undefined : plain;
+  }
+  // Double-quoted scalars process `\` escapes; see the docstring above.
+  if (quote === '"' && s.includes("\\")) return undefined;
+  let value = "";
+  for (let i = 1; i < s.length; i++) {
+    const c = s[i]!;
+    if (c !== quote) {
+      value += c;
+      continue;
+    }
+    if (quote === "'" && s[i + 1] === "'") {
+      value += "'";
+      i += 1;
+      continue;
+    }
+    const after = s.slice(i + 1);
+    // Only whitespace or a comment may follow the closing quote. `- 'a' oops`
+    // is invalid YAML, and reading it as `a` would be a guess.
+    return after.trim() === "" || /^\s+#/.test(after) ? value : undefined;
+  }
+  // Unterminated: invalid YAML, and nothing here knows where it was meant to
+  // end.
+  return undefined;
 }
 
 function globsFromPnpm(root: string): string[] | undefined {
@@ -151,14 +212,6 @@ export interface Workspace {
   /** `name` from its package.json, when it has one. */
   name?: string;
 }
-
-/**
- * Depth bound for the package walk, in path segments below the root. Past any
- * real layout -- the deepest workspace in the fixtures sits at four -- and the
- * only thing bounding a `**` glob, which otherwise names every directory in
- * the tree.
- */
-const MAX_WALK_DEPTH = 8;
 
 /**
  * Every directory declared by the root manifest that actually holds a
@@ -251,8 +304,28 @@ export function discoverWorkspaces(root: string): Workspace[] {
  * Repo-relative POSIX directories holding a `package.json`, excluding `root`
  * itself.
  *
- * This is a full walk of the tree, minus `node_modules`, dot-directories and
- * anything deeper than `MAX_WALK_DEPTH`. It does not stop descending at a match,
+ * This is a full walk of the tree, minus `node_modules` and dot-directories.
+ * There is deliberately no depth bound. One was here and it was wrong: a
+ * workspace nine segments down was never discovered, its files were never
+ * analyzed, and they came back as an unexplained gap in the coverage
+ * denominator that no flag could close -- `scanSourceFiles` has no depth limit,
+ * so it counted every one of them. A cap that protects nothing still has to
+ * match on both sides of the coverage figure, and this one could not.
+ *
+ * Nothing needs bounding here. The walk is not glob-driven -- it enumerates the
+ * filesystem and matches afterwards -- so a `**` glob cannot deepen it. And a
+ * symlink, even one pointing at its own parent, reports `isDirectory() === false`
+ * from `readdirSync` (measured on node 24 and bun 1.4; symlinks answer
+ * `isSymbolicLink`), so the walk cannot enter a cycle. What is left is bounded
+ * by the filesystem's own path limit.
+ *
+ * The skips must stay a subset of `scanSourceFiles`'s, which drops
+ * `node_modules`, dot-directories AND generated directory names. Skipping more
+ * than the scan does is what creates a gap nothing explains; skipping less, as
+ * here, at worst proposes a workspace whose files the scan never counted. Keep
+ * the asymmetry pointing this way.
+ *
+ * It does not stop descending at a match,
  * because real monorepos nest packages and the manifest is the only thing that
  * knows whether an inner one is a member: stopping would make `tools/**` mean
  * `tools/*` and leave no glob able to name the inner package.
@@ -269,8 +342,7 @@ export function discoverWorkspaces(root: string): Workspace[] {
  */
 function packageDirs(root: string): string[] {
   const out: string[] = [];
-  const walk = (abs: string, rel: string, depth: number): void => {
-    if (depth > MAX_WALK_DEPTH) return;
+  const walk = (abs: string, rel: string): void => {
     let entries;
     try {
       entries = readdirSync(abs, { withFileTypes: true });
@@ -292,10 +364,10 @@ function packageDirs(root: string): string[] {
       // segments that its own glob no longer matches.
       const childRel = rel === "" ? name : `${rel}/${name}`;
       if (existsSync(join(abs, name, "package.json"))) out.push(childRel);
-      walk(join(abs, name), childRel, depth + 1);
+      walk(join(abs, name), childRel);
     }
   };
-  walk(root, "", 1);
+  walk(root, "");
   return out;
 }
 

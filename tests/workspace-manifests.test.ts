@@ -200,6 +200,58 @@ describe("globsFromPnpmText", () => {
     ]);
   });
 
+  it("keeps a # that is inside a quoted scalar", () => {
+    // YAML suspends comment rules inside quotes, so this `#` is content. Cut
+    // the item at it and the glob comes back as `'libs/team`, with a stray
+    // quote -- a confident WRONG answer, which is the one shape this parser's
+    // design forbids. The symptom is not a visible failure either: that
+    // workspace is simply absent from discovery, and its files resurface as an
+    // unexplained coverage gap.
+    expect(globsFromPnpmText("packages:\n  - 'libs/team #1/*'\n")).toEqual(["libs/team #1/*"]);
+    expect(globsFromPnpmText('packages:\n  - "libs/team #2/*"\n')).toEqual(["libs/team #2/*"]);
+    // ...and a comment after the closing quote is still a comment.
+    expect(globsFromPnpmText("packages:\n  - 'libs/team #1/*' # why\n")).toEqual([
+      "libs/team #1/*",
+    ]);
+  });
+
+  it("does not read a quote inside a plain scalar as opening one", () => {
+    // The opposite failure to the one above, and the one a naive fix causes:
+    // track quote state from any quote anywhere and this apostrophe opens a
+    // scalar that never closes, so the trailing comment becomes part of the
+    // glob -- or the whole manifest is refused. A quote only opens a scalar at
+    // the start of the value.
+    expect(globsFromPnpmText("packages:\n  - libs/don't/* # why\n")).toEqual(["libs/don't/*"]);
+  });
+
+  it("reads a doubled single quote as an escaped quote", () => {
+    // The one escape a single-quoted YAML scalar has. Scanning for the closing
+    // quote without it ends the scalar early, and everything after it lands
+    // outside the quotes -- where the comment rule then applies to content.
+    expect(globsFromPnpmText("packages:\n  - 'it''s/*'\n")).toEqual(["it's/*"]);
+  });
+
+  it("answers undefined for an unterminated quote", () => {
+    // Invalid YAML: there is no way to know where the scalar was meant to end,
+    // and every guess about it still produces a glob. Refuse instead.
+    expect(globsFromPnpmText("packages:\n  - 'libs/a/*\n")).toBeUndefined();
+    expect(globsFromPnpmText('packages:\n  - "libs/a/*\n')).toBeUndefined();
+  });
+
+  it("answers undefined for content after a closing quote", () => {
+    // `- 'a' oops` is not a shape this understands, and YAML rejects it too.
+    // What matters is that it is not silently read as `a`.
+    expect(globsFromPnpmText("packages:\n  - 'libs/a/*' oops\n")).toBeUndefined();
+  });
+
+  it("answers undefined for a double-quoted scalar carrying a backslash", () => {
+    // A double-quoted YAML scalar processes `\` escapes and this does not, so
+    // `"a\\b"` would come back carrying both characters and name a different
+    // path. Reading it correctly means implementing YAML's escape table;
+    // refusing is the bounded answer, and no POSIX glob needs one.
+    expect(globsFromPnpmText('packages:\n  - "libs/a\\\\b/*"\n')).toBeUndefined();
+  });
+
   it("skips a full-line comment inside the list", () => {
     expect(globsFromPnpmText("packages:\n  # why these\n  - a/*\n")).toEqual(["a/*"]);
   });
