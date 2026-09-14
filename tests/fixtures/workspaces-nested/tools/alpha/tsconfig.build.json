@@ -1,0 +1,19 @@
+{
+  // A sibling of the PARENT workspace whose `include` reaches into the NESTED
+  // one AND into a plain directory beside it. It covers two files that no
+  // primary config reaches, and exactly one of them is the parent's:
+  //
+  //   sub/scripts/gen.ts    belongs to `tools/alpha/sub`, a workspace of its
+  //                         own -- so this config must never be what closes
+  //                         it, and `sub/tsconfig.extra.json` must be.
+  //   sub-x/gen.ts          belongs to `tools/alpha`: `sub-x` is a plain
+  //                         directory whose NAME merely starts with `sub`.
+  //                         This config is the only thing covering it, so it
+  //                         IS chosen -- for that file and no other.
+  //
+  // Attribute either file to the wrong workspace and the answer changes:
+  // shallowest-wins loses `sub/tsconfig.extra.json`, and a containment test
+  // without a trailing separator loses this config.
+  "extends": "./tsconfig.json",
+  "include": ["sub*/**/*.ts"]
+}

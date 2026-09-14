@@ -1,0 +1,10 @@
+{
+  // Beta's own sibling, and the second half of the attribution rule: when beta
+  // IS selected this config is adopted, because `scripts/gen.ts` is beta's gap
+  // and this is what covers it. When beta is NOT selected it must not be
+  // adopted, and not because the file stopped being uncovered -- because the
+  // gap is beta's and beta is not in this run. An "all discovered workspaces"
+  // list used for anything but ATTRIBUTION pulls this back in.
+  "extends": "./tsconfig.json",
+  "include": ["scripts/**/*.ts"]
+}

@@ -1,0 +1,16 @@
+# a comment that must not become a glob
+packages:
+  # quoting is optional in YAML and real manifests mix all three forms
+  - 'libs/*'
+  - "tools/*"
+  - libs/nested/*
+  # a bare directory name is a legal entry: it names one workspace, not a set
+  - services
+  - '!libs/private'
+
+catalog:
+  # a later top-level key ends the list, and nothing under it is a glob
+  react: ^18.3.1
+
+onlyBuiltDependencies:
+  - esbuild

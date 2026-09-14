@@ -1,0 +1,412 @@
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  globsFromPnpmText,
+  manifestProblems,
+  workspaceGlobs,
+} from "../src/extract/manifest.js";
+import { pnpmWorkspacesRoot, withRoot, workspacesRoot } from "./helpers.js";
+
+describe("workspaceGlobs", () => {
+  it("reads the array form from package.json, in declaration order", () => {
+    // Declaration order is load-bearing: `--filter` is applied in order and so
+    // is negation, so a set or a sort here changes which workspaces survive.
+    expect(workspaceGlobs(workspacesRoot())).toEqual([
+      "tools/*",
+      "libs/*",
+      "deep/**",
+      "!libs/ignored",
+    ]);
+  });
+
+  // A root that is not a workspace root must be distinguishable from one
+  // declaring zero workspaces, or discovery cannot decide whether to run.
+  it("answers undefined when the directory holds no manifest at all", () => {
+    withRoot({}, (root) => {
+      // The two halves of what this case claims to be. Without them it would
+      // still pass against a path that does not exist, or against one that
+      // grew a manifest -- and in the second case it would quietly become a
+      // copy of the "declares no workspaces" test below, leaving the absent-
+      // file arm of the catch uncovered.
+      expect(existsSync(root)).toBe(true);
+      expect(existsSync(join(root, "package.json"))).toBe(false);
+      expect(workspaceGlobs(root)).toBeUndefined();
+    });
+  });
+
+  it("reads the yarn v1 object form", () => {
+    // yarn v1 nests the list under `packages` and puts `nohoist` beside it.
+    // Reading only the array form finds nothing in a yarn v1 monorepo and
+    // reports it as a plain single project, which is a silently empty answer
+    // rather than an error.
+    withRoot(
+      {
+        "package.json": JSON.stringify({
+          workspaces: { packages: ["libs/*", "!libs/ignored"], nohoist: ["**/x"] },
+        }),
+      },
+      (root) => expect(workspaceGlobs(root)).toEqual(["libs/*", "!libs/ignored"]),
+    );
+  });
+
+  it("answers undefined for a manifest that declares no workspaces", () => {
+    // A different branch from "no package.json at all": the file is there and
+    // parses, and the `workspaces` key simply is not in it. Every single-package
+    // repo with a manifest takes this path.
+    withRoot({ "package.json": JSON.stringify({ name: "plain", version: "1.0.0" }) }, (root) =>
+      expect(workspaceGlobs(root)).toBeUndefined(),
+    );
+  });
+
+  // `[]` and `undefined` are different answers and the next two cases are what
+  // hold them apart. An empty list is a declaration -- this IS a workspace
+  // root, and it currently has no members -- so discovery runs and finds none.
+  // `undefined` says no manifest declared workspaces at all, so discovery must
+  // not run and the root is treated as a plain project. Folding the empty list
+  // into the `undefined` path looks like tidying two empty cases into one and
+  // silently changes what a zero-member monorepo means.
+  it("answers [] for an array declaring exactly no workspaces", () => {
+    withRoot({ "package.json": JSON.stringify({ workspaces: [] }) }, (root) =>
+      expect(workspaceGlobs(root)).toEqual([]),
+    );
+  });
+
+  it("answers [] for a yarn v1 object declaring exactly no workspaces", () => {
+    // Both branches take the same tidy-up, so both need the guard.
+    withRoot({ "package.json": JSON.stringify({ workspaces: { packages: [] } }) }, (root) =>
+      expect(workspaceGlobs(root)).toEqual([]),
+    );
+  });
+
+  it("answers undefined for an unparseable manifest rather than throwing", () => {
+    // Discovery is a convenience, never a dependency. A manifest mid-edit must
+    // degrade to "not a workspace root", not take the run down with it.
+    withRoot({ "package.json": '{ "workspaces": ["libs/*",' }, (root) =>
+      expect(workspaceGlobs(root)).toBeUndefined(),
+    );
+  });
+
+  it("drops non-string entries and keeps the rest in order", () => {
+    // A glob list is consumed as strings. Passing a number or an object through
+    // defers the failure to whoever expands it, where it reads as a bad glob
+    // rather than as a malformed manifest.
+    //
+    // This expectation happens to be in sorted order, so it alone cannot catch
+    // an introduced sort. Order is guarded by the fixture case at the top of
+    // this file, whose declaration order is deliberately unsorted -- do not
+    // delete that one believing this covers it.
+    withRoot(
+      {
+        "package.json": JSON.stringify({
+          workspaces: ["libs/*", 7, { packages: ["x"] }, null, "tools/*"],
+        }),
+      },
+      (root) => expect(workspaceGlobs(root)).toEqual(["libs/*", "tools/*"]),
+    );
+  });
+
+  it("reads the block-list form from pnpm-workspace.yaml, in declaration order", () => {
+    // The fixture's `package.json` has no `workspaces` key, so the YAML is the
+    // only thing here that can answer. Declaration order is deliberately
+    // unsorted for the same reason as the package.json case above.
+    expect(workspaceGlobs(pnpmWorkspacesRoot())).toEqual([
+      "libs/*",
+      "tools/*",
+      "libs/nested/*",
+      "services",
+      "!libs/private",
+    ]);
+  });
+
+  it("prefers package.json over pnpm-workspace.yaml when a root holds both", () => {
+    // A repo that migrated to pnpm and left the old key behind holds two
+    // answers, and the two files must not be consulted in whichever order
+    // reads more naturally. `package.json` wins: every package manager reads
+    // it, so it is the one both tools agree on.
+    withRoot(
+      {
+        "package.json": JSON.stringify({ workspaces: ["from-package-json/*"] }),
+        "pnpm-workspace.yaml": "packages:\n  - from-yaml/*\n",
+      },
+      (root) => expect(workspaceGlobs(root)).toEqual(["from-package-json/*"]),
+    );
+  });
+
+  it("lets an empty package.json declaration win over a pnpm manifest", () => {
+    // `[]` is not nullish, so the pnpm file is never consulted -- and that is
+    // the right answer, not an accident of `??`. An explicit empty declaration
+    // is still a declaration: a root saying "I have no workspaces" must not be
+    // overruled by a second manifest left behind by a half-finished migration.
+    withRoot(
+      {
+        "package.json": JSON.stringify({ workspaces: [] }),
+        "pnpm-workspace.yaml": "packages:\n  - libs/*\n",
+      },
+      (root) => expect(workspaceGlobs(root)).toEqual([]),
+    );
+  });
+
+  it("reads a root whose members are on disk beside the manifest", () => {
+    // The answer comes from the manifest alone -- what is on disk neither adds
+    // to it nor subtracts from it at this layer -- so this is also the one case
+    // that builds a nested path through `withRoot`. Task 4 expands globs
+    // against real directories and needs the helper to express one; without the
+    // recursive mkdir the write throws ENOENT, and this is where that surfaces.
+    withRoot(
+      {
+        "pnpm-workspace.yaml": "packages:\n  - libs/*\n",
+        "libs/beta/package.json": JSON.stringify({ name: "beta" }),
+      },
+      (root) => {
+        expect(existsSync(join(root, "libs", "beta", "package.json"))).toBe(true);
+        expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+      },
+    );
+  });
+
+  it("finds the .yml spelling of the pnpm manifest", () => {
+    // Both spellings are in the wild and pnpm accepts either. Checking only
+    // `.yaml` reports a `.yml` monorepo as a plain single project.
+    withRoot({ "pnpm-workspace.yml": "packages:\n  - libs/*\n" }, (root) =>
+      expect(workspaceGlobs(root)).toEqual(["libs/*"]),
+    );
+  });
+
+  it("answers undefined when the pnpm manifest cannot be read", () => {
+    // Same rule as an unparseable `package.json`: discovery degrades, it never
+    // throws. A directory wearing the manifest's name is the portable way to
+    // make the read fail on every platform.
+    withRoot({}, (root) => {
+      mkdirSync(join(root, "pnpm-workspace.yaml"));
+      expect(workspaceGlobs(root)).toBeUndefined();
+    });
+  });
+});
+
+describe("globsFromPnpmText", () => {
+  it("unquotes single-quoted, double-quoted and bare entries alike", () => {
+    expect(globsFromPnpmText("packages:\n  - 'a/*'\n  - \"b/*\"\n  - c/*\n")).toEqual([
+      "a/*",
+      "b/*",
+      "c/*",
+    ]);
+  });
+
+  it("keeps a # that is inside a glob", () => {
+    // YAML starts a comment at `#` only at line start or after whitespace. A
+    // blanket strip truncates `libs/c#1/*` to `libs/c`, which is still a valid
+    // glob -- so the manifest would be read, silently, as naming a different
+    // directory.
+    expect(globsFromPnpmText("packages:\n  - libs/c#1/*\n  - 'd/*' # trailing\n")).toEqual([
+      "libs/c#1/*",
+      "d/*",
+    ]);
+  });
+
+  it("keeps a # that is inside a quoted scalar", () => {
+    // YAML suspends comment rules inside quotes, so this `#` is content. Cut
+    // the item at it and the glob comes back as `'libs/team`, with a stray
+    // quote -- a confident WRONG answer, which is the one shape this parser's
+    // design forbids. The symptom is not a visible failure either: that
+    // workspace is simply absent from discovery, and its files resurface as an
+    // unexplained coverage gap.
+    expect(globsFromPnpmText("packages:\n  - 'libs/team #1/*'\n")).toEqual(["libs/team #1/*"]);
+    expect(globsFromPnpmText('packages:\n  - "libs/team #2/*"\n')).toEqual(["libs/team #2/*"]);
+    // ...and a comment after the closing quote is still a comment.
+    expect(globsFromPnpmText("packages:\n  - 'libs/team #1/*' # why\n")).toEqual([
+      "libs/team #1/*",
+    ]);
+  });
+
+  it("does not read a quote inside a plain scalar as opening one", () => {
+    // The opposite failure to the one above, and the one a naive fix causes:
+    // track quote state from any quote anywhere and this apostrophe opens a
+    // scalar that never closes, so the trailing comment becomes part of the
+    // glob -- or the whole manifest is refused. A quote only opens a scalar at
+    // the start of the value.
+    expect(globsFromPnpmText("packages:\n  - libs/don't/* # why\n")).toEqual(["libs/don't/*"]);
+  });
+
+  it("reads a doubled single quote as an escaped quote", () => {
+    // The one escape a single-quoted YAML scalar has. Scanning for the closing
+    // quote without it ends the scalar early, and everything after it lands
+    // outside the quotes -- where the comment rule then applies to content.
+    expect(globsFromPnpmText("packages:\n  - 'it''s/*'\n")).toEqual(["it's/*"]);
+  });
+
+  it("answers undefined for an unterminated quote", () => {
+    // Invalid YAML: there is no way to know where the scalar was meant to end,
+    // and every guess about it still produces a glob. Refuse instead.
+    expect(globsFromPnpmText("packages:\n  - 'libs/a/*\n")).toBeUndefined();
+    expect(globsFromPnpmText('packages:\n  - "libs/a/*\n')).toBeUndefined();
+  });
+
+  it("answers undefined for content after a closing quote", () => {
+    // `- 'a' oops` is not a shape this understands, and YAML rejects it too.
+    // What matters is that it is not silently read as `a`.
+    expect(globsFromPnpmText("packages:\n  - 'libs/a/*' oops\n")).toBeUndefined();
+  });
+
+  it("answers undefined for a double-quoted scalar carrying a backslash", () => {
+    // A double-quoted YAML scalar processes `\` escapes and this does not, so
+    // `"a\\b"` would come back carrying both characters and name a different
+    // path. Reading it correctly means implementing YAML's escape table;
+    // refusing is the bounded answer, and no POSIX glob needs one.
+    expect(globsFromPnpmText('packages:\n  - "libs/a\\\\b/*"\n')).toBeUndefined();
+  });
+
+  it("skips a full-line comment inside the list", () => {
+    expect(globsFromPnpmText("packages:\n  # why these\n  - a/*\n")).toEqual(["a/*"]);
+  });
+
+  it("reads a list written at zero indentation", () => {
+    // YAML lets a block sequence sit at its key's own indentation, and real
+    // manifests are written both ways. Requiring the indented form returns
+    // `[]` here rather than failing -- and `[]` is a confident answer meaning
+    // "this is a workspace root with no members", which is exactly the wrong
+    // thing to say about a root declaring two.
+    expect(globsFromPnpmText("packages:\n- 'libs/*'\n- tools/*\n")).toEqual(["libs/*", "tools/*"]);
+  });
+
+  it("reads a manifest with CRLF line endings", () => {
+    // `\r` is a JavaScript line terminator, so `.` cannot match it and `$` does
+    // not assert before it: a comment regex applied before `trimEnd` never
+    // fires on a CRLF line. Both halves of that are silent. A trailing comment
+    // survives into the glob -- `a/* # c` is well-formed and matches nothing,
+    // so one workspace vanishes from discovery while the rest are reported
+    // confidently -- and a full-line comment inside the list becomes an
+    // unparseable line, discarding the whole manifest. Git for Windows defaults
+    // to `core.autocrlf=true` and this repo has no `.gitattributes`, so a
+    // Windows checkout of the fixture beside this file takes the second path.
+    // Both symptoms, because they are separate failures: the first line has a
+    // full-line comment (undefined before the fix) and the second a trailing
+    // one (`["a/* # c"]` before the fix).
+    expect(globsFromPnpmText("packages:\r\n  # why\r\n  - a/* # trailing\r\n")).toEqual(["a/*"]);
+    expect(globsFromPnpmText("packages:\r\n  - a/* # c\r\n")).toEqual(["a/*"]);
+  });
+
+  it("reads a manifest that starts with a byte order mark", () => {
+    // The BOM defeats `/^packages:\s*$/` on the very first line, so the whole
+    // manifest is discarded and a pnpm monorepo reads as a plain single
+    // project -- the same silent symptom the BOM strip on `package.json`
+    // exists to prevent, and thicket-specific: YAML permits a leading BOM and
+    // pnpm reads the file fine. Stripped here rather than at the read, so this
+    // pure function is correct on its own and the case needs no filesystem.
+    expect(globsFromPnpmText("\uFEFFpackages:\n  - a/*\n")).toEqual(["a/*"]);
+  });
+
+  it("stops at the next top-level key", () => {
+    expect(
+      globsFromPnpmText("packages:\n  - a/*\ncatalog:\n  react: ^18\nignoredKey:\n  - b/*\n"),
+    ).toEqual(["a/*"]);
+  });
+
+  it("stops at a top-level key whose own list is flush", () => {
+    // The item regex runs before the top-level-key break and no longer requires
+    // indentation, so this is the shape that would leak if the break were ever
+    // moved below it or loosened: `- esbuild` is a well-formed list item
+    // belonging to somebody else's key. Nothing is wrong today -- this is here
+    // so the next person to touch either regex does not have to re-derive it.
+    expect(globsFromPnpmText("packages:\n  - a/*\nonlyBuiltDependencies:\n- esbuild\n")).toEqual([
+      "a/*",
+    ]);
+  });
+
+  it("answers [] for a packages key with no members", () => {
+    // YAML calls this value `null`, and `undefined` would be the literal
+    // reading. `[]` is the right answer anyway: the file declares `packages:`,
+    // so this IS a pnpm workspace root, it just lists nobody -- the same
+    // semantics `{"workspaces": []}` already has in package.json. The
+    // `undefined`-versus-`[]` contract asks "is this a workspace root", which
+    // the key's presence answers, and the two manifest formats agreeing on it
+    // matters more than matching YAML's null/empty-list distinction.
+    //
+    // Ending at a later key and ending at EOF agree; both are pinned because
+    // nothing else here would notice if only one of them changed.
+    expect(globsFromPnpmText("packages:\ncatalog:\n  react: ^18.3.1\n")).toEqual([]);
+    expect(globsFromPnpmText("packages:\n")).toEqual([]);
+  });
+
+  it("answers undefined for a manifest with no packages key", () => {
+    expect(globsFromPnpmText("catalog:\n  react: ^18\n")).toBeUndefined();
+  });
+
+  // Degrading to `undefined` keeps a shape we cannot parse from silently
+  // becoming a wrong answer.
+  it("answers undefined for a flow sequence", () => {
+    expect(globsFromPnpmText("packages: ['a/*']\n")).toBeUndefined();
+  });
+
+  it("answers undefined for a pnpm manifest shape it does not understand", () => {
+    expect(globsFromPnpmText("packages: { a: 1 }\n")).toBeUndefined();
+  });
+
+  it("answers undefined for a nested mapping under packages", () => {
+    // Not a list of scalars. Reading the keys as globs would hand back
+    // `["libs"]`, an answer with no relationship to what the manifest says.
+    expect(globsFromPnpmText("packages:\n  libs:\n    - a/*\n")).toBeUndefined();
+  });
+});
+
+/**
+ * The diagnostic split. `workspaceGlobs` answers `undefined` for absent,
+ * unreadable and unparseable alike -- right there, wrong for a reader, because
+ * the coverage banner then blames SCOPE for a manifest that would not read.
+ */
+describe("manifestProblems", () => {
+  // The drift this exists to catch: `manifestProblems` and the reader share
+  // `declaredList`, so they cannot disagree about which shapes are understood
+  // -- but re-inlining `Array.isArray(ws) ? ws : undefined` here is silent, and
+  // its effect is a warning that CONTRADICTS a reader handling the file fine.
+  // Every yarn v1 monorepo would be told its manifest cannot be read while its
+  // workspaces were being analyzed. A wrong statement is worse than none.
+  it("reports nothing for a yarn v1 manifest the reader accepts", () => {
+    withRoot(
+      {
+        "package.json": JSON.stringify({
+          workspaces: { packages: ["libs/*"], nohoist: ["**/x"] },
+        }),
+      },
+      (root) => {
+        expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+        expect(manifestProblems(root)).toEqual([]);
+      },
+    );
+  });
+
+  it("reports nothing for an ordinary package that declares no workspaces", () => {
+    // The single-project case, which is every run this tool had before
+    // discovery existed. A line here would be on stderr for all of them.
+    withRoot({ "package.json": JSON.stringify({ name: "plain" }) }, (root) =>
+      expect(manifestProblems(root)).toEqual([]),
+    );
+  });
+
+  it("reports nothing when there is no manifest at all", () => {
+    withRoot({}, (root) => expect(manifestProblems(root)).toEqual([]));
+  });
+
+  it("names a package.json that is not JSON", () => {
+    withRoot({ "package.json": '{ "workspaces": ["libs/*"' }, (root) => {
+      const problems = manifestProblems(root);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]!.path).toBe(join(root, "package.json"));
+    });
+  });
+
+  it("names the entries it dropped, which the reader drops silently", () => {
+    withRoot({ "package.json": JSON.stringify({ workspaces: ["libs/*", 7] }) }, (root) => {
+      expect(workspaceGlobs(root)).toEqual(["libs/*"]);
+      expect(manifestProblems(root)).toHaveLength(1);
+    });
+  });
+
+  it("names a pnpm manifest whose packages list it refused", () => {
+    withRoot({ "pnpm-workspace.yaml": "packages:\n  - 'libs/a/*\n" }, (root) => {
+      const problems = manifestProblems(root);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]!.path).toBe(join(root, "pnpm-workspace.yaml"));
+    });
+  });
+});

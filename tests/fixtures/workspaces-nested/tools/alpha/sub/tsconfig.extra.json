@@ -1,0 +1,7 @@
+{
+  // The nested workspace's own sibling, and the one config here that must be
+  // adopted: it covers `scripts/gen.ts`, which is the only file no primary
+  // config reaches.
+  "extends": "./tsconfig.json",
+  "include": ["scripts/**/*.ts"]
+}

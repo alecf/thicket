@@ -22,6 +22,27 @@ jobs:
       # than typechecking, and the `package` job below both builds it and
       # proves the result runs. `typecheck` is what covers src/**.
       - run: bun run typecheck
+      # AGENTS.md §1 bans `localeCompare`: it makes sort order a property of
+      # the host's ICU data and `LANG`, so two machines emit differently
+      # ordered reports from identical source. The `determinism` job below
+      # catches it only where the sample fixture exercises the sort, and four
+      # sorts reached review with no data that could fail them -- so the ban is
+      # enforced here rather than remembered. The pattern matches the CALL, not
+      # the word, which is what keeps the comments in `order.ts` and
+      # `ts-adapter.ts` explaining the ban legal.
+      - name: No localeCompare in src/
+        run: |
+          set -uo pipefail
+          # The second grep drops matches whose line begins a comment (` * `,
+          # `//`, `/*`), because `order.ts` documents the ban by quoting the
+          # call it bans. A violation with a trailing comment after it still
+          # matches, since only the START of the line is tested.
+          hits=$(grep -rnE '\.localeCompare\(' src/ | grep -vE '^[^:]+:[0-9]+: *(\*|//|/\*)' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::localeCompare in src/ -- sort with compareStrings from src/order.ts (AGENTS.md §1)"
+            exit 1
+          fi
       - run: bun run test
 
   # Mirrors the build half of deploy-site.yml, so a page that will not build is
@@ -68,8 +89,16 @@ jobs:
       # them out of node_modules rather than fetching anything itself.
       - run: bun install --frozen-lockfile --os='*' --cpu='*'
 
-      - name: Render the reference report from source
-        run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+      - name: Render the reference reports from source
+        # Two entry paths, not one. `--config` opens the named project; a bare
+        # directory discovers workspaces first, and that discovery is the only
+        # caller of `sourceFileNames`. A binary that bundles one correctly and
+        # the other not produces a byte-identical `--config` report and fails
+        # every directory run, which is what a single reference cannot see.
+        run: |
+          set -euo pipefail
+          bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+          bun run thicket tests/fixtures/workspaces --no-cache > from-source-ws.md
 
       - name: Build every target
         # Not just the host: the formula names all four tarballs and their
@@ -87,7 +116,7 @@ jobs:
           mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
           ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
 
-      - name: Render the same report through the installed binary
+      - name: Render the same reports through the installed binary
         # cd out of the checkout: inside it, a stray node_modules could satisfy
         # a resolution the packaged layout is supposed to satisfy on its own,
         # and the job would pass while the artifact was broken for everyone.
@@ -97,12 +126,18 @@ jobs:
           "$RUNNER_TEMP/prefix/bin/thicket" \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            "$GITHUB_WORKSPACE/tests/fixtures/workspaces" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary-ws.md"
 
       - name: The packaged binary must produce the same bytes as the source
         run: |
-          test -s from-binary.md
+          set -euo pipefail
+          for report in from-binary from-binary-ws; do test -s "$report.md"; done
           diff -u from-source.md from-binary.md \
             || { echo "::error::The packaged binary disagrees with the source run"; exit 1; }
+          diff -u from-source-ws.md from-binary-ws.md \
+            || { echo "::error::The packaged binary disagrees with the source run over a directory"; exit 1; }
           echo "Packaged binary and source run are byte-identical."
 
       - name: The Homebrew formula must be generatable and valid Ruby

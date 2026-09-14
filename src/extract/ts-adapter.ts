@@ -309,7 +309,7 @@ function bindingCountsBySpecifier(
  * `/repo/package` share `/repo` rather than `/repo/pack`.
  */
 export function commonRootDir(configs: readonly string[]): string {
-  if (configs.length === 0) throw new Error("openProject requires at least one tsconfig path");
+  if (configs.length === 0) throw new Error("analysis requires at least one tsconfig path");
   const dirs = configs.map((c) => toPosix(dirname(isAbsolute(c) ? c : resolve(c))).split("/"));
   let common = dirs[0]!;
   for (const segs of dirs.slice(1)) {
@@ -319,6 +319,19 @@ export function commonRootDir(configs: readonly string[]): string {
   }
   // A single leading "" means the only shared ancestor is the filesystem root.
   return common.join("/") || "/";
+}
+
+/**
+ * `pin` when it contains `derived`, and `derived` otherwise.
+ *
+ * Containment is tested on whole segments -- `${pin}/` -- because `/repo/pack`
+ * is not an ancestor of `/repo/package`, the same trap `commonRootDir` compares
+ * segments to avoid.
+ */
+function pinnedRoot(pin: string | undefined, derived: string): string {
+  if (pin === undefined) return derived;
+  const abs = toPosix(resolve(pin));
+  return derived === abs || derived.startsWith(`${abs}/`) ? abs : derived;
 }
 
 /**
@@ -409,6 +422,25 @@ export interface OpenProjectOptions {
    * The escape hatch for generated code that declares nothing.
    */
   exclude?: readonly string[];
+  /**
+   * The directory every repo-relative path is measured from, when the caller
+   * knows it. Defaults to `commonRootDir` of the configs actually opened.
+   *
+   * That default is DERIVED from the config set, which makes it move when the
+   * config set does: narrow a monorepo run to one workspace and the root
+   * collapses into that workspace, so the same file is `src/a.ts` in one run
+   * and `tools/alpha/src/a.ts` in the next. Those paths are the cache keys,
+   * the module names finding ids derive from, and what the report prints, so
+   * a caller that knows the root of the tree it was pointed at should say so
+   * and get the same answers at every scope.
+   *
+   * Honoured only when it CONTAINS the derived root. A pin below it would put
+   * `../` on the paths of everything above, which repo-relative paths cannot
+   * express (see `commonRootDir`); the derived root wins instead, and the
+   * caller can see that it did by comparing `Project.root` with what it
+   * passed.
+   */
+  root?: string;
 }
 
 /** What `openProject` dropped, by the rule that dropped it. */
@@ -416,6 +448,33 @@ export interface ExcludedCounts {
   directory: number;
   banner: number;
   pattern: number;
+}
+
+/**
+ * True for a program file that is not analyzable source.
+ *
+ * One predicate, used by `openProject` and by `sourceFileNames`, because the
+ * probe's whole job is to predict what the real load will contribute: two
+ * copies of these rules that drift apart make it propose a sibling config
+ * whose every file `openProject` then discards.
+ *
+ * `.json` is excluded because `resolveJsonModule` puts every imported data
+ * file into the program and the API parses it into a real Array/ObjectLiteral
+ * AST. On one application a 126,000-line LOINC code table produced six of the
+ * top findings -- clusters of identical array literals inside a single data
+ * file, which is duplication only in the sense that a phone book repeats
+ * itself -- and contributed those 126k lines to the reported LOC. Resolution
+ * is unaffected: this drops the file from ANALYSIS, not from the program.
+ *
+ * `.d.ts` is doing more work than "skip hand-written declarations": every
+ * program lists the ~63 default lib files, so a two-file project comes back
+ * with 65 names. Where those libs live is not a constant -- installed into the
+ * project they carry a `node_modules` segment, resolved from a global install
+ * cache (bun's, pnpm's store) they carry none -- so neither rule can be said
+ * to be the one that catches them, and both have to stay.
+ */
+function isSkippedSourceName(name: string): boolean {
+  return name.includes("node_modules") || name.endsWith(".d.ts") || name.endsWith(".json");
 }
 
 /**
@@ -458,8 +517,10 @@ export async function openProject(
   const { snapshot, configs: opened } = await expandReferences(api, list);
   // Rooted at the ancestor of everything actually opened: a reference may sit
   // outside the requested config's directory, and a file above the root would
-  // get a `../`-prefixed path, breaking the repo-relative-path contract.
-  const root = commonRootDir(opened);
+  // get a `../`-prefixed path, breaking the repo-relative-path contract. A
+  // caller may pin it higher -- to the directory it was pointed at -- but
+  // never lower, for the same reason.
+  const root = pinnedRoot(opts.root, commonRootDir(opened));
 
   // A file present in several tsconfig projects is returned once per project.
   // Dedupe on absolute path; the unit of analysis is the FILE, not (project,file).
@@ -481,21 +542,7 @@ export async function openProject(
   for (const project of snapshot.getProjects()) {
     const checker = project.checker as unknown as Checker;
     for (const name of await project.program.getSourceFileNames()) {
-      // `.json` is excluded because `resolveJsonModule` puts every imported
-      // data file into the program and the API parses it into a real
-      // Array/ObjectLiteral AST. On one application a 126,000-line LOINC code
-      // table produced six of the top findings -- clusters of identical array
-      // literals inside a single data file, which is duplication only in the
-      // sense that a phone book repeats itself -- and contributed those 126k
-      // lines to the reported LOC. Resolution is unaffected: this drops the
-      // file from ANALYSIS, not from the program.
-      if (
-        name.includes("node_modules") ||
-        name.endsWith(".d.ts") ||
-        name.endsWith(".json")
-      ) {
-        continue;
-      }
+      if (isSkippedSourceName(name)) continue;
       if (seen.has(name)) continue;
       seen.add(name);
       // Segment-matched against the REPO-RELATIVE path: a checkout that lives
@@ -741,4 +788,143 @@ export async function openProject(
     importsOf: (file: FileHandle) => importDetailsOf(file).map((d) => d.target),
     close: () => api.close(),
   };
+}
+
+/** What a probe found: the file list, and the root those paths are measured from. */
+export interface ProbeResult {
+  /** Absolute, POSIX-separated, exactly what `openProject` would report. */
+  root: string;
+  /** Paths relative to `root`, POSIX, deduped, sorted with `compareStrings`. */
+  names: string[];
+  /**
+   * The same names again, split by the config that contributed them: key is
+   * the config's absolute path LOWER-CASED, value is that config's own list,
+   * sorted the same way.
+   *
+   * Look values up; never iterate this. Map order is insertion order, which
+   * here is whatever order the API handed its projects back in, and nothing
+   * downstream may depend on it (AGENTS.md §1).
+   *
+   * `names` cannot answer "which of these configs added that file", and the
+   * question matters: a workspace with two sibling configs needs to keep the
+   * one that closes its gap and drop the one that adds nothing. Asking by
+   * probing each config alone costs ~35ms of `tsgo` spawn apiece, which is
+   * the cost batching exists to avoid, so the breakdown rides along with the
+   * union instead.
+   *
+   * Lower-cased because tsconfig paths reach us with host casing and the same
+   * config can arrive spelled two ways; `expandReferences` folds case for its
+   * visited set for the same reason.
+   *
+   * Keys are every config actually OPENED, `expandReferences`'s additions
+   * included, so a config the caller never named can appear here. The inverse
+   * is the one to keep in mind: a solution config owning no files of its own
+   * maps to an EMPTY list, and what it delegates to is listed under the
+   * config that owns it. A caller asking "did the config I named contribute
+   * anything" therefore gets `no` for every solution config -- safe where the
+   * cost of a `no` is analyzing less, which is `configsFor`'s case, and wrong
+   * anywhere the cost runs the other way. Closing it means rolling an added
+   * config's files up into the entry for the config that pulled it in, which
+   * is `expandReferences`'s knowledge and nobody else's.
+   */
+  byConfig: Map<string, string[]>;
+}
+
+/**
+ * Paths of a project's source files, without materializing any of them.
+ *
+ * `openProject` awaits `getSourceFile` per name, which builds the AST; this
+ * stops at `getSourceFileNames`. It answers which files a tsconfig would
+ * contribute, which is the question "is this sibling config worth loading?"
+ * and not a question about what is in them.
+ *
+ * Two grounds, in order of which one actually decides it.
+ *
+ * The first is API shape, and it holds at every size. `openProject` returns a
+ * `Project` that owns an open `tsgo` connection, a content hash and a
+ * `FileHandle` per file, and a checker per file, and it obliges the caller to
+ * `close()` it. A caller that wants a file LIST would acquire all of that,
+ * read one field, and be responsible for disposing the rest. This returns
+ * plain data and disposes itself.
+ *
+ * The second is cost, and it is honestly size-dependent. Measured, probe
+ * against `openProject` on the same configs: 1000 files, 70ms against 340ms
+ * (4.9x); 32 files, 45ms against 78ms (1.7x); 2 and 4 files, indistinguishable
+ * -- 0.7x to 1.1x, the probe sometimes SLOWER. Both entry points pay the same
+ * ~35ms to spawn `tsgo` and load the default lib, and only `openProject` pays
+ * per file, so at the size of a small workspace this is free rather than
+ * cheaper, and N probes is N x 35ms of fixed cost with nothing bought back.
+ * The saving is real where workspaces are large -- a sample monorepo has a
+ * single workspace holding 6048 source files -- which is the case this exists
+ * for. Probe once over many configs, not once per config.
+ *
+ * NOT REGRESSION-TESTED: that this materializes nothing. Replace the body with
+ * `(await openProject(configs)).files().map((f) => f.path)` and every test
+ * still passes -- the agreement test below becomes true by definition, and the
+ * measurements above rule out a timing assertion, because there is no
+ * threshold between 0.7x and 4.9x that is not either flaky or vacuous. The
+ * property is carried by review of this function, not by the suite.
+ *
+ * The root comes back WITH the names because the caller cannot work it out:
+ * it is the common ancestor of every config actually OPENED, and
+ * `expandReferences` may open configs the caller never named, so a reference
+ * reaching outside the requested config's directory moves the root upwards
+ * without the call site ever seeing it. Returning a bare `string[]` would make
+ * the list's meaning depend on a value invisible at the call site -- and two
+ * lists measured from different roots have no paths in common at all, which
+ * reads as "this config covers no files" rather than "these were measured from
+ * different places".
+ *
+ * Root it at the REQUESTED configs instead and a probe of a solution config
+ * answers in `../`-prefixed paths, which match nothing the caller holds.
+ *
+ * Applies the same skip rules as `openProject` so the two agree about what a
+ * "source file" is -- a probe that counted `.d.ts` would propose a sibling
+ * that adds nothing analyzable, and would count the default lib besides.
+ *
+ * Deliberately does NOT apply the generated-directory, banner or `--exclude`
+ * rules, and only ONE of those three has cost as its reason: the banner sniff
+ * reads file text, which is the thing this avoids. `isGeneratedPath` and
+ * `isExcludedByPattern` are path-only and free; they are left out because the
+ * question here is which files a config CONTRIBUTES, and a config does not
+ * stop contributing a file because the analysis later declines to read it.
+ *
+ * So the answer is a strict SUPERSET of what `openProject` analyzes, and the
+ * direction matters to the coverage figure AGENTS.md requires to match on both
+ * sides. `scanSourceFiles` -- the denominator -- applies all three rules, so
+ * every file this returns beyond what gets analyzed is a file the scan already
+ * dropped: it cannot appear in `scan minus covered`, so a wider `covered`
+ * neither invents a gap nor hides one. Keep the asymmetry pointing this way.
+ * A probe that excluded MORE than the scan is the dangerous direction -- that
+ * one reports a gap no flag can close, which is the failure `packageDirs` was
+ * written to avoid.
+ */
+export async function sourceFileNames(configs: readonly string[]): Promise<ProbeResult> {
+  const list = configs.map((c) => (isAbsolute(c) ? c : resolve(c)));
+  const api = createAPI(commonRootDir(list));
+  try {
+    const { snapshot, configs: opened } = await expandReferences(api, list);
+    const root = commonRootDir(opened);
+    const seen = new Set<string>();
+    const byConfig = new Map<string, string[]>();
+    for (const project of snapshot.getProjects()) {
+      const own = new Set<string>();
+      for (const name of await project.program.getSourceFileNames()) {
+        if (isSkippedSourceName(name)) continue;
+        const rel = toPosix(relative(root, name));
+        seen.add(rel);
+        own.add(rel);
+      }
+      byConfig.set(project.configFileName.toLowerCase(), [...own].sort(compareStrings));
+    }
+    // `compareStrings`, never `localeCompare`: under `en-US` collation folds
+    // case, so `src/Util.ts` sorts AFTER `src/alpha.ts` and two machines emit
+    // differently ordered lists from identical source. See `src/order.ts`.
+    return { root, names: [...seen].sort(compareStrings), byConfig };
+  } finally {
+    // The API holds an open connection to the `tsgo` child it spawned, and
+    // that connection keeps the event loop alive. Leak it and nothing is
+    // visible in the answer -- the caller's process simply never exits.
+    await api.close();
+  }
 }

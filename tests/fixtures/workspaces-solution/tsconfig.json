@@ -1,0 +1,7 @@
+{
+  // A solution-style root: it owns zero files and delegates to the workspace.
+  // `scripts/root-only.ts` is therefore covered by nothing, which is a real
+  // permanent gap the report must own rather than paper over.
+  "files": [],
+  "references": [{ "path": "tools/alpha" }]
+}

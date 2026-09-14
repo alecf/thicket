@@ -6,9 +6,12 @@ import { compareStrings } from "../order.js";
  * required for a diffable report (PRD §9.4).
  *
  * Recursive. Depth is bounded by the longest simple path in the module graph,
- * which on the `auto` path is at most 64 nodes; even `granularity: "file"`
- * bounds it by the import depth of the repo, not by file count. The iterative
- * rewrite waits for a profile that says it is needed.
+ * which on the single-project `auto` path is at most 64 nodes. Neither
+ * `granularity: "file"` nor the per-workspace path carries that bound -- the
+ * latter cuts each workspace independently, so a monorepo's module count is
+ * the sum over its workspaces -- but both are bounded by the import depth of
+ * the repo rather than by node count. The iterative rewrite waits for a
+ * profile that says it is needed.
  */
 export function stronglyConnected(
   nodes: readonly string[],

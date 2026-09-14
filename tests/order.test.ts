@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { byScoreThenId, compareStrings } from "../src/order.js";
+import { ORDERING_PROBE } from "./helpers.js";
 
 describe("compareStrings", () => {
   it("is a total order", () => {
@@ -19,14 +20,33 @@ describe("compareStrings", () => {
   });
 
   it("sorts a realistic path list identically regardless of host locale", () => {
-    const paths = ["src/util.ts", "src/App.tsx", "src/a-b.ts", "src/ab.ts", "src/Button.tsx"];
-    expect([...paths].sort(compareStrings)).toEqual([
-      "src/App.tsx",
-      "src/Button.tsx",
-      "src/a-b.ts",
-      "src/ab.ts",
-      "src/util.ts",
-    ]);
+    // `ORDERING_PROBE` is already in the order `compareStrings` must produce,
+    // and it is deliberately NOT in that order under collation.
+    const shuffled = [...ORDERING_PROBE].reverse();
+    expect(shuffled.sort(compareStrings)).toEqual([...ORDERING_PROBE]);
+  });
+});
+
+/**
+ * The probe is the foundation every other ordering guard now stands on, so it
+ * gets guards of its own: edit it in a way that costs it either property and
+ * the dependent tests would keep passing while proving nothing.
+ */
+describe("ORDERING_PROBE", () => {
+  it("orders differently under collation than under code units", () => {
+    const collated = [...ORDERING_PROBE].sort((a, b) => a.localeCompare(b));
+    expect(collated).not.toEqual([...ORDERING_PROBE]);
+  });
+
+  it("holds a nested path that no directory-at-a-time walk emits in order", () => {
+    // The other half, and the one Task 4 had to invent separately: the files
+    // of `a/` must not be contiguous in the sorted answer, or a walk that
+    // finishes each directory before starting the next produces the sorted
+    // list by luck and an unsorted implementation passes.
+    const nested = ORDERING_PROBE.findIndex((p) => p.startsWith("a/"));
+    expect(nested).toBeGreaterThan(-1);
+    expect(ORDERING_PROBE.slice(0, nested).some((p) => !p.startsWith("a/"))).toBe(true);
+    expect(ORDERING_PROBE.slice(nested + 1).some((p) => !p.startsWith("a/"))).toBe(true);
   });
 });
 

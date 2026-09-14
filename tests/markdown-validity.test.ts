@@ -150,8 +150,8 @@ describe("the report is valid markdown", () => {
         onDisk: 6286,
         complete: false,
         gaps: [
-          { dir: "apps/web", fileCount: 5262, config: "apps/web/tsconfig.json" },
-          { dir: "vendored", fileCount: 848 },
+          { dir: "apps/web", fileCount: 5262, configs: ["apps/web/tsconfig.json"] },
+          { dir: "vendored", fileCount: 848, configs: [] },
         ],
       },
     }),

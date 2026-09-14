@@ -1,4 +1,9 @@
 node_modules/
+# ...but not tests/fixtures/**/node_modules, which exists precisely to be a
+# directory named `node_modules` that the workspace walk must skip. The rule
+# above is unanchored, so without this carve-out the decoy never reaches the
+# repo and the skip test passes vacuously.
+!tests/fixtures/**/node_modules/
 /dist/
 # ...but not tests/fixtures/**/dist, which exists precisely to be a directory
 # named `dist` that the analyzer must skip. An unanchored `dist/` deletes that

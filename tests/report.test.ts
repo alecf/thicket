@@ -6,6 +6,7 @@ import {
   type ReportInput,
   type TangleEdge,
 } from "../src/report/markdown.js";
+import type { Scope } from "../src/extract/scope.js";
 import type { Ranked } from "../src/report/rank.js";
 import { initHash } from "../src/hash.js";
 
@@ -145,30 +146,55 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown(base)).not.toMatch(/outside this program/);
   });
 
-  it("warns above the findings when the program covered part of the tree", () => {
-    const out = renderMarkdown({
+  const partial = (gaps: Scope["gaps"]): string =>
+    renderMarkdown({
       ...base,
-      scope: {
-        analyzed: 176,
-        onDisk: 6286,
-        complete: false,
-        gaps: [
-          { dir: "apps/web", fileCount: 5262, config: "apps/web/tsconfig.json" },
-          { dir: "vendored", fileCount: 848 },
-        ],
-      },
+      scope: { analyzed: 176, onDisk: 6286, complete: false, gaps },
       duplication: [ranked("THK-DUP-1")],
       totalFindings: 1,
     });
+
+  it("warns above the findings when the program covered part of the tree", () => {
+    const out = partial([
+      { dir: "apps/web", fileCount: 5262, configs: ["apps/web/tsconfig.json"] },
+      { dir: "vendored", fileCount: 848, configs: [] },
+    ]);
     expect(out).toMatch(/\| analyzed \| 176 of 6286 source files \(2\.8%\) \|/);
     expect(out).toMatch(/6110 source files are outside this program/);
-    // The actionable half: the exact argument that closes the gap.
-    expect(out).toMatch(/^> - `apps\/web` — 5262 files — `--config apps\/web\/tsconfig\.json`$/m);
+    // The actionable half: a config in that directory the run has not opened.
+    expect(out).toMatch(
+      /^> - `apps\/web` — 5262 files — untried: `--config apps\/web\/tsconfig\.json`$/m,
+    );
     // A directory with no tsconfig of its own still gets counted, without a
     // fabricated --config that would not work.
     expect(out).toMatch(/^> - `vendored` — 848 files$/m);
     // Above the findings, because it changes what every number below it means.
     expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
+  });
+
+  it("lists every untried config in the directory, and does not rank them", () => {
+    const out = partial([
+      {
+        dir: "apps/web",
+        fileCount: 5262,
+        configs: ["apps/web/tsconfig.app.json", "apps/web/tsconfig.node.json"],
+      },
+    ]);
+    expect(out).toMatch(
+      /^> - `apps\/web` — 5262 files — untried: `--config apps\/web\/tsconfig\.app\.json`, `--config apps\/web\/tsconfig\.node\.json`$/m,
+    );
+  });
+
+  // The common case once workspace discovery has opened every config a
+  // directory has: there is nothing left to suggest. The line must end at the
+  // file count -- an empty list rendered as `— untried: ` is an instruction
+  // with no instruction in it, and a dangling `--config` is the dead-end
+  // advice this whole section exists to stop printing.
+  it("says nothing about configs when every one of them was already tried", () => {
+    const out = partial([{ dir: "apps/web", fileCount: 5262, configs: [] }]);
+    expect(out).toMatch(/^> - `apps\/web` — 5262 files$/m);
+    expect(out).not.toMatch(/untried/);
+    expect(out).not.toMatch(/--config/);
   });
 
   const manyFiles = ranked("THK-DUP-many", {

@@ -1,0 +1,17 @@
+{
+  // A sibling config that contributes NOTHING: its file set is a PROPER subset
+  // of `tsconfig.json`'s, which already covers all of `src/` except the tests.
+  // Picking up every `tsconfig*.json` beside a workspace's main config must be
+  // justified by the files it adds -- `tsconfig.test.json` adds the one file
+  // the main config excludes, and this one adds nothing at all.
+  //
+  // Keep the containment PROPER: `tsconfig.json`'s file set must always hold at
+  // least one file this config does not name -- today that is `src/b.ts`, which
+  // exists for no other reason. If the two sets were equal, a test asserting
+  // this config is skipped would also pass under the weaker rule "skip a
+  // sibling whose file set EQUALS the main config's", and would then keep
+  // passing with the real rule ("skip a sibling that adds no NEW files")
+  // broken.
+  "extends": "./tsconfig.json",
+  "include": ["src/a.ts"]
+}

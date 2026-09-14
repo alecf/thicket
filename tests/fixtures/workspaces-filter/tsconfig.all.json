@@ -1,0 +1,11 @@
+{
+  // The root sibling that spans the repository -- the shape a real
+  // `tsconfig.eslint.json` or `tsconfig.all.json` has, and the reason this
+  // fixture exists. Under `--filter pkg/alpha`, `pkg/beta`'s files are covered
+  // by no chosen config; blame the ROOT for them and this config is what
+  // closes that gap, so a run narrowed to one workspace quietly analyzes the
+  // other. The analysis is a graph computation, so that does not merely add
+  // findings -- it changes alpha's own propagation cost, coverage and clusters.
+  "compilerOptions": { "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true },
+  "include": ["**/*.ts"]
+}

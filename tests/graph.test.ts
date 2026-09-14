@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { buildModuleGraph } from "../src/graph/build.js";
 import { propagationCost, stronglyConnected } from "../src/graph/metrics.js";
-import { fixtureConfig, monorepoConfigs, typeOnlyConfig } from "./helpers.js";
+import { join } from "node:path";
+import {
+  filterWorkspacesRoot,
+  fixtureConfig,
+  monorepoConfigs,
+  typeOnlyConfig,
+} from "./helpers.js";
 
 describe("stronglyConnected", () => {
   it("finds a simple 2-node cycle", () => {
@@ -272,5 +278,66 @@ describe("buildModuleGraph", () => {
     // file in `view`: four symbols, one edit.
     expect(viewToModel.weight).toBe(4);
     expect(viewToModel.files).toEqual(["packages/view/render.ts"]);
+  });
+});
+
+/**
+ * The acceptance test for per-workspace granularity, run over a real program
+ * rather than over synthetic path strings.
+ *
+ * `THK-CYC-*` ids derive from module names (PRD §9.1), and the whole point of
+ * the report is diffing one run against the last. Before this, the same tree
+ * reported `dir:3 (4 modules)` unfiltered and `dir:1 (2 modules)` under
+ * `--filter @filt/alpha`, so `pkg/alpha/src/a.ts` was in a module called
+ * `pkg/alpha/src` in one run and `pkg` in the other.
+ *
+ * The config lists here are the ones discovery picks for each scope, asserted
+ * end to end in `tests/workspace-run.test.ts`; `repoFileCount` is the on-disk
+ * source count, which does not move with `--filter`.
+ */
+describe("buildModuleGraph across workspaces", () => {
+  const root = filterWorkspacesRoot();
+  const ws = { dirs: ["pkg/alpha", "pkg/beta"], repoFileCount: 4 };
+
+  it("names a workspace's modules the same filtered and unfiltered", async () => {
+    const wide = await openProject(
+      [
+        join(root, "tsconfig.json"),
+        join(root, "pkg/alpha/tsconfig.json"),
+        join(root, "pkg/beta/tsconfig.json"),
+        join(root, "pkg/beta/tsconfig.extra.json"),
+      ],
+      { root },
+    );
+    const narrow = await openProject(
+      [join(root, "tsconfig.json"), join(root, "pkg/alpha/tsconfig.json")],
+      { root },
+    );
+    const all = buildModuleGraph(wide, { workspaces: ws });
+    const alphaOnly = buildModuleGraph(narrow, { workspaces: ws });
+
+    expect(all.granularity).toBe("workspace");
+    expect(all.modules).toEqual(["<root>", "pkg/alpha", "pkg/beta/scripts", "pkg/beta/src"]);
+    expect(alphaOnly.modules).toEqual(["<root>", "pkg/alpha"]);
+    expect(alphaOnly.moduleOf["pkg/alpha/src/a.ts"]).toBe("pkg/alpha");
+    expect(all.moduleOf["pkg/alpha/src/a.ts"]).toBe("pkg/alpha");
+  });
+
+  /**
+   * One workspace is not a monorepo: there is no second workspace to be a peer
+   * at a different scale, and re-cutting it would churn `THK-CYC-*` ids for a
+   * repo that gains nothing. The common prefix is stripped as it always was,
+   * which is what makes these names differ from the ones above.
+   */
+  it("leaves a one-workspace run on the single-project ladder", async () => {
+    const project = await openProject(
+      [join(root, "pkg/beta/tsconfig.json"), join(root, "pkg/beta/tsconfig.extra.json")],
+      { root },
+    );
+    const graph = buildModuleGraph(project, {
+      workspaces: { dirs: ["pkg/beta"], repoFileCount: 4 },
+    });
+    expect(graph.granularity).toBe("dir:1");
+    expect(graph.modules).toEqual(["scripts", "src"]);
   });
 });

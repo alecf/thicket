@@ -49,6 +49,7 @@ The report must be a pure function of `(source content, config, thicket version)
 
 - Sort every collection before emitting; break ties explicitly (`score desc, id asc`).
 - **Never use `localeCompare`.** Sort strings with `compareStrings` from `src/order.ts`. `localeCompare` depends on the host's ICU data and `LANG`/`LC_ALL`, and it disagrees with code-unit order on inputs we handle constantly — under `en-US`, `"src/Util.ts"` sorts *after* `"src/alpha.ts"` because collation folds case. Any repo with a capitalized filename hits this on the first sort, and two machines then emit differently-ordered reports from identical source.
+- **Ordering data must be adversarial, or the assertion is decorative.** A sort is pinned only by input that can *fail* it, and that needs two properties: a name whose **code-unit order differs from collation order** (`Util.ts` before `alpha.ts`; `-` 0x2D, `.` 0x2E and `_` 0x5F straddling the letters), and a path whose **sorted position differs from any plausible insertion order** (`a/c.ts` between `a.min.ts` and `a_c.ts`, so no walk that finishes one directory before starting another emits the sorted list by luck). Four sorts reached review with data that had neither, and swapping `compareStrings` for `localeCompare` left all of them green. `ORDERING_PROBE` in `tests/helpers.ts` carries both — reference it rather than rederiving one; where the data has to be domain-shaped (tsconfig basenames, directory names), say which property it carries and point back at the probe. CI greps `src/` for the banned call, which is a floor, not a substitute: it cannot see a sort that is merely unpinned.
 - Never rely on `Map`/`Set` iteration order reflecting anything meaningful.
 - Fixed hash seeds. No `Math.random()`, no timestamps, no absolute paths, no wall-clock durations anywhere in the diffable body.
 - Paths are POSIX-normalized and repo-relative.
@@ -163,6 +164,12 @@ and it cannot be engineered away from this side.
   checkout a stray `node_modules` satisfies the resolution the packaged layout
   is supposed to satisfy alone, and the job goes green while the artifact is
   broken for everyone.
+  **And one reference report cannot see it.** Every `new API` is a place that
+  fault can reappear: `createAPI` fixed the call site in `openProject`, and the
+  workspace probe added a second one, which the packaged binary then failed on
+  for every directory run while the `--config` report stayed byte-identical. So
+  the job renders *both entry paths* — `--config <tsconfig>` and a bare
+  directory — because only the second reaches `sourceFileNames`.
 - **tsgo will not start without its `lib.*.d.ts` files beside it.** It does not
   degrade — it panics with `bundled: …/lib.d.ts does not exist; this executable
   may be misplaced`. So the shipping unit is a directory: the binary, `tsgo/tsc`,

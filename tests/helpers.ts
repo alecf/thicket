@@ -1,7 +1,43 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Paths that make an ordering assertion falsifiable, in the order
+ * `compareStrings` must put them.
+ *
+ * A sort assertion is only a guard if its data can FAIL it, and four sorts in
+ * this repository reached review pinned by data that could not -- swapping
+ * `compareStrings` for `localeCompare` left every one of them green. Two
+ * properties are needed, and most hand-written lists have neither:
+ *
+ *  1. **Code-unit order differs from collation order.** `Util.ts` before
+ *     `alpha.ts` (`U` = 0x55 < `a` = 0x61), which en-US reverses because it
+ *     folds case; and the punctuation straddling the letters, since `-`
+ *     (0x2D), `.` (0x2E) and `_` (0x5F) are variable-weight under collation
+ *     and fixed under code units. Without one of these the two comparators
+ *     agree and the swap is invisible.
+ *  2. **Sorted order differs from any plausible INSERTION order.** `a/c.ts`
+ *     sorts between `a.min.ts` and `a_c.ts`, so the files of directory `a/` are
+ *     not contiguous in the answer: no walk that finishes one directory before
+ *     starting another can produce this list by luck, whether or not it sorts.
+ *
+ * Use it wherever a sort's output is asserted; where the data has to be
+ * domain-shaped instead (tsconfig basenames, directory names), state both
+ * properties and point back here rather than rederiving them.
+ */
+export const ORDERING_PROBE: readonly string[] = [
+  "Util.ts",
+  "a-b.ts",
+  "a.min.ts",
+  "a/c.ts",
+  "a_c.ts",
+  "ab.ts",
+  "alpha.ts",
+];
 
 export function fixtureRoot(): string {
   return resolve(here, "fixtures/sample");
@@ -208,4 +244,184 @@ export function typeCutConfig(): string {
 
 export function tangleConfig(): string {
   return resolve(here, "fixtures/tangle/tsconfig.json");
+}
+
+/**
+ * A workspace root whose own tsconfig covers only `scripts/`, beside four
+ * workspaces and one excluded by a negation glob. Directory names are
+ * deliberately `tools/` and `libs/`: any hardcoded `apps`/`packages` name
+ * fails here instead of passing by luck.
+ *
+ * Each member is a trap for one way workspace discovery goes wrong:
+ * - `tools/alpha` carries two siblings, and they must be told apart by the
+ *   files they add: `tsconfig.test.json` adds the one file the main config
+ *   excludes, `tsconfig.build.json` names a proper subset and adds nothing.
+ * - `tools/cfgonly` publishes shared config and owns no tsconfig and no
+ *   source; it must yield zero configs rather than throwing, and its lone
+ *   `.d.ts` keeps it out of the denominator. Its `base.json` is a non-tsconfig
+ *   JSON file sitting where configs are looked for -- glob `*.json` instead of
+ *   `tsconfig*.json` and it gets loaded as a project.
+ * - `libs/ignored` has a working config and source, so the negation glob is
+ *   the only thing keeping it out of the analyzed set.
+ * - `deep/a/b/gamma` is reachable only through a `**` glob, two levels below
+ *   where every other workspace sits, so one-level expansion misses it.
+ * - `deep/a/b/gamma/node_modules/dep` is a package the walk must skip. It sits
+ *   under `deep/**` because that is the only glob here that crosses separators:
+ *   anywhere under `tools/*` or `libs/*` the include filter rejects it on path
+ *   depth alone, so the walk's own skip would never be what excluded it and
+ *   deleting that skip would change nothing.
+ *
+ * `tools/cfgonly` is also the one workspace with no `"type": "module"`, which
+ * is deliberate rather than an oversight: it owns a single `.d.ts` and no
+ * module ever resolves against it.
+ */
+export function workspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces");
+}
+
+/**
+ * A second workspace root in the solution style a real pnpm monorepo uses: the
+ * root `tsconfig.json` declares `"files": []` and delegates to `tools/alpha`,
+ * so it legitimately owns nothing. `scripts/root-only.ts` sits in no workspace
+ * and is covered by no config -- a permanent gap, and the only honest answer
+ * is to say so.
+ *
+ * The root also carries a sibling, `tsconfig.build.json`, whose `include`
+ * reaches into `tools/**`. That is what `workspacesRoot()` cannot test: its
+ * root has no sibling at all, so a coverage check scoped to the whole tree
+ * rather than to files in no workspace passes there by construction. Here it
+ * adopts a config that covers only another workspace's files.
+ *
+ * `tools/alpha/scripts/build.ts` closes the other way that check can be wrong.
+ * Scope the root's gap GLOBALLY -- "files no config chosen so far covers" --
+ * and with every `tools/` file already covered by alpha's own config the
+ * residual is `scripts/root-only.ts` alone, which the sibling does not cover,
+ * so the sibling is declined for a reason unrelated to scoping. `build.ts`
+ * sits outside alpha's `src/**` and inside the sibling's `tools/**`, so it
+ * survives into a global residual and the sibling covers it. Both mis-scopes
+ * now adopt it; the correct check looks for a sibling inside `tools/alpha`,
+ * finds none, and reports alpha's gap as permanent.
+ */
+export function solutionWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-solution");
+}
+
+/**
+ * A third workspace root, declared the pnpm way. Its `package.json` carries no
+ * `workspaces` key at all, so `pnpm-workspace.yaml` is the only thing here that
+ * can answer -- read the globs from the wrong file and this root looks like a
+ * plain single project.
+ *
+ * The YAML is shaped after a real pnpm monorepo's, because the details that
+ * break a hand-written parser are the ones nobody writes into an example:
+ * entries that are single-quoted, double-quoted and bare; an entry that is a
+ * plain directory name rather than a pattern; comments both above `packages:`
+ * and inside its list; and later top-level keys, one holding a nested mapping
+ * and one holding a list of its own. The parser must stop at the FIRST of those
+ * keys, which makes everything after it unreachable by construction -- the
+ * second key is realism, not coverage, and the output is identical with those
+ * lines deleted. The shape that would actually leak, a later key whose own list
+ * is flush against the margin, is pinned in `tests/workspaces.test.ts` where it
+ * can be read beside the regex it constrains.
+ *
+ * Only `libs/gamma` exists on disk. Nothing expands these globs -- this root is
+ * read by the manifest parser and by nothing else -- so the rest deliberately
+ * match nothing.
+ */
+export function pnpmWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-pnpm");
+}
+
+/**
+ * Runs `body` against a throwaway root holding exactly `files`, keyed by name.
+ *
+ * Malformed and oddly-shaped manifests are written here rather than committed
+ * as fixtures: each one is read by a single assertion, needs no TypeScript
+ * beside it, and an unparseable `package.json` checked into `tests/fixtures/`
+ * is a trap for every tool that walks this repo. The empty case -- `{}` -- is a
+ * temp dir for a different reason: it must be a directory that exists and holds
+ * no manifest, and a committed fixture only has that property until someone
+ * adds a `package.json` to it, at which point the test silently starts
+ * exercising a branch another test already covers.
+ *
+ * Files are named rather than implied, because which manifest wins when a root
+ * holds two of them is itself under test. A name may carry directories, since
+ * a workspace root's members live in subdirectories of it.
+ */
+export function withRoot(files: Record<string, string>, body: (root: string) => void): void {
+  const root = mkdtempSync(join(tmpdir(), "thicket-ws-"));
+  try {
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(root, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+    body(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * A fourth workspace root, and the only one where a workspace sits INSIDE
+ * another. `tools/**` matches both `tools/alpha` and `tools/alpha/sub`, which
+ * is the nesting Task 4 made reachable.
+ *
+ * Two properties no other fixture has, and each is invisible without the
+ * other:
+ *
+ * - `tools/alpha/tsconfig.build.json` reaches into `sub/` AND into `sub-x/`,
+ *   and covers one uncovered file in each. `sub/scripts/gen.ts` belongs to the
+ *   nested workspace, so this config must never be what closes it --
+ *   attribute a gapped file to the shallowest workspace containing it and it
+ *   is. `sub-x/gen.ts` belongs to `tools/alpha`, because `sub-x` is a plain
+ *   directory whose name merely starts with `sub` -- test containment without
+ *   a trailing separator and that file is handed to the nested workspace, the
+ *   parent is left missing nothing, and the file is analyzed by nothing. One
+ *   config, two attributions, failing in opposite directions.
+ * - There is NO root `tsconfig.json`, which is what puts the probe's root
+ *   below the repo root: the common ancestor of the primaries is `tools`, so
+ *   every name the probe returns is measured from there -- and from
+ *   `tools/alpha/sub` alone once `--filter` narrows the run to one workspace.
+ *   Diff those against a repo-relative scan without rebasing and the whole
+ *   tree reads as a gap -- and `sub/tsconfig.extra.json`, the one sibling that
+ *   genuinely contributes, is then rejected because its names match nothing.
+ *
+ * A root with no config of its own is not a contrivance for that: a pnpm
+ * monorepo that keeps its compiler settings in the packages routinely has one.
+ *
+ * `tools/Zed` is here for its capital letter and nothing else: it is the only
+ * name in these fixtures that sorts differently under code-unit order and
+ * under collation, so it is what fails when `compareStrings` is swapped for
+ * `localeCompare` (AGENTS.md §1). It stays a bespoke datum because it has to
+ * be a directory ON DISK that workspace discovery walks, which no exported
+ * constant can be -- it carries property 1 of `ORDERING_PROBE` and not
+ * property 2, and the probe's docstring is where both are written down.
+ */
+export function nestedWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-nested");
+}
+
+/**
+ * A fifth workspace root, built for one question: what happens to a workspace
+ * the run was told to leave out.
+ *
+ * The root carries `tsconfig.all.json`, whose `include` is `**` -- the shape
+ * of a real `tsconfig.eslint.json`. Under `--filter @filt/alpha`, `pkg/beta`'s
+ * files are covered by no chosen config, and if the root is blamed for them
+ * this config is exactly what closes that gap. The run then analyzes beta
+ * anyway, and since every number thicket reports is computed over the file set
+ * -- propagation cost, duplicated coverage, cycles, clusters -- alpha's own
+ * figures change, measured over a tree the reader explicitly excluded, with
+ * nothing in the output saying so.
+ *
+ * `pkg/beta/tsconfig.extra.json` is the other half. It covers
+ * `pkg/beta/scripts/gen.ts`, which beta's own config misses, so it MUST be
+ * adopted when beta is selected and must NOT be when beta is not -- and not
+ * because the file stopped being uncovered, but because the gap is beta's and
+ * beta is not in this run. A "list of every workspace" used for anything but
+ * attribution pulls both that config and beta's primary back in.
+ */
+export function filterWorkspacesRoot(): string {
+  return resolve(here, "fixtures/workspaces-filter");
 }
