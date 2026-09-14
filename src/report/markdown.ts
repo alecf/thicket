@@ -3,35 +3,22 @@ import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
+import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
 import { canonicalKind } from "./kinds.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
-/** One dependency edge inside a tangle, with what it would cost to remove. */
-export interface TangleEdge {
-  from: string;
-  to: string;
-  /**
-   * Import sites across the edge: one per symbol per importing file, with
-   * `export … from` re-exports counted as the imports they are. NOT distinct
-   * symbol names — a symbol imported in eight files counts eight times, which
-   * is the point, since it is a proxy for how many edits severing the edge
-   * costs.
-   */
-  weight: number;
-  /** Files in `from` that carry it, sorted. This is the number of edits. */
-  files: string[];
-  /** How many of `weight` are erased at compile time. */
-  erased: number;
-  /** The single file most of this edge lands on, and how much of it. */
-  topTarget: { path: string; weight: number };
-  /** How many of `weight` the target merely forwards from somewhere else. */
-  passThrough: number;
-  /** Where it forwards them from. */
-  origin?: string;
-  /** ALL of it erased, so not a runtime dependency at all. */
-  typeOnly: boolean;
-}
+/**
+ * One dependency edge inside a tangle, with what it would cost to remove.
+ *
+ * The graph's own edge, under the name the report calls it -- an alias rather
+ * than a restatement. The two were declared separately and structural typing
+ * let `buildModuleGraph` output flow into a `CycleFinding` regardless, so the
+ * copies drifted in the one way that never fails: `weight` was documented here
+ * as import sites and there as "distinct symbols", which is the wrong name
+ * AGENTS.md records an agent losing a tangle to.
+ */
+export type TangleEdge = ModuleEdge;
 
 export interface CycleFinding {
   id: string;

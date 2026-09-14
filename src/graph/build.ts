@@ -11,10 +11,14 @@ export interface ModuleEdge {
   from: string;
   to: string;
   /**
-   * Distinct symbols the `from` module imports out of the `to` module,
-   * summed over its files. Counting imports instead would make nearly every
-   * weight 1 and lose the difference between pulling one constant and pulling
-   * thirty (PRD §7.2).
+   * Import sites across the edge: one per symbol per importing file, with
+   * `export … from` re-exports counted as the imports they are. NOT distinct
+   * symbol names -- a symbol imported in eight files counts eight times, which
+   * is the point, since it is a proxy for how many edits severing the edge
+   * costs.
+   *
+   * Counting declarations instead would make nearly every weight 1 and lose
+   * the difference between pulling one constant and pulling thirty (PRD §7.2).
    */
   weight: number;
   /**
