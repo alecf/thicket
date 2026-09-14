@@ -153,6 +153,29 @@ describe("openCache", () => {
     expect(openCache(dir, "config-1")).toBeNull();
   });
 
+  it("releases the write lock when a write fails part way through a file", () => {
+    const path = join(tempDir(), "cache.db");
+    const a = openCache(path, "config-1")!;
+    const b = openCache(path, "config-1")!;
+
+    // The second fragment cannot bind, so the INSERT throws after
+    // BEGIN IMMEDIATE has already taken the write lock and written the first.
+    a.replaceFile("a.ts", "h1", [frag(), frag({ kind: undefined as unknown as string })]);
+
+    // Nothing half-written survives...
+    expect(b.fragmentsOf("a.ts")).toEqual([]);
+    expect(b.isUnchanged("a.ts", "h1")).toBe(false);
+
+    // ...and the part `guard` cannot fake: the lock is released, so another
+    // connection can still write. Drop the ROLLBACK and the aborted
+    // transaction holds RESERVED, and this write dies on the busy timeout.
+    b.replaceFile("b.ts", "h2", [frag({ filePath: "b.ts" })]);
+    expect(b.isUnchanged("b.ts", "h2")).toBe(true);
+
+    a.close();
+    b.close();
+  });
+
   it("survives a second process holding the same database", () => {
     const path = join(tempDir(), "cache.db");
     const a = openCache(path, "config-1")!;
