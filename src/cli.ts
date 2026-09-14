@@ -90,8 +90,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       allowNegative: true,
     });
   } catch (err) {
-    process.stderr.write(`thicket: ${(err as Error).message}\n\n${USAGE}`);
-    return 2;
+    return fail((err as Error).message, { usage: true, code: 2 });
   }
 
   const { values, positionals } = parsed;
@@ -111,15 +110,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   // Explicit configs are resolved up front so a bad path fails before anything
   // is loaded; absent, they are discovered under `dir` (see `runReport`).
   const configs = values.config === undefined ? undefined : resolveConfigs(values.config);
-  if (typeof configs === "string") {
-    process.stderr.write(configs);
-    return 1;
-  }
+  if (typeof configs === "string") return fail(configs);
 
   if (positionals[0] === "cache") {
     if (positionals[1] !== "clear" || positionals.length !== 2) {
-      process.stderr.write(`thicket: unknown command: ${positionals.join(" ")}\n\n${USAGE}`);
-      return 1;
+      return fail(`unknown command: ${positionals.join(" ")}`, { usage: true });
     }
     // Where `runReport` would have put it: the analyzed directory, or -- when
     // configs were named instead -- the root derived from them. Derived can
@@ -128,15 +123,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     // success over one nobody asked about.
     const root = configs === undefined ? resolve(".") : commonRootDir(configs);
     const removed = clearCache(root);
-    process.stderr.write(
-      removed ? `thicket: cleared the cache in ${root}\n` : `thicket: no cache in ${root}\n`,
-    );
+    note(removed ? `cleared the cache in ${root}` : `no cache in ${root}`);
     return 0;
   }
 
   if (positionals.length > 1) {
-    process.stderr.write(`thicket: unknown command: ${positionals.join(" ")}\n\n${USAGE}`);
-    return 1;
+    return fail(`unknown command: ${positionals.join(" ")}`, { usage: true });
   }
   // `cache` and `diff` are answered above, so a lone positional is the
   // directory to analyze -- and a directory genuinely named either of those is
@@ -144,8 +136,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   // it is also the root paths and the cache are measured from.
   const dir = positionals[0];
   if (dir !== undefined && !isDirectory(dir)) {
-    process.stderr.write(`thicket: not a directory: ${resolve(dir)}\n`);
-    return 1;
+    return fail(`not a directory: ${resolve(dir)}`);
   }
   // `--config` alone keeps its own root -- the ancestor of the configs opened
   // -- rather than being pinned to the working directory. Someone who names a
@@ -164,14 +155,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   // everything is the failure this tool exists to prevent. The asymmetry is
   // the difference between belt-and-braces and a request that goes unanswered.
   if (filter.length > 0 && configs !== undefined) {
-    process.stderr.write(
-      `thicket: --filter selects workspaces and --config names configs; pass one or the other\n`,
-    );
-    return 1;
+    return fail("--filter selects workspaces and --config names configs; pass one or the other");
   }
   if (filter.length > 0 && values.workspaces === false) {
-    process.stderr.write(`thicket: --filter selects workspaces, which --no-workspaces turns off\n`);
-    return 1;
+    return fail("--filter selects workspaces, which --no-workspaces turns off");
   }
 
   let depth: number;
@@ -186,31 +173,26 @@ export async function main(argv: readonly string[]): Promise<number> {
     minLinesOverride = parseNumber(values["min-lines"], "--min-lines");
     maxLocations = parseNumber(values["max-locations"], "--max-locations");
   } catch (err) {
-    process.stderr.write(`thicket: ${(err as Error).message}\n`);
-    return 1;
+    return fail((err as Error).message);
   }
 
   const preset = DEPTH_PRESETS[depth];
   if (!preset) {
-    process.stderr.write(`thicket: --depth must be 1..5, got ${depth}\n`);
-    return 1;
+    return fail(`--depth must be 1..5, got ${depth}`);
   }
 
   // Rejected rather than silently defaulted: a typo'd mode that quietly
   // analyzed everything would be indistinguishable from asking for everything.
   const types = values.types ?? "include";
   if (types !== "include" && types !== "exclude" && types !== "only") {
-    process.stderr.write(`thicket: --types must be include, exclude, or only; got ${types}\n`);
-    return 1;
+    return fail(`--types must be include, exclude, or only; got ${types}`);
   }
 
   const granularity = parseGranularity(values.granularity);
   if (granularity === undefined) {
-    process.stderr.write(
-      `thicket: --granularity must be auto, dir, file, or a directory depth; ` +
-        `got ${values.granularity}\n`,
+    return fail(
+      `--granularity must be auto, dir, file, or a directory depth; got ${values.granularity}`,
     );
-    return 1;
   }
 
   const minNodes = minNodesOverride ?? preset.minNodes;
@@ -224,7 +206,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       ...(analyzedDir === undefined ? {} : { dir: analyzedDir }),
       filter,
       workspaces: values.workspaces ?? true,
-      warn: (message) => process.stderr.write(`thicket: ${message}\n`),
+      warn: note,
       minNodes,
       minLines,
       maxFindings: preset.maxFindings,
@@ -240,8 +222,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   } catch (err) {
     // A stack trace on stderr is a worse answer than a sentence: the caller is
     // usually a harness, and an unhandled rejection exits 1 with no message.
-    process.stderr.write(`thicket: analysis failed: ${(err as Error).message}\n`);
-    return 1;
+    return fail(`analysis failed: ${(err as Error).message}`);
   }
 
   process.stdout.write(markdown);
@@ -252,6 +233,27 @@ export async function main(argv: readonly string[]): Promise<number> {
 }
 
 /** True for a path that exists and is a directory. */
+/**
+ * Print a thicket diagnostic and hand back an exit code.
+ *
+ * The `thicket: ` prefix and the trailing newline live here rather than at
+ * each of the thirteen failure paths. The prefix is how a harness tells our
+ * diagnostics apart from the compiler's, and leaving it to the call site had
+ * already produced one function that supplied its own while every other site
+ * added one at the call -- a split with nothing to keep the two halves
+ * agreeing.
+ */
+function fail(message: string, opts: { usage?: boolean; code?: number } = {}): number {
+  note(message);
+  if (opts.usage === true) process.stderr.write(`\n${USAGE}`);
+  return opts.code ?? 1;
+}
+
+/** One prefixed line on stderr, for what is not a failure: warnings, and what was done. */
+function note(message: string): void {
+  process.stderr.write(`thicket: ${message}\n`);
+}
+
 function isDirectory(path: string): boolean {
   try {
     return statSync(resolve(path)).isDirectory();
@@ -260,16 +262,16 @@ function isDirectory(path: string): boolean {
   }
 }
 
-/** The resolved config paths, or the error message to print. */
+/** The resolved config paths, or the message to hand to `fail`. */
 function resolveConfigs(given: readonly string[]): string[] | string {
   // `resolve("")` is the cwd, which exists, so an empty --config would slip
   // past the existence check and analyze a directory as if it were a config.
   if (given.some((c) => c.trim() === "")) {
-    return `thicket: --config must name a tsconfig, got an empty string\n`;
+    return "--config must name a tsconfig, got an empty string";
   }
   const configs = given.map((c) => resolve(c));
   const missing = configs.filter((c) => !existsSync(c));
-  if (missing.length > 0) return `thicket: no such tsconfig: ${missing.join(", ")}\n`;
+  if (missing.length > 0) return `no such tsconfig: ${missing.join(", ")}`;
   return configs;
 }
 
@@ -284,18 +286,14 @@ function resolveConfigs(given: readonly string[]): string[] | string {
  */
 function diffCommand(args: readonly string[]): number {
   if (args.length !== 2) {
-    process.stderr.write(
-      `thicket: diff takes exactly two report paths, got ${args.length}\n\n${USAGE}`,
-    );
-    return 1;
+    return fail(`diff takes exactly two report paths, got ${args.length}`, { usage: true });
   }
   let diff;
   try {
     const [before, after] = args.map((path) => readReport(path));
     diff = diffReports(before!, after!);
   } catch (err) {
-    process.stderr.write(`thicket: ${(err as Error).message}\n`);
-    return 1;
+    return fail((err as Error).message);
   }
 
   const lines = [formatDiff(diff)];

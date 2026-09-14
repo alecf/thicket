@@ -130,6 +130,40 @@ describe("main", () => {
     expect(io.stdout()).toBe("");
   });
 
+  /**
+   * Every failure path, checked for shape rather than wording.
+   *
+   * The prefix is how a harness tells thicket's own diagnostics apart from the
+   * compiler's, and the newline is what keeps two of them from running
+   * together on one line. Asserted as a property because the per-case
+   * assertions above are `toMatch` on a fragment, which stays green if the
+   * prefix disappears -- and one site had in fact drifted into supplying its
+   * own prefix while the rest added theirs at the call.
+   */
+  const FAILING_INVOCATIONS: readonly (readonly string[])[] = [
+    ["--config", ""],
+    ["--config", "/definitely/not/here/tsconfig.json"],
+    ["--depth", "9"],
+    ["--depth", "not-a-number"],
+    ["--types", "sideways"],
+    ["--granularity", "sideways"],
+    ["cache", "purge"],
+    ["one", "two"],
+    ["--filter", "a", "--config", fixtureConfig()],
+    ["--filter", "a", "--no-workspaces"],
+    ["/definitely/not/here"],
+    ["--not-a-flag"],
+  ];
+
+  it.each(FAILING_INVOCATIONS)("explains itself on stderr: thicket %s %s", async (...argv) => {
+    const io = capture();
+    expect(await main(argv)).not.toBe(0);
+    const err = io.stderr();
+    expect(err.startsWith("thicket: ")).toBe(true);
+    expect(err.endsWith("\n")).toBe(true);
+    expect(io.stdout()).toBe("");
+  });
+
   it("exits non-zero for a nonexistent config path", async () => {
     const io = capture();
     expect(await main(["--config", "/definitely/not/here/tsconfig.json"])).not.toBe(0);
