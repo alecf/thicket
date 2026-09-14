@@ -661,6 +661,19 @@ export async function runReport(
     // Hoisted above the cycle block, which needs it to walk file-level imports.
     const byRelPath = new Map(files.map((f) => [f.path, f]));
 
+    // By repo-relative path rather than by handle, which is what every caller
+    // downstream has. A path outside the program answers "imports nothing"
+    // rather than throwing: the callers walk whole components and a filtered
+    // run legitimately holds edges to files it did not analyze.
+    const importsOfPath = (path: string): readonly string[] => {
+      const handle = byRelPath.get(path);
+      return handle === undefined ? [] : project.importsOf(handle);
+    };
+    const reexportsOfPath = (path: string): readonly string[] => {
+      const handle = byRelPath.get(path);
+      return handle === undefined ? [] : project.reexportsOf(handle);
+    };
+
     const components = stronglyConnected(graph.modules, graph.adjacency).filter(
       (c) => c.length > 1,
     );
@@ -676,14 +689,7 @@ export async function runReport(
       const componentFiles = files
         .map((f) => f.path)
         .filter((p) => members.has(graph.moduleOf[p] ?? ""));
-      const cycles = fileCycles(
-        componentFiles,
-        (p) => {
-          const handle = byRelPath.get(p);
-          return handle === undefined ? [] : project.importsOf(handle);
-        },
-        (p) => graph.moduleOf[p],
-      );
+      const cycles = fileCycles(componentFiles, importsOfPath, (p) => graph.moduleOf[p]);
       const { dissolves, cuts, residual, bestRejectedResidual } = suggestFixes(
         modules,
         inner,
@@ -755,14 +761,8 @@ export async function runReport(
     const byPath = new Map(files.map((f) => [f.path, f.sourceFile.text]));
     const importIndex = buildImportIndex(
       files.map((f) => f.path),
-      (path) => {
-        const handle = byRelPath.get(path);
-        return handle === undefined ? [] : project.importsOf(handle);
-      },
-      (path) => {
-        const handle = byRelPath.get(path);
-        return handle === undefined ? [] : project.reexportsOf(handle);
-      },
+      importsOfPath,
+      reexportsOfPath,
     );
     const decorate = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;
