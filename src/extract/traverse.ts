@@ -18,3 +18,19 @@ export function walk(node: Node, visit: (n: Node) => void): void {
   visit(node);
   forEachChildSafe(node, (c) => walk(c, visit));
 }
+
+/**
+ * `getText()` behind a guard.
+ *
+ * It reads back through the source file, which throws for a synthesized node --
+ * and a throw here would abort the whole walk for one unreadable identifier.
+ * That failure is silent downstream: an aborted import walk reads as "this
+ * repo has no imports" rather than as an error (AGENTS.md §3).
+ */
+export function safeText(node: Node): string {
+  try {
+    return node.getText();
+  } catch {
+    return "";
+  }
+}

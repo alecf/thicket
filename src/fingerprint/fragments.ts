@@ -1,6 +1,6 @@
 import { SyntaxKind } from "typescript/unstable/ast";
 import type { FileHandle, Node } from "../extract/types.js";
-import { forEachChildSafe } from "../extract/traverse.js";
+import { forEachChildSafe, safeText } from "../extract/traverse.js";
 
 /**
  * Kinds carrying no refactoring signal, matched by enum VALUE.
@@ -216,12 +216,4 @@ function appendDelimited(parent: string[], child: readonly string[]): void {
   parent.push("(");
   for (const token of child) parent.push(token);
   parent.push(")");
-}
-
-function safeText(node: Node): string {
-  try {
-    return node.getText();
-  } catch {
-    return "";
-  }
 }

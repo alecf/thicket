@@ -6,7 +6,7 @@ import { hash, initHash } from "../hash.js";
 import { compareStrings, mostFrequent } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
 import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
-import { forEachChildSafe, walk } from "./traverse.js";
+import { forEachChildSafe, safeText, walk } from "./traverse.js";
 import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
@@ -188,7 +188,7 @@ function bindingCount(decl: Node): { count: number; erased: number; names: strin
 function localNameOf(spec: Node): string {
   const identifiers: string[] = [];
   forEachChildSafe(spec, (child) => {
-    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(safeText(child));
   });
   return identifiers[identifiers.length - 1] ?? "";
 }
@@ -204,22 +204,9 @@ function localNameOf(spec: Node): string {
 function importedNameOf(spec: Node): string {
   const identifiers: string[] = [];
   forEachChildSafe(spec, (child) => {
-    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(safeText(child));
   });
   return identifiers[0] ?? "";
-}
-
-/**
- * `getText()` behind a guard. It reads back through the source file, which
- * throws for a synthesized node -- and a throw here would abort the whole
- * import walk for one unreadable identifier.
- */
-function nodeText(node: Node): string {
-  try {
-    return node.getText();
-  } catch {
-    return "";
-  }
 }
 
 /**
