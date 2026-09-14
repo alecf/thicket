@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byScoreThenId, compareStrings } from "../src/order.js";
+import { byScoreThenId, compareStrings, heaviestKey, mostFrequent } from "../src/order.js";
 import { ORDERING_PROBE } from "./helpers.js";
 
 describe("compareStrings", () => {
@@ -66,5 +66,58 @@ describe("byScoreThenId", () => {
       { id: "b", score: 3 },
     ];
     expect([...items].sort(byScoreThenId).map((i) => i.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("heaviestKey", () => {
+  it("returns the key with the largest value", () => {
+    const m = new Map([
+      ["a", 1],
+      ["b", 7],
+      ["c", 3],
+    ]);
+    expect(heaviestKey(m)).toEqual({ key: "b", weight: 7 });
+  });
+
+  it("is empty-safe", () => {
+    expect(heaviestKey(new Map())).toEqual({ key: "", weight: 0 });
+  });
+
+  it("breaks ties by code unit, not by collation", () => {
+    // Every key is tied, so the answer is decided entirely by the tie-break --
+    // and `ORDERING_PROBE` is built so code-unit order and collation disagree
+    // about which comes first ("Util.ts" vs "alpha.ts"). Swap `compareStrings`
+    // for `localeCompare` and this flips.
+    const tied = new Map(ORDERING_PROBE.map((k) => [k, 5]));
+    expect(heaviestKey(tied)).toEqual({ key: ORDERING_PROBE[0], weight: 5 });
+    expect(ORDERING_PROBE[0]).not.toBe([...ORDERING_PROBE].sort((a, b) => a.localeCompare(b))[0]);
+  });
+
+  it("does not depend on insertion order", () => {
+    const forwards = new Map(ORDERING_PROBE.map((k) => [k, 5]));
+    const backwards = new Map([...ORDERING_PROBE].reverse().map((k) => [k, 5]));
+    expect(heaviestKey(backwards)).toEqual(heaviestKey(forwards));
+  });
+});
+
+describe("mostFrequent", () => {
+  it("returns the commonest value", () => {
+    expect(mostFrequent(["b", "a", "b", "c", "b"])).toBe("b");
+  });
+
+  it("is empty-safe", () => {
+    expect(mostFrequent([])).toBe("");
+  });
+
+  it("breaks frequency ties by code unit, not by collation", () => {
+    // One occurrence each, so the tie-break decides. See `heaviestKey` above.
+    const shuffled = [...ORDERING_PROBE].reverse();
+    expect(mostFrequent(shuffled)).toBe(ORDERING_PROBE[0]);
+  });
+
+  it("prefers a genuine majority over the tie-break", () => {
+    // Guards the opposite mistake: a comparator-only implementation that
+    // ignored counts would answer "Util.ts" here.
+    expect(mostFrequent([...ORDERING_PROBE, "alpha.ts", "alpha.ts"])).toBe("alpha.ts");
   });
 });

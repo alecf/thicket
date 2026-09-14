@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/async";
 import { hash, initHash } from "../hash.js";
-import { compareStrings } from "../order.js";
+import { compareStrings, mostFrequent } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
 import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
 import { forEachChildSafe, walk } from "./traverse.js";
@@ -179,21 +179,6 @@ function bindingCount(decl: Node): { count: number; erased: number; names: strin
   // not read as erasable for having nothing to erase, which is why every
   // consumer tests `symbols > 0` before comparing the two.
   return { count, erased, names };
-}
-
-/** The most frequent entry, ties broken by name so the answer is stable. */
-function commonest(values: readonly string[]): string {
-  const counts = new Map<string, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best = "";
-  let bestCount = 0;
-  for (const [value, count] of [...counts].sort((a, b) => compareStrings(a[0], b[0]))) {
-    if (count > bestCount) {
-      best = value;
-      bestCount = count;
-    }
-  }
-  return best;
 }
 
 /**
@@ -760,7 +745,7 @@ export async function openProject(
         erased: d.erased,
         erasable: d.erasable,
         passThrough: d.passThrough,
-        ...(d.origins.length > 0 ? { origin: commonest(d.origins) } : {}),
+        ...(d.origins.length > 0 ? { origin: mostFrequent(d.origins) } : {}),
       }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }
