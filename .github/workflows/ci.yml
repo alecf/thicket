@@ -18,7 +18,9 @@ jobs:
         with:
           bun-version: "1.4"
       - run: bun install --frozen-lockfile
-      - run: bun run build
+      # `bun run build` is deliberately absent: it now compiles a binary rather
+      # than typechecking, and the `package` job below both builds it and
+      # proves the result runs. `typecheck` is what covers src/**.
       - run: bun run typecheck
       - run: bun run test
 
@@ -46,6 +48,238 @@ jobs:
           # silently and break the only integration the report promises.
           test -s site/dist/report-guide.md
           diff -q docs/report-guide.md site/dist/report-guide.md
+
+  # `bun build --compile` succeeding proves nothing about the binary running:
+  # the bundle built cleanly for weeks' worth of commits and died on first
+  # invocation with `ENOENT: /$bunfs/package.json`, because the native tsgo
+  # child is found by reading a package.json relative to `import.meta.url`.
+  # Only an extracted artifact, run from a directory with no node_modules, can
+  # see that class of failure -- the same reason process-exit.test.ts spawns a
+  # real subprocess.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      # `--os/--cpu '*'` installs every platform's tsgo as an optional dependency
+      # of `typescript`, each verified against bun.lock by Bun. The build copies
+      # them out of node_modules rather than fetching anything itself.
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
+
+      - name: Render the reference report from source
+        run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+
+      - name: Build every target
+        # Not just the host: the formula names all four tarballs and their
+        # sha256s, so generating it below needs all four to exist. Cross-
+        # compiling here also keeps the other three targets from rotting
+        # unnoticed between releases.
+        run: bun run build:all
+
+      - name: Install it the way Homebrew does, far from any node_modules
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
+          tar -xzf "dist-bin/thicket-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+
+      - name: Render the same report through the installed binary
+        # cd out of the checkout: inside it, a stray node_modules could satisfy
+        # a resolution the packaged layout is supposed to satisfy on its own,
+        # and the job would pass while the artifact was broken for everyone.
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+
+      - name: The packaged binary must produce the same bytes as the source
+        run: |
+          test -s from-binary.md
+          diff -u from-source.md from-binary.md \
+            || { echo "::error::The packaged binary disagrees with the source run"; exit 1; }
+          echo "Packaged binary and source run are byte-identical."
+
+      - name: The Homebrew formula must be generatable and valid Ruby
+        run: |
+          set -euo pipefail
+          bun run build:formula
+          ruby -c dist-bin/thicket.rb
+
+      # Both npm paths exit 0 when they are broken, which is why they are
+      # checked here rather than trusted. The launcher once `await import`ed
+      # the fallback -- cli.ts runs main() only as an entry point, so it
+      # imported cleanly, ran nothing, printed nothing and exited 0. A second
+      # bug marked xxhash-wasm external, so the fallback died on import. Only
+      # installing the built packages and running them can see either.
+      - name: Stage and install the npm packages the way a user would
+        run: |
+          set -euo pipefail
+          bun run build:npm
+          mkdir -p "$RUNNER_TEMP/packs"
+          (cd dist-npm/thicket-linux-x64 && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          (cd dist-npm/thicket && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          mkdir -p "$RUNNER_TEMP/npmtest"
+          cd "$RUNNER_TEMP/npmtest"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
+
+      # Installing both tarballs directly means the launcher would resolve the
+      # platform package even if the thin package pointed at the wrong name or
+      # version, and even if os/cpu were mistyped -- in which case npm would
+      # silently skip the binary and every user would get the slow JS fallback,
+      # with CI still green. Names and versions cannot drift (build-npm.ts
+      # derives optionalDependencies from the same loop that writes each
+      # platform package), so what is checked here is the part that CAN: that
+      # the declared os/cpu actually match the platform they are built for.
+      - name: The thin package must point at packages this platform selects
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const thin = require("./dist-npm/thicket/package.json");
+            const optional = thin.optionalDependencies ?? {};
+            let checked = 0;
+            for (const dir of fs.readdirSync("dist-npm")) {
+              if (dir === "thicket") continue;
+              const pkg = require(`./dist-npm/${dir}/package.json`);
+              if (optional[pkg.name] !== pkg.version) {
+                throw new Error(`thin package does not name ${pkg.name}@${pkg.version}`);
+              }
+              const [, platform, arch] = dir.split("-");
+              if (!pkg.os?.includes(platform)) throw new Error(`${pkg.name} os ${pkg.os} != ${platform}`);
+              if (!pkg.cpu?.includes(arch)) throw new Error(`${pkg.name} cpu ${pkg.cpu} != ${arch}`);
+              checked++;
+            }
+            if (checked !== Object.keys(optional).length) {
+              throw new Error(`${checked} platform packages but ${Object.keys(optional).length} optional deps`);
+            }
+            // The runner is linux-x64, so npm must have a package for it.
+            if (!optional[`@thicket/thicket-${process.platform}-${process.arch}`]) {
+              throw new Error(`nothing declared for this runner`);
+            }
+            console.log(`${checked} platform packages, all selectable`);
+          '
+
+      - name: The npm platform binary must produce the same report
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          ./node_modules/.bin/thicket \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-npm.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-npm.md
+          diff -u from-source.md from-npm.md \
+            || { echo "::error::The npm platform binary disagrees with the source run"; exit 1; }
+
+      - name: With no platform binary, the JS fallback must still work
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          # `typescript` is an optional peer: the fallback needs it, and it
+          # brings its own platform tsgo. Install it, then delete the platform
+          # binary so the launcher has no choice but the fallback.
+          npm install --no-audit --no-fund typescript@"$(node -p "require('$GITHUB_WORKSPACE/package.json').dependencies.typescript")"
+          rm -rf node_modules/@thicket
+          ./node_modules/.bin/thicket \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-fallback.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-fallback.md
+          diff -u from-source.md from-fallback.md \
+            || { echo "::error::The npm JS fallback disagrees with the source run"; exit 1; }
+
+      - name: With neither, it must explain itself rather than exit 0
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npmtest"
+          rm -rf node_modules/typescript node_modules/@typescript
+          set +e
+          out=$(./node_modules/.bin/thicket --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" 2>&1)
+          code=$?
+          set -e
+          test "$code" -ne 0 || { echo "::error::exited 0 with no way to run"; echo "$out"; exit 1; }
+          echo "$out" | grep -q "npm install typescript@" \
+            || { echo "::error::failed without saying what to install"; echo "$out"; exit 1; }
+          echo "Refused correctly: exit $code"
+
+      # Handed to the smoke matrix below, which runs each of these on a machine
+      # that can actually execute it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: |
+            dist-bin/*.tar.gz
+            from-source.md
+          retention-days: 1
+
+  # Cross-compiling four binaries proves they LINK, not that they run. A
+  # target-specific tsgo packaging fault would ship three artifacts nobody had
+  # ever executed -- which is the exact failure this whole branch exists to
+  # stop, one level up. Every target is therefore run on a machine of its own
+  # kind, against the report the ubuntu job rendered from source: identical
+  # bytes across four platforms is also the determinism thicket promises.
+  smoke:
+    needs: package
+    name: run the ${{ matrix.target }} artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-latest
+          - target: darwin-x64
+            # Rosetta on an arm64 runner, NOT native Intel. `macos-13` is the
+            # only native x64 image left and it is being retired -- a blocking
+            # job pinned to a disappearing runner queues until it is removed
+            # outright. Rosetta genuinely executes the artifact, tsgo child and
+            # all, so it catches packaging faults; it would not catch a fault
+            # specific to real Intel silicon, which is a far narrower risk than
+            # never running the binary at all.
+            runs-on: macos-latest
+          - target: linux-x64
+            runs-on: ubuntu-latest
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: artifacts
+
+      - name: Install it the way Homebrew does, far from any node_modules
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          # upload-artifact roots a multi-path artifact at the least common
+          # ancestor of those paths, so `dist-bin/*.tar.gz` plus a workspace-root
+          # file lands the tarballs under dist-bin/ rather than at the top.
+          tarball="dist-bin/thicket-$version-${{ matrix.target }}.tar.gz"
+          test -f "$tarball" || { echo "::error::no $tarball"; find . -name '*.tar.gz'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+
+      - name: It must run, and agree byte for byte with the source run
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prefix/bin/thicket" \
+            --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
+            --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
+          cd "$GITHUB_WORKSPACE"
+          test -s from-binary.md
+          diff -u from-source.md from-binary.md \
+            || { echo "::error::${{ matrix.target }} disagrees with the source run"; exit 1; }
+          echo "${{ matrix.target }}: byte-identical."
 
   # thicket's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide

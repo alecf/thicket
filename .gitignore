@@ -8,3 +8,7 @@ node_modules/
 .thicket/
 .DS_Store
 site/dist/
+
+# compiled binaries and the npm packages staged from them
+dist-bin/
+dist-npm/

@@ -27,15 +27,19 @@ prototypes/      research scripts (NOT the implementation — see prototypes/REA
 ```bash
 bun install
 bun run thicket --config <tsconfig>   # runs src/cli.ts live; no build step
-bun run build          # tsc -p tsconfig.json -- emits dist/, which the `thicket` bin points at
+bun install --frozen-lockfile --os='*' --cpu='*'   # every platform's tsgo
+bun run build          # compile a binary for THIS platform into dist-bin/
+bun run build:all      # ...and for all four; one host builds the whole matrix
+bun run build:npm      # stage the npm packages (needs build:all first)
+bun run build:formula  # emit the Homebrew formula from dist-bin/checksums.txt
 bun run typecheck      # tsc -p tsconfig.test.json -- the ONLY thing that reads test-file types
 bun run test           # vitest run
 bun run test:watch
 bunx vitest run tests/path/to/one.test.ts   # single file
 ```
 
-Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; `dist/`
-still runs under Node ≥24 for anyone who installs the bin.
+Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; the
+bundled JS fallback shipped in the npm package still runs under Node ≥24.
 
 ## Non-negotiables
 
@@ -141,6 +145,46 @@ the warm path invents findings the cold path suppresses (114 of them on a
 ### 6. Never reference specific private codebases
 
 Analysis and benchmarking happen against real private repositories. **Do not name them, path them, or quote their source in code, comments, docs, commit messages, or test fixtures.** Refer to "a sample project," "test repositories," or the anonymized "Sample A"/"Sample B" used in the PRD. Fixtures live in `tests/fixtures/` and are written by hand.
+
+### 7. What ships is a directory, and the binary must be run to be tested
+
+Analysis goes through `typescript/unstable/async`, which spawns a **native tsgo
+child process**. That is the fact the whole distribution story is downstream of,
+and it cannot be engineered away from this side.
+
+- **`bun build --compile` succeeding proves nothing.** The bundle compiled
+  cleanly long before anyone ran it; the binary died on first invocation with
+  `ENOENT: no such file or directory, open '/$bunfs/package.json'`. The
+  `typescript` package finds tsgo by reading its own package.json relative to
+  `import.meta.url`, which inside a bundle is `file:///$bunfs/root/cli` — a
+  virtual path with no filesystem under it. Only an *extracted artifact, run
+  from a directory with no `node_modules`*, can see this, which is why the
+  `package` CI job exists and why it `cd`s out of the checkout first. Inside the
+  checkout a stray `node_modules` satisfies the resolution the packaged layout
+  is supposed to satisfy alone, and the job goes green while the artifact is
+  broken for everyone.
+- **tsgo will not start without its `lib.*.d.ts` files beside it.** It does not
+  degrade — it panics with `bundled: …/lib.d.ts does not exist; this executable
+  may be misplaced`. So the shipping unit is a directory: the binary, `tsgo/tsc`,
+  and ~110 declaration files. 24MB and 3.9MB respectively, per platform.
+- **Locate it from `process.execPath`, never `import.meta.url`.** The latter is
+  virtual inside a bundle. `execPath` also resolves *through* a symlink to the
+  real file, which is the only reason a Homebrew `bin/` → `libexec/` symlink
+  works at all.
+- **Resolution is a fallthrough, not an override.** `$THICKET_TSGO`, then
+  `<dirname(execPath)>/tsgo/tsc`, then `undefined` to mean "let `typescript`
+  resolve it as it always has". Drop that third step and every developer command
+  breaks, along with the determinism job, which runs from source deliberately.
+- **The tsgo version joins the config hash.** A different compiler parses and
+  resolves differently, and the cache is keyed on that hash — see §5.
+- **Let Bun fetch tsgo; do not hand-roll it.** Every platform's compiler is an
+  optional dependency of `typescript`, and `bun install --os='*' --cpu='*'`
+  installs all of them, verified against the sha512 in `bun.lock`. The build
+  copies them out of `node_modules`. A previous version downloaded them from the
+  registry itself, which meant a second cache and a second integrity check to
+  keep correct -- and reviewers found real bugs in both (a fail-open digest
+  check, and a half-extracted cache trusted forever). One host still cross-builds
+  the whole matrix in seconds; no macOS or arm runner is needed to BUILD.
 
 ## Working style
 

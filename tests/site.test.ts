@@ -123,3 +123,36 @@ describe("the Markdown subset the site renders", () => {
     expect(markdownToHtml("> **warning** text")).toContain("<blockquote>");
   });
 });
+
+/**
+ * The site and the README both tell a newcomer how to install thicket, and
+ * they drifted the moment one of them was updated: the README moved to `brew`
+ * while the landing page still said `npm run build && node dist/cli.js` --
+ * naming a file the build had stopped producing entirely. Neither page is
+ * generated from the other, so nothing failed.
+ */
+describe("install instructions", () => {
+  const readme = readFileSync(join(repo, "README.md"), "utf8");
+  const landing = read("index.html");
+
+  it("agrees with the README on the install command", () => {
+    const fromReadme = /brew install (\S+)/.exec(readme)?.[1];
+    const fromSite = /brew install (\S+)/.exec(landing)?.[1];
+    expect(fromReadme).toBe("alecf/tap/thicket");
+    expect(fromSite).toBe(fromReadme);
+  });
+
+  it("does not tell anyone to run a file the build no longer emits", () => {
+    // `bun run build` compiles a binary now; there is no dist/cli.js to run.
+    for (const page of ["index.html", "report-guide.html"]) {
+      expect(read(page)).not.toContain("dist/cli.js");
+    }
+    expect(readme).not.toContain("dist/cli.js");
+  });
+
+  it("says the download is a directory, which is the part people get wrong", () => {
+    // Copying the binary out on its own produces a tsgo panic about being
+    // misplaced, and nothing else on the page would explain why.
+    expect(landing).toContain("tsgo/");
+  });
+});
