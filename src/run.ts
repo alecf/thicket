@@ -15,6 +15,7 @@ import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
 import { hash, initHash } from "./hash.js";
+import { tsgoVersion } from "./extract/tsgo-path.js";
 import { compareStrings } from "./order.js";
 import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
@@ -523,6 +524,12 @@ export async function runReport(
   const configHash = hash(
     JSON.stringify({
       version: VERSION,
+      // A different tsgo parses and resolves differently, so it changes the
+      // finding set. It is pinned by construction in a packaged thicket, but
+      // THICKET_TSGO can point at another one -- and the cache is keyed on
+      // this hash, so leaving it out lets a warm cache serve a report produced
+      // by a compiler the reader cannot see (AGENTS.md §5).
+      tsgo: tsgoVersion(),
       minNodes,
       minLines,
       granularity: String(granularity),

@@ -12,15 +12,34 @@ thicket never judges, never edits, never opens PRs. It produces **ranked candida
 
 ## Install
 
-Not on npm — the name is taken by an unrelated package, so `npx thicket` will fetch something else. Run it from a clone:
+```bash
+brew install alecf/tap/thicket
+```
+
+Or download a tarball from [Releases](https://github.com/alecf/thicket/releases), extract it, and put the `thicket` binary on your `PATH` — a symlink is fine, it finds its own files through it. Prebuilt for macOS and Linux on arm64 and x64.
+
+The npm name is taken by an unrelated package; `npx thicket` currently fetches something else. That is [being sorted out](https://github.com/alecf/thicket/issues).
+
+### From a clone
 
 ```bash
-git clone <this repo> && cd thicket
 bun install
 bun run thicket --help
 ```
 
-There is no build step: `bun run thicket` executes `src/cli.ts` directly. Bun ≥1.4 is required. `bun run build` still exists and emits `dist/`, which is what the `thicket` bin points at if you `npm link` one onto your `PATH`; the examples below spell out `bun run thicket`.
+`bun run thicket` executes `src/cli.ts` directly — no build step, Bun ≥1.4. The examples below spell that form out; with an installed binary, drop `bun run`.
+
+### What is in the tarball
+
+thicket analyzes through the TypeScript compiler's native `tsgo` binary, which it spawns as a child process. So the download is a **directory**, not a lone file:
+
+```
+thicket            the CLI (~65–83 MB)
+tsgo/tsc           the native compiler (~24 MB)
+tsgo/lib.*.d.ts    its standard library — it will not start without these
+```
+
+Keep them together. `thicket` locates `tsgo/` relative to its own executable, resolving through symlinks, so installing anywhere and symlinking onto your `PATH` works; copying the binary out on its own does not. To point at a different tsgo build, set `THICKET_TSGO` — its version joins the report's config hash, so a swap invalidates the cache rather than silently changing the answer.
 
 ## Usage
 
@@ -95,7 +114,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config c3a4de98 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 66fac093 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -325,7 +344,9 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 ## Stack
 
-TypeScript on Bun ≥1.4, with **zero native dependencies** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/async`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
+TypeScript on Bun ≥1.4, with **nothing to compile at install time** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/async`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
+
+That compiler is a native binary thicket spawns, which is why a release is a directory rather than a single file. It is prebuilt per platform and shipped in the tarball, so there is no toolchain on your machine for it to need.
 
 ## License
 

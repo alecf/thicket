@@ -5,6 +5,7 @@ import { API } from "typescript/unstable/async";
 import { hash, initHash } from "../hash.js";
 import { compareStrings } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
+import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
 import { forEachChildSafe, walk } from "./traverse.js";
 import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
@@ -476,6 +477,33 @@ function isSkippedSourceName(name: string): boolean {
   return name.includes("node_modules") || name.endsWith(".d.ts") || name.endsWith(".json");
 }
 
+/**
+ * `new API`, with the tsgo executable located the way a packaged thicket needs.
+ *
+ * Without this the compiled binary fails with `ENOENT: no such file or
+ * directory, open '/$bunfs/package.json'` -- the `typescript` package finds
+ * tsgo by reading its own package.json relative to `import.meta.url`, which
+ * inside a bundle is a virtual path. The message names a file the user does
+ * not have and a directory that does not exist, so it is rewritten here into
+ * one that says where thicket actually looked.
+ */
+function createAPI(cwd: string): API {
+  const tsgo = resolveTsgo();
+  try {
+    return new API(tsgo.path ? { cwd, tsserverPath: tsgo.path } : { cwd });
+  } catch (e) {
+    // Only one location is ever tried. Naming the other sends a reader to
+    // debug a path this run never looked at.
+    const where = tsgo.path
+      ? `Used ${tsgo.path}, from ${tsgo.source === "env" ? TSGO_ENV_VAR : "the packaged tsgo/ directory"}.`
+      : `Looked for a packaged tsgo at ${tsgo.searched.join(", ")}, then in the installed \`typescript\` package.`;
+    throw new Error(
+      `could not start the tsgo executable thicket analyzes with. ${where} ` +
+        `Set ${TSGO_ENV_VAR} to point at one. (${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+}
+
 export async function openProject(
   configs: string | string[],
   opts: OpenProjectOptions = {},
@@ -485,7 +513,7 @@ export async function openProject(
     isAbsolute(c) ? c : resolve(c),
   );
 
-  const api = new API({ cwd: commonRootDir(list) });
+  const api = createAPI(commonRootDir(list));
   const { snapshot, configs: opened } = await expandReferences(api, list);
   // Rooted at the ancestor of everything actually opened: a reference may sit
   // outside the requested config's directory, and a file above the root would
@@ -873,7 +901,7 @@ export interface ProbeResult {
  */
 export async function sourceFileNames(configs: readonly string[]): Promise<ProbeResult> {
   const list = configs.map((c) => (isAbsolute(c) ? c : resolve(c)));
-  const api = new API({ cwd: commonRootDir(list) });
+  const api = createAPI(commonRootDir(list));
   try {
     const { snapshot, configs: opened } = await expandReferences(api, list);
     const root = commonRootDir(opened);

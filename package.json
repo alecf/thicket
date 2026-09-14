@@ -3,16 +3,16 @@
   "version": "0.1.0",
   "description": "Deterministic complexity reports for TypeScript codebases",
   "type": "module",
-  "bin": {
-    "thicket": "./dist/cli.js"
-  },
   "engines": {
     "bun": ">=1.4",
     "node": ">=24"
   },
   "scripts": {
     "thicket": "bun src/cli.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "bun scripts/build-binary.ts",
+    "build:all": "bun scripts/build-binary.ts --all",
+    "build:npm": "bun scripts/build-npm.ts",
+    "build:formula": "bun scripts/homebrew-formula.ts",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
