@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openProject, sourceFileNames } from "../src/extract/ts-adapter.js";
 import {
+  COMPILER_OPTIONS,
   generatedConfig,
   monorepoConfigs,
   solutionWorkspacesRoot,
@@ -76,13 +77,7 @@ describe("sourceFileNames", () => {
     // exactly where it was.
     const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-probe-")));
     try {
-      const compilerOptions = {
-        target: "es2022",
-        module: "nodenext",
-        moduleResolution: "nodenext",
-        strict: true,
-        noEmit: true,
-      };
+      const compilerOptions = COMPILER_OPTIONS;
       await mkdir(join(dir, "build"), { recursive: true });
       await mkdir(join(dir, "pkg/src"), { recursive: true });
       await writeFile(

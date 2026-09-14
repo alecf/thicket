@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -8,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cachePathFor } from "../src/cache/db.js";
 import { main } from "../src/cli.js";
@@ -19,7 +18,9 @@ import {
   fixtureRoot,
   nestedConfig,
   generatedConfig,
+  scratchProject,
   solutionConfig,
+  TSCONFIG,
   workspacesRoot,
 } from "./helpers.js";
 
@@ -44,17 +45,6 @@ function capture() {
 
 const temps: string[] = [];
 
-/** A throwaway copy of the sample fixture, so a test may write a cache into it. */
-function scratchProject(): { root: string; config: string } {
-  const root = mkdtempSync(join(tmpdir(), "thicket-cli-"));
-  temps.push(root);
-  cpSync(fixtureRoot(), root, {
-    recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
-  });
-  return { root, config: join(root, "tsconfig.json") };
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
@@ -77,17 +67,6 @@ function scratchTree(files: Record<string, string>): string {
   }
   return root;
 }
-
-const TSCONFIG = JSON.stringify({
-  compilerOptions: {
-    target: "es2022",
-    module: "nodenext",
-    moduleResolution: "nodenext",
-    strict: true,
-    noEmit: true,
-  },
-  include: ["src/**/*.ts"],
-});
 
 /** A root project of two files beside one workspace of one. */
 function miniMonorepo(): string {
@@ -264,7 +243,7 @@ describe("main", () => {
   });
 
   it("--no-cache leaves no cache behind and reports the same thing", async () => {
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-cli-", temps);
     const io = capture();
     expect(await main(["--config", config, "--no-cache"])).toBe(0);
     const plain = io.stdout();
@@ -278,7 +257,7 @@ describe("main", () => {
   });
 
   it("cache clear removes the project's cache, and says so either way", async () => {
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-cli-", temps);
     capture();
     await main(["--config", config]);
     expect(existsSync(cachePathFor(root))).toBe(true);
@@ -650,7 +629,7 @@ describe("main diff", () => {
   }
 
   it("compares two sidecars and names what was resolved", async () => {
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-cli-", temps);
     const before = await sidecar(config, "before.json", root);
     // Delete one copy of the duplicated function.
     const beta = join(root, "src/beta.ts");
@@ -668,7 +647,7 @@ describe("main diff", () => {
   it("needs no tsconfig in the working directory", async () => {
     // `--config` defaults to ./tsconfig.json. A diff analyzes nothing, so
     // requiring one would break the command everywhere but a project root.
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-cli-", temps);
     const before = await sidecar(config, "before.json", root);
     const io = capture();
     const cwd = process.cwd();
@@ -696,7 +675,7 @@ describe("main diff", () => {
   });
 
   it("names the file that is not a report", async () => {
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-cli-", temps);
     const good = await sidecar(config, "good.json", root);
     const junk = join(root, "junk.json");
     writeFileSync(junk, `{"hello":"world"}\n`);

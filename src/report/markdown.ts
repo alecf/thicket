@@ -583,14 +583,6 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
 }
 
 /**
- * Files named as dependents before they are only counted.
- *
- * Naming a handful is strictly better than counting them, because a re-export
- * barrel among them tells the reader the number is a floor rather than a total.
- */
-const MAX_DEPENDENTS_NAMED = 4;
-
-/**
  * Locations named for the same-shape-elsewhere line.
  *
  * A pointer, not an inventory. One of these is usually enough — the reader is

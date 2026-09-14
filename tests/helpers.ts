@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +38,53 @@ export const ORDERING_PROBE: readonly string[] = [
   "ab.ts",
   "alpha.ts",
 ];
+
+/**
+ * The compiler options a scratch project needs to be analyzable at all, and
+ * nothing beyond them.
+ *
+ * Four tests wrote this block out by hand. Shared because it is scaffolding
+ * rather than subject matter -- where a test is ABOUT a compiler setting
+ * (dropping `moduleResolution`, pointing `include` somewhere unusual) it still
+ * spells out its own, since that variation is the thing under test.
+ */
+export const COMPILER_OPTIONS = {
+  target: "es2022",
+  module: "nodenext",
+  moduleResolution: "nodenext",
+  strict: true,
+  noEmit: true,
+} as const;
+
+/** `COMPILER_OPTIONS` over a conventional `src/`, serialized. */
+export const TSCONFIG = JSON.stringify({
+  compilerOptions: COMPILER_OPTIONS,
+  include: ["src/**/*.ts"],
+});
+
+/**
+ * A throwaway copy of the sample fixture at a fresh absolute path.
+ *
+ * Copied rather than analyzed in place so a test may write a cache or rewrite
+ * sources without racing the rest of the suite over
+ * `tests/fixtures/sample/.thicket`; it doubles as a check that the report does
+ * not depend on where the project sits on disk. Any `.thicket/` already in the
+ * fixture is skipped -- copying one in would hand a "cold" run a warm cache.
+ *
+ * The directory is pushed onto `temps` for the caller's own `afterEach` to
+ * remove, rather than registered here: vitest files share a module registry
+ * within a worker, so a cleanup owned by this module could delete a directory
+ * another file's test is still using.
+ */
+export function scratchProject(prefix: string, temps: string[]): { root: string; config: string } {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(root);
+  cpSync(fixtureRoot(), root, {
+    recursive: true,
+    filter: (src) => !src.split(sep).includes(".thicket"),
+  });
+  return { root, config: join(root, "tsconfig.json") };
+}
 
 export function fixtureRoot(): string {
   return resolve(here, "fixtures/sample");

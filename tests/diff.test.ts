@@ -1,10 +1,9 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { diffReports, formatDiff, parseReport } from "../src/report/diff.js";
 import { runReport, type ReportJson } from "../src/run.js";
-import { fixtureRoot } from "./helpers.js";
+import { fixtureRoot, scratchProject } from "./helpers.js";
 
 /**
  * The shape `diffReports` consumes is the JSON sidecar's, so the fixture
@@ -128,19 +127,6 @@ afterEach(() => {
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
 });
 
-/** A throwaway copy of the sample fixture, so a test may rewrite its sources. */
-function scratchProject(): { root: string; config: string } {
-  const root = mkdtempSync(join(tmpdir(), "thicket-diff-"));
-  temps.push(root);
-  // Skip any `.thicket/` the suite left in the fixture: copying one in would
-  // hand a "cold" run a warm cache.
-  cpSync(fixtureRoot(), root, {
-    recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
-  });
-  return { root, config: join(root, "tsconfig.json") };
-}
-
 const INSERTED_COMMENT = `/*
  * A comment block inserted above the functions. It changes every byte offset
  * and every line number below it, and none of the code.
@@ -174,7 +160,7 @@ const dupIds = (json: ReportJson) => json.duplication.map((d) => d.id);
 
 describe("finding ids across a real edit", () => {
   it("keeps every duplication id when the code only moves", async () => {
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-diff-", temps);
     const beta = join(root, "src/beta.ts");
     const before = await reportOn(config);
     expect(before.duplication.length).toBeGreaterThan(0);
@@ -210,7 +196,7 @@ describe("finding ids across a real edit", () => {
   it("reports a genuinely deleted copy as resolved", async () => {
     // The negative control. Without it the test above passes just as happily
     // against a differ that answers "nothing changed" unconditionally.
-    const { root, config } = scratchProject();
+    const { root, config } = scratchProject("thicket-diff-", temps);
     const beta = join(root, "src/beta.ts");
     const before = await reportOn(config);
 
