@@ -175,10 +175,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF#refs/tags/}" \
-            --title "${GITHUB_REF#refs/tags/}" \
-            --generate-notes \
-            dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/thicket.rb
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          assets=(dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/thicket.rb)
+          # Re-runnable, like the npm step. The tap push below is the one path
+          # whose credential cannot be checked before a real release; if it
+          # fails, the fix is to re-run this job -- and a bare `gh release
+          # create` would then abort here because the release already exists,
+          # leaving the tap permanently unreachable without deleting the
+          # release by hand or burning a version number.
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists; replacing its assets."
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" --title "$tag" --generate-notes "${assets[@]}"
+          fi
 
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/v') && env.HAS_NPM_TOKEN == 'true' && env.DRY_RUN != 'true'
