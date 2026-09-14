@@ -4,26 +4,9 @@ import { initHash } from "../src/hash.js";
 import {
   renderMarkdown,
   type ReportInput,
-  type TangleEdge,
 } from "../src/report/markdown.js";
 import type { Ranked } from "../src/report/rank.js";
-
-/**
- * A tangle edge. `files` defaults to one synthetic importer, because the
- * report prints file counts and a zero-length list would make every edge look
- * free to cut.
- */
-const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
-  from,
-  to,
-  weight,
-  files: [`${from}/importer.ts`],
-  erased: 0,
-  topTarget: { path: `${to}/index.ts`, weight },
-  passThrough: 0,
-  typeOnly: false,
-  ...over,
-});
+import { edge, reportInput } from "./report-fixtures.js";
 
 beforeAll(async () => {
   await initHash();
@@ -57,24 +40,8 @@ const ranked = (id: string, over: Partial<Ranked> = {}): Ranked => ({
   ...over,
 });
 
-const base: ReportInput = {
-  version: "0.1.0",
-  configHash: "abc123",
-  fileCount: 4,
-  lineCount: 60,
-  granularity: "dir:1",
-  moduleCount: 2,
-  metrics: {
-    duplicatedMass: 100,
-    redundantByteFraction: 0.05,
-    propagationCost: 0.5,
-    cycleCount: 1,
-    largestScc: 2,
-  },
-  scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
+const base: ReportInput = reportInput({
   duplication: [ranked("THK-DUP-1")],
-  typeDuplication: [],
-  testDuplication: [],
   cycles: [
     {
       id: "THK-CYC-1",
@@ -88,15 +55,8 @@ const base: ReportInput = {
     },
   ],
   totalFindings: 2,
-  census: {
-    duplication: 1,
-    cycles: 1,
-    bands: [{ label: "10–29", count: 1 }],
-    typeDuplication: 0,
-    testDuplication: 0,
-    singleFile: 0,
-  },
-};
+  census: { duplication: 1, cycles: 1, bands: [{ label: "10–29", count: 1 }] },
+});
 
 /**
  * Splits a document into fenced-code regions and prose regions, so prose-only

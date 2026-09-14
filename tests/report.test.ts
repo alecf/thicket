@@ -4,28 +4,11 @@ import { canonicalKind } from "../src/report/kinds.js";
 import {
   renderMarkdown,
   type ReportInput,
-  type TangleEdge,
 } from "../src/report/markdown.js";
 import type { Scope } from "../src/extract/scope.js";
 import type { Ranked } from "../src/report/rank.js";
 import { initHash } from "../src/hash.js";
-
-/**
- * A tangle edge. `files` defaults to one synthetic importer, because the
- * report prints file counts and a zero-length list would make every edge look
- * free to cut.
- */
-const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
-  from,
-  to,
-  weight,
-  files: [`${from}/importer.ts`],
-  erased: 0,
-  topTarget: { path: `${to}/index.ts`, weight },
-  passThrough: 0,
-  typeOnly: false,
-  ...over,
-});
+import { edge, reportInput } from "./report-fixtures.js";
 
 beforeAll(async () => {
   await initHash();
@@ -96,36 +79,14 @@ const twoModuleCycle = {
   residual: 1,
 };
 
-const base: ReportInput = {
-  version: "0.1.0",
-  configHash: "abc123",
-  fileCount: 4,
-  lineCount: 60,
-  granularity: "dir:1",
-  moduleCount: 2,
-  metrics: {
-    duplicatedMass: 100,
-    redundantByteFraction: 0.05,
-    propagationCost: 0.5,
-    cycleCount: 1,
-    largestScc: 2,
-  },
-  scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
-  duplication: [],
-  typeDuplication: [],
-  testDuplication: [],
-  cycles: [],
-  totalFindings: 0,
-  census: { duplication: 0, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
-};
+const base: ReportInput = reportInput();
 
 describe("renderMarkdown", () => {
   it("always states how many findings were omitted", () => {
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       totalFindings: 495,
-      census: { duplication: 494, cycles: 1, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
-    });
+      census: { duplication: 494, cycles: 1 },
+    }));
     expect(out).toMatch(/of 495/);
     expect(out).toContain("495 of 495 findings are not shown above.");
   });
@@ -630,13 +591,12 @@ describe("renderMarkdown", () => {
     // copies of `{ info: vi.fn(), warn: vi.fn() }` and the like. No setting of
     // the test weight fixed that without also discarding real findings, so the
     // two kinds of work stopped competing for a slot instead.
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       duplication: [ranked("THK-DUP-src")],
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 2,
-      census: { duplication: 1, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 1, singleFile: 0 },
-    });
+      census: { duplication: 1, testDuplication: 1 },
+    }));
     expect(out).toContain("## Duplication in tests");
     expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Duplication in tests"));
     expect(out.indexOf("THK-DUP-src")).toBeLessThan(out.indexOf("THK-DUP-mock"));
@@ -645,25 +605,23 @@ describe("renderMarkdown", () => {
   it("spends a tight budget on production duplication before test duplication", () => {
     // The ordering above is also the truncation order: under pressure the
     // report keeps the work it exists to rank.
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       duplication: Array.from({ length: 10 }, (_, i) => ranked(`THK-DUP-src${i}`, {}, 100 - i)),
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 11,
-      census: { duplication: 10, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 1, singleFile: 0 },
+      census: { duplication: 10, testDuplication: 1 },
       budgetTokens: 400,
-    });
+    }));
     expect(out).toContain("THK-DUP-src0");
     expect(out).not.toContain("THK-DUP-mock");
   });
 
   it("names the test section even when production duplication is empty", () => {
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       testDuplication: [ranked("THK-DUP-mock")],
       totalFindings: 2,
-      census: { duplication: 0, cycles: 0, bands: [], typeDuplication: 0, testDuplication: 2, singleFile: 0 },
-    });
+      census: { testDuplication: 2 },
+    }));
     expect(out).toContain("## Duplication in tests");
     expect(out).not.toContain("## Duplication\n");
   });
@@ -674,6 +632,10 @@ describe("renderMarkdown", () => {
     // times, and with thresholds that admit mostly noise -- three findings
     // that call for three different responses. The split settles the first
     // two and the histogram settles the third.
+    // The one census written out in full, deliberately: every term is
+    // non-zero, which is what AGENTS.md asks of a census fixture, and spelling
+    // it out is what makes a newly required field a compile error here rather
+    // than a zero the builder supplied on this test's behalf.
     const out = renderMarkdown({
       ...base,
       duplication: [ranked("THK-DUP-1")],
@@ -708,8 +670,7 @@ describe("renderMarkdown", () => {
   });
 
   it("counts shown cycles against the tangle row, not the duplication row", () => {
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       duplication: [ranked("THK-DUP-1")],
       cycles: [
         {
@@ -724,26 +685,18 @@ describe("renderMarkdown", () => {
         },
       ],
       totalFindings: 50,
-      census: { duplication: 47, cycles: 3, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
-    });
+      census: { duplication: 47, cycles: 3 },
+    }));
     expect(out).toContain("| duplication | 47 | 1 |");
     expect(out).toContain("| module tangle | 3 | 1 |");
   });
 
   it("says nothing about omissions when it printed everything", () => {
-    const out = renderMarkdown({
-      ...base,
+    const out = renderMarkdown(reportInput({
       duplication: [ranked("THK-DUP-1")],
       totalFindings: 1,
-      census: {
-        duplication: 1,
-        cycles: 0,
-        bands: [{ label: "10–29", count: 1 }],
-        typeDuplication: 0,
-        testDuplication: 0,
-        singleFile: 0,
-      },
-    });
+      census: { duplication: 1, bands: [{ label: "10–29", count: 1 }] },
+    }));
     expect(out).not.toContain("## Omitted");
   });
 
