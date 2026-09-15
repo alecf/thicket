@@ -156,3 +156,75 @@ describe("install instructions", () => {
     expect(landing).toContain("tsgo/");
   });
 });
+
+/**
+ * The README and the landing page both tell a reader what to type, and neither
+ * is generated from the CLI. They drifted: workspace discovery, `--filter`,
+ * `--exclude`, `--types` and the bare-directory form shipped, and the README
+ * went on documenting `--config` as the only way in -- and went on saying, in
+ * Known limits, that there is no "point it at a directory" mode. Nothing
+ * failed, because prose cannot fail.
+ *
+ * The check runs in both directions on purpose. A flag the docs invent is the
+ * obvious drift; a flag the docs never mention is the one that actually
+ * happened, and only the second direction catches it.
+ */
+describe("documented flags", () => {
+  const cli = readFileSync(join(repo, "src/cli.ts"), "utf8");
+  const readme = readFileSync(join(repo, "README.md"), "utf8");
+  const landing = readFileSync(join(repo, "site/index.html.part"), "utf8");
+
+  /** The `parseArgs` option table: the only thing that decides what is accepted. */
+  const options = /options: \{([\s\S]*?)\n {6}\},/.exec(cli)?.[1] ?? "";
+  const declared = [...options.matchAll(/^\s+"?([a-z][a-z-]*)"?:\s*\{\s*type:\s*"(\w+)"/gm)].map(
+    (m) => ({ name: m[1] ?? "", boolean: m[2] === "boolean" }),
+  );
+
+  /** `--no-x` is accepted for every boolean, because parseArgs runs with allowNegative. */
+  const accepted = new Set(
+    declared.flatMap(({ name, boolean }) =>
+      boolean ? [`--${name}`, `--no-${name}`] : [`--${name}`],
+    ),
+  );
+
+  /** Flags named in the README's flag table, which is where a reader looks. */
+  const documented = new Set(
+    [...readme.matchAll(/^\| `(--[a-z][a-z-]*)[^`]*`/gm)].map((m) => m[1] ?? ""),
+  );
+
+  it("finds the CLI's option table at all", () => {
+    // Every assertion below compares against `declared`; a regex that stopped
+    // matching would empty it and turn all of them green.
+    expect(declared.map(({ name }) => name)).toContain("filter");
+    expect(declared.length).toBeGreaterThan(10);
+    expect(documented.size).toBeGreaterThan(10);
+  });
+
+  it("documents every flag the CLI accepts", () => {
+    // In either polarity: `cache` is documented as `--no-cache`, which is the
+    // form anyone types.
+    const missing = declared
+      .map(({ name }) => name)
+      .filter((name) => !documented.has(`--${name}`) && !documented.has(`--no-${name}`));
+    expect(missing).toEqual([]);
+  });
+
+  it("documents no flag the CLI would reject", () => {
+    expect([...documented].filter((flag) => !accepted.has(flag))).toEqual([]);
+  });
+
+  it("types only real flags in its worked examples", () => {
+    // Prose mentions flags that deliberately do not exist ("no `--write`"), so
+    // this reads the command blocks only -- the lines a reader copies.
+    const commands = [
+      ...[...readme.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1] ?? ""),
+      ...[...landing.matchAll(/<code class="language-bash">([\s\S]*?)<\/code>/g)].map(
+        (m) => m[1] ?? "",
+      ),
+    ];
+    expect(commands.length).toBeGreaterThan(4);
+    const used = new Set(commands.flatMap((body) => body.match(/--[a-z][a-z-]*/g) ?? []));
+    expect(used.has("--config")).toBe(true);
+    expect([...used].filter((flag) => !accepted.has(flag))).toEqual([]);
+  });
+});

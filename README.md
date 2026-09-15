@@ -6,9 +6,89 @@ A CLI that analyzes a TypeScript codebase and emits a **deterministic plaintext 
 thicket report → LLM picks targets → LLM refactors → thicket report → …
 ```
 
-thicket never judges, never edits, never opens PRs. It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding when progress is sufficient is the harness's job.
+thicket never judges, never edits, never opens PRs. There is no score, no grade and no pass/fail — [it is not a linter](#it-is-not-a-linter). It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding what is worth fixing, and when progress is sufficient, is the reader's job.
 
 > **Status: v1, early.** Duplication and module tangle work end to end and are covered by tests; the simplification checks and near-miss duplication described below are not in v1 (see [Known limits](#known-limits)).
+
+## How you use it
+
+thicket finds the candidates; an LLM decides what to do about them. The tool only does the first half, and it is useless without the second — a report nobody reads is a list of coordinates. There are two ways to arrange the reading, and the only real difference is who types the command.
+
+### Run it yourself, hand the report over
+
+```bash
+thicket > thicket.md
+```
+
+No arguments: it analyzes the directory you are standing in, discovering the tsconfigs — every workspace of a monorepo included — as [Usage](#usage) describes.
+
+Then, in Claude Code, Codex, Cursor, or whatever you use:
+
+> Read `thicket.md`. It lists duplication and dependency-cycle **candidates** in this repo — it has not judged any of them, and some of them are not worth doing. The top of the file links to a guide explaining every field; fetch that first. Then pick the findings you think are genuinely worth acting on, tell me which ones you are rejecting and why, and do the top one.
+
+That link is the part that makes this work without you explaining anything. Every report opens with a pointer to [the field guide](https://alecf.github.io/thicket/report-guide.md), served as raw Markdown for exactly this reason: one fetch and the agent knows what `L1` means, what `varies across copies` is for, what `file cycles:` decides, and how to tell a finding worth acting on from one that merely scored well.
+
+### Let the agent run it
+
+Nothing needs a human in the middle. The whole thing is one command with text output, so an agent can do the run too:
+
+> Run `thicket > thicket.md` and read the report — it links to a guide explaining how to read it. Pick the one finding you are most confident is worth consolidating, do it, then re-run thicket and show me that the finding is gone.
+
+If you do this more than once, put the command in the repository's own `CLAUDE.md` or `AGENTS.md` so it is already in context:
+
+```markdown
+## Finding cleanup work
+
+`thicket > thicket.md` emits a ranked report of duplicated code and dependency
+cycles. It reports **candidates** and does not judge them — plenty of them
+should be left alone. The report links to a guide describing every field; fetch
+it before acting on a finding.
+```
+
+### Close the loop
+
+Either way, the check that an agent's "done" means something is a second report:
+
+```bash
+thicket --json before.json > thicket.md
+# ...the agent refactors...
+thicket --json after.json > thicket.md
+thicket diff before.json after.json
+```
+
+```
+1 finding resolved, 0 new, duplicated mass -65.2% (253 -> 88), propagation cost 0.44 -> 0.44
+  - THK-DUP-c389b5be
+```
+
+Finding IDs are derived from content rather than position, so `diff` tells you which findings actually went away rather than which code got touched. An agent that reformatted the copies and declared victory shows up here as zero resolved.
+
+## It is not a linter
+
+This is the thing to get straight before reading a report, because everything in it is shaped by it: **thicket is not scoring your codebase, and nothing it prints is a defect.**
+
+- There is **no grade and no threshold.** No pass/fail, no "complexity: B−", no exit code that means too messy. It exits 0 whether it found three findings or eighteen thousand, because "is this too much duplication" is a question about your deadlines and your team, and a tool that answered it would be guessing.
+- The summary numbers are **trend numbers, not measurements of quality.** `duplicated mass` deliberately double-counts nested clusters; comparing it between two codebases means nothing at all. Comparing it against itself one refactor later is the entire point of it.
+- A finding is a **candidate**, and it is phrased like one: *these 19 things are the same shape, here is every location, here is what differs between the copies, here is the base class all of them already import.* Whether consolidating them is an improvement is a design judgement — and the honest answer is frequently **no**. Nineteen classes differing only in the *values* of `loincCode` and `unit` are one concept with a parameter list. A hundred and ninety-three objects differing in every *field name* are ninety-odd unrelated things sharing a syntax template, and the only abstraction available is a generic `pick` that no future change will benefit from. The report ranks with that distinction in mind and [tells you how to check it](docs/report-guide.md#is-this-duplication-worth-removing); it does not make the call.
+
+The split of labour is the whole design. A **deterministic** pass finds every exact and α-renamed repeat across the entire tree — identically on every run, with no context window and no sampling — and the model then spends its judgement on the few dozen candidates that come back, instead of spending it on the search.
+
+That ordering is also the cheap one. Asking a model to find duplication means feeding it the codebase: one real application here is 5,798 files and 1.5M lines, which no context window holds and nobody wants to pay to re-read weekly. And cross-file duplication is the specific thing a model is worst placed to find, because the two copies live in two files it never held open at the same time. thicket reads all of them outside the model, costs no tokens to do it, and hands back a report bounded by `--budget-tokens`.
+
+## Especially for code an LLM wrote
+
+An agent writes what it can see. It cannot see the helper in the file it did not open, so it writes that helper again — correctly, sensibly in local terms, and for the fifth time. Each diff is fine on its own. A reviewer looking at one PR cannot see the other four copies either, and the next session starts with an empty context and does it again.
+
+That is precisely the shape this tool is built for: the same structure, in files that never appear in one diff together, often with every identifier renamed — which is what `L1` matching exists to catch. An agent-written codebase accumulates it quietly and steadily, and no amount of care inside a single session prevents it.
+
+Because the report is a pure function of the source, it is safe to run on a schedule — a weekly job, a cron, a `workflow_dispatch` — and compare against the last one:
+
+```bash
+thicket --json .thicket/this-week.json > thicket.md
+thicket diff .thicket/last-week.json .thicket/this-week.json
+```
+
+Then hand `thicket.md` to an agent with the brief above. Run it as cleanup, not as a gate: it reports candidates, so wiring it into a required check would turn it into the linter it deliberately is not.
 
 ## Install
 
@@ -43,20 +123,28 @@ Keep them together. `thicket` locates `tsgo/` relative to its own executable, re
 
 ## Usage
 
-Point it at a tsconfig. The report goes to stdout, so it pipes:
+Point it at a directory, or at nothing, which means `.`. The report goes to stdout, so it pipes:
 
 ```bash
-bun run thicket --config ./tsconfig.json
-bun run thicket --config ./tsconfig.json > report.md
+bun run thicket
+bun run thicket ./packages/web > report.md
 ```
 
-A monorepo takes one `--config` per project. Passing the same path twice does nothing useful — the TypeScript API dedupes by path — but genuinely distinct configs are analyzed as one corpus, so a package duplicated across two of them is found:
+thicket finds the tsconfigs itself: it reads the directory's `package.json` and `pnpm-workspace.yaml` for declared workspaces and analyzes each one's config, falling back to `<dir>/tsconfig.json` when there are none. `--no-workspaces` skips the manifests entirely.
+
+`--filter` narrows that selection the way turbo and pnpm do — by package name or by `./path`, where `*` is a wildcard and `!` negates. Filters are repeatable and applied in order:
+
+```bash
+bun run thicket --filter '@acme/*' --filter '!@acme/legacy-ui'
+```
+
+`--config` names tsconfigs explicitly instead, and turns discovery off. Passing the same path twice does nothing useful — the TypeScript API dedupes by path — but genuinely distinct configs are analyzed as one corpus, so a package duplicated across two of them is found:
 
 ```bash
 bun run thicket --config packages/a/tsconfig.json --config packages/b/tsconfig.json
 ```
 
-For the loop, keep the JSON sidecar and diff it against the next iteration's:
+For the loop, keep the JSON sidecar and diff it against the next iteration's, as in [Close the loop](#close-the-loop) above:
 
 ```bash
 bun run thicket --config ./tsconfig.json --json before.json > /dev/null
@@ -65,25 +153,26 @@ bun run thicket --config ./tsconfig.json --json after.json  > /dev/null
 bun run thicket diff before.json after.json
 ```
 
-```
-1 finding resolved, 0 new, duplicated mass -65.2% (253 -> 88), propagation cost 0.44 -> 0.44
-  - THK-DUP-c389b5be
-```
-
 `diff` exits 0 because the comparison ran, not because the numbers improved. Whether a delta is good enough is a policy question, and a tool that encoded one in its exit code would be judging.
 
 ### Flags
 
 | Flag | Meaning |
 |---|---|
-| `--config <path>` | tsconfig to analyze. **Repeatable.** Defaults to `./tsconfig.json`. A solution-style config that owns no files and only lists `references` is expanded. |
+| `[dir]` | Directory to analyze, default `.`. Its workspaces are discovered from `package.json` / `pnpm-workspace.yaml`. |
+| `--filter <pattern>` | Analyze only these workspaces, by package name or `./path`; `*` is a wildcard and a leading `!` negates. **Repeatable**, applied in order. |
+| `--no-workspaces` | Ignore workspace manifests and analyze `<dir>/tsconfig.json` alone. |
+| `--config <path>` | tsconfig to analyze, instead of discovering any. **Repeatable.** A solution-style config that owns no files and only lists `references` is expanded. |
 | `--depth <1..5>` | Preset for how deep to look: sets the minimum fragment size and the findings cap per section. Default `3`. |
 | `--min-nodes <n>` | Override the depth preset's minimum fragment size, in AST nodes. Smaller means more, finer candidates. |
 | `--min-lines <n>` | Override the depth preset's minimum fragment size, in lines. A node count does not bound this — 15 AST nodes fit on one line — and extracting a one-line shape is a strict loss. |
 | `--budget-tokens <n>` | Hard ceiling on the whole report. Findings are dropped from the bottom of the ranking and the count dropped is always printed. |
 | `--max-locations <n>` | Cap the files each finding names. Unset — the default — names every one, so an agent can reach every copy. |
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
-| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. |
+| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. It also stops honouring a file's own `@generated` banner. |
+| `--no-banner-scan` | Stop treating an `@generated` / "auto-generated" banner as generated, without bringing the excluded directories back. Each opinion has its own off switch. |
+| `--exclude <glob>` | Skip files matching this glob. **Repeatable.** An instruction rather than a guess, so `--include-generated` does not cancel it. |
+| `--types <mode>` | `include` (default), `exclude`, or `only` — whether type declarations and type-only imports are analyzed. |
 | `--json <path>` | Additionally write the JSON sidecar here. The Markdown still goes to stdout. |
 | `--no-cache` | Re-analyze every file, ignoring `.thicket/cache.db`. |
 | `--help` | Print usage. |
@@ -323,7 +412,7 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 ## What thicket deliberately does not do
 
-- **It does not judge.** No thresholds, no grades, no pass/fail, no exit code that means "too complex". It reports candidates and metrics; something else decides what is worth fixing.
+- **It does not judge.** No thresholds, no grades, no pass/fail, no exit code that means "too complex". It reports candidates and metrics; something else decides what is worth fixing — see [It is not a linter](#it-is-not-a-linter).
 - **It does not edit.** No codemods, no autofix, no `--write`.
 - **It does not open PRs**, post review comments, or touch your VCS in any way.
 - **It does not report progress for you.** `diff` prints what changed between two reports. Whether that constitutes enough progress to stop is the harness's call.
@@ -334,7 +423,7 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 - **The simplification checks are not in v1** — parameters that take the same constant at every call site, statically-true conditions, exports nobody imports. The type checker knows all three; nothing consumes that yet. There is no `THK-INV-…` finding in a v1 report.
 - **The ranker cannot tell a data table from a code block.** An object literal repeated 15 times and a function body repeated 15 times look the same to it: same node count, same copy count, same score. Intra-file repetition is down-weighted and per-file copy counts are capped, which stops a config literal from taking the top of the report, but a few data tables still survive into the lower half. Treating them as refactoring candidates is the reader's mistake to avoid; thicket cannot yet make it for you.
 - **Duplication is reported at every granularity that matches.** A cluster and a strictly smaller cluster with the *same* occurrence count are collapsed to the larger one, but an L0 pair nested inside an L1 triple is two findings, as in the example report above. They are genuinely different facts; they still cost two report slots.
-- **A real tsconfig is required.** Import resolution runs through the type checker, so there is no "point it at a directory" mode. Declaration files (`.d.ts`) and `node_modules` are never analyzed.
+- **A real tsconfig is still required — thicket just finds it for you.** Import resolution runs through the type checker, so a directory with no tsconfig anywhere in it cannot be analyzed; pointing at a directory discovers the configs, it does not do without them. Declaration files (`.d.ts`) and `node_modules` are never analyzed.
 
 ## Design notes
 

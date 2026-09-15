@@ -4,10 +4,12 @@
   <p class="lede">
     <strong>thicket</strong> analyzes a TypeScript codebase and emits a deterministic plaintext
     report of where it repeats itself and where its modules depend on each other in circles.
-    It reports candidates. Something else does the judging and the editing.
+    You hand that report to a coding agent. It reports candidates — the agent does the judging
+    and the editing.
   </p>
   <div class="cta">
-    <a class="primary" href="report-guide.html">How to read a report</a>
+    <a class="primary" href="#then-what">Run it, then what?</a>
+    <a href="report-guide.html">How to read a report</a>
     <a href="example.html">See an example</a>
     <a href="https://github.com/alecf/thicket">GitHub</a>
   </div>
@@ -17,7 +19,12 @@
   <h2 id="quick-start">Quick start</h2>
   <pre><code class="language-bash">brew install alecf/tap/thicket
 
-thicket --config tsconfig.json &gt; thicket.md</code></pre>
+thicket &gt; thicket.md</code></pre>
+  <p>
+    No arguments: it analyzes the directory you are standing in, finding the tsconfigs itself —
+    every workspace of a monorepo included, which <code>--filter</code> narrows and
+    <code>--config</code> overrides.
+  </p>
   <p>
     Or download a tarball from
     <a href="https://github.com/alecf/thicket/releases">Releases</a> and put the
@@ -26,8 +33,8 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
     runtime to install, because the binary carries its own.
   </p>
   <p>
-    Point <code>--config</code> at each <code>tsconfig.json</code> you want covered; the report
-    says plainly which files it did <em>not</em> reach and what argument would reach them.
+    Whatever it ends up analyzing, the report says plainly which files it did <em>not</em> reach
+    and what argument would reach them.
   </p>
   <blockquote>
     <p>
@@ -40,13 +47,64 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
     </p>
   </blockquote>
 
-  <h2 id="for-agents">Built to be handed to an agent</h2>
+  <h2 id="then-what">You have a report. Now what?</h2>
   <p>
-    Every report opens with a link to a
-    <a href="report-guide.md">field-by-field guide in raw Markdown</a>. Point a coding agent at
-    <code>thicket.md</code> and tell it to clean something up: it can fetch that URL and learn
-    what each section means, what the numbers count, and — the part that matters — how to tell
-    a finding worth acting on from one that merely scored well.
+    Give it to an LLM. thicket finds the candidates and an agent decides what to do about them;
+    the tool only does the first half, and a report nobody reads is a list of coordinates. There
+    are two ways to arrange the second half, and the only real difference is who types the
+    command.
+  </p>
+
+  <h3 id="hand-it-over">1. Run it yourself, hand the report over</h3>
+  <pre><code class="language-bash">thicket &gt; thicket.md</code></pre>
+  <p>Then, in Claude Code, Codex, Cursor, or whatever you use:</p>
+  <blockquote>
+    <p>
+      Read <code>thicket.md</code>. It lists duplication and dependency-cycle
+      <strong>candidates</strong> in this repo — it has not judged any of them, and some of them
+      are not worth doing. The top of the file links to a guide explaining every field; fetch
+      that first. Then pick the findings you think are genuinely worth acting on, tell me which
+      ones you are rejecting and why, and do the top one.
+    </p>
+  </blockquote>
+  <p>
+    That link is what makes this work without you explaining anything. Every report opens with a
+    pointer to the <a href="report-guide.md">field guide in raw Markdown</a> — one fetch and the
+    agent knows what <code>L1</code> means, what <code>varies across copies</code> is for, and
+    how to tell a finding worth acting on from one that merely scored well.
+  </p>
+
+  <h3 id="agent-runs-it">2. Let the agent run it</h3>
+  <p>
+    Nothing needs a human in the middle. It is one command with text output, so the agent can do
+    the run too:
+  </p>
+  <blockquote>
+    <p>
+      Run <code>thicket &gt; thicket.md</code> and read the report — it
+      links to a guide explaining how to read it. Pick the one finding you are most confident is
+      worth consolidating, do it, then re-run thicket and show me that the finding is gone.
+    </p>
+  </blockquote>
+  <p>
+    If you do this more than once, put the command in the repository's own
+    <code>CLAUDE.md</code> or <code>AGENTS.md</code>, so it is already in context whenever
+    someone asks for a cleanup.
+  </p>
+
+  <h3 id="close-the-loop">3. Either way, close the loop</h3>
+  <p>
+    Findings are identified by content rather than position, so a second report says which ones
+    actually went away rather than which code got touched:
+  </p>
+  <pre><code class="language-bash">thicket --json before.json &gt; thicket.md
+# ...the agent refactors...
+thicket --json after.json &gt; thicket.md
+thicket diff before.json after.json</code></pre>
+  <pre><code>1 finding resolved, 0 new, duplicated mass -65.2% (253 -&gt; 88), propagation cost 0.44 -&gt; 0.44
+  - THK-DUP-c389b5be</code></pre>
+  <p>
+    An agent that reformatted the copies and declared victory shows up here as zero resolved.
   </p>
 
   <h2 id="what-it-reports">What it reports</h2>
@@ -88,12 +146,66 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
 </section>
 
 <section class="prose">
-  <h2 id="what-it-does-not-do">What it does not do</h2>
+  <h2 id="not-a-linter">It is not a linter</h2>
   <p>
-    It does not edit code, and it does not claim a finding is worth fixing. A great deal of
-    duplication should be left alone: if the copies differ in the <em>names</em> of their fields
-    rather than the <em>values</em>, consolidating them buys a generic that no future change
-    will benefit from. The report is ranked with that in mind and the guide says how to check,
-    but the judgement is yours.
+    Worth getting straight before you read a report, because everything in it is shaped by it:
+    <strong>thicket is not scoring your codebase, and nothing it prints is a defect.</strong>
+  </p>
+  <ul>
+    <li>
+      <strong>No grade and no threshold.</strong> No pass/fail, no “complexity: B−”, no exit code
+      that means too messy. It exits 0 whether it found three findings or eighteen thousand,
+      because “is this too much duplication” is a question about your deadlines and your team,
+      and a tool that answered it would be guessing.
+    </li>
+    <li>
+      <strong>The summary numbers are trends, not marks.</strong> <code>duplicated mass</code>
+      deliberately double-counts nested clusters; comparing it between two codebases means
+      nothing. Comparing it against itself one refactor later is the entire point of it.
+    </li>
+    <li>
+      <strong>A finding is a candidate, phrased like one.</strong> <em>These 19 things are the
+      same shape, here is every location, here is what differs between the copies, here is the
+      base class all of them already import.</em> Whether consolidating that is an improvement is
+      a design judgement — and the answer is frequently no.
+    </li>
+  </ul>
+  <p>
+    The split of labour is the whole design. A <strong>deterministic</strong> pass finds every
+    exact and α-renamed repeat across the entire tree — identically on every run, with no context
+    window and no sampling — and the model then spends its judgement on the few dozen candidates
+    that come back, instead of spending it on the search.
+  </p>
+  <p>
+    That ordering is also the cheap one. Asking a model to find duplication means feeding it the
+    codebase, and cross-file duplication is the specific thing it is worst placed to find: the
+    two copies live in two files it never held open at the same time. thicket reads all of them
+    outside the model, costs no tokens doing it, and hands back a report with a token budget you
+    set.
+  </p>
+
+  <h2 id="ai-written-code">Especially for code an LLM wrote</h2>
+  <p>
+    An agent writes what it can see. It cannot see the helper in the file it did not open, so it
+    writes that helper again — correctly, sensibly in local terms, and for the fifth time. Each
+    diff is fine on its own, a reviewer looking at one PR cannot see the other four copies
+    either, and the next session starts with an empty context and does it again.
+  </p>
+  <p>
+    That is precisely the shape this tool is built for: the same structure, in files that never
+    appear in one diff together, often with every identifier renamed — which is what
+    <code>L1</code> matching exists to catch. A codebase written largely by agents accumulates it
+    quietly, and no amount of care inside a single session prevents it.
+  </p>
+  <p>
+    Because the report is a pure function of the source, it is safe to run on a schedule — a
+    weekly job, a cron, a manual dispatch — and compare against the last one:
+  </p>
+  <pre><code class="language-bash">thicket --json .thicket/this-week.json &gt; thicket.md
+thicket diff .thicket/last-week.json .thicket/this-week.json</code></pre>
+  <p>
+    Then hand <code>thicket.md</code> to an agent with the brief above. Run it as cleanup, not as
+    a gate: it reports candidates, so wiring it into a required check would turn it into the
+    linter it deliberately is not.
   </p>
 </section>
