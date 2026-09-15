@@ -11,7 +11,7 @@ import { stronglyConnected } from "./metrics.js";
  * finding drew. So nothing circular executes: there is no module-init hazard,
  * no bundler cycle, and the tangle is layering drift rather than a defect. That
  * one fact reversed its recommendation, it cost it a Tarjan implementation to
- * learn, and thicket had already built the graph it needed.
+ * learn, and underbrush had already built the graph it needed.
  *
  * The counts are kept apart because they mean opposite things. A cycle crossing
  * two of the component's modules is evidence FOR the finding. A cycle inside

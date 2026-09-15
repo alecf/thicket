@@ -20,7 +20,7 @@ import {
 describe("runReport", () => {
   it("produces a report naming the fixture's known duplication", async () => {
     const { markdown } = await runReport({ config: fixtureConfig(), minNodes: 15 });
-    expect(markdown).toContain("# thicket report");
+    expect(markdown).toContain("# underbrush report");
     expect(markdown).toContain("src/alpha.ts");
     expect(markdown).toContain("src/beta.ts");
   });

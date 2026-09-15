@@ -50,7 +50,7 @@ export interface RunOptions {
   config?: string | string[];
   /**
    * The directory being analyzed, and the root every repo-relative path is
-   * measured from -- which is where `.thicket/cache.db` lives.
+   * measured from -- which is where `.underbrush/cache.db` lives.
    *
    * Without it the root is `commonRootDir` of the configs actually opened,
    * which moves with the config set: `--filter` down to one workspace
@@ -116,7 +116,7 @@ export interface RunOptions {
    */
   exclude?: readonly string[];
   /**
-   * Reuse `.thicket/cache.db` under the project root to skip re-walking files
+   * Reuse `.underbrush/cache.db` under the project root to skip re-walking files
    * whose content has not changed. On by default. It changes how long the run
    * takes and nothing else — the report is identical either way.
    */
@@ -141,7 +141,7 @@ export interface ReportJson {
   /** The type-duplication section, same shape as `duplication`. */
   typeDuplication: ReportJson["duplication"];
   duplication: {
-    /** THK-DUP finding id; identical to the one the Markdown prints. */
+    /** UB-DUP finding id; identical to the one the Markdown prints. */
     id: string;
     /** The normalized shape hash the id is derived from. */
     shapeHash: string;
@@ -325,7 +325,7 @@ interface Discovery {
  * The tsconfigs to analyze under `root` when the caller named none.
  *
  * Workspace discovery first, a single `tsconfig.json` second, and an error
- * third. There is deliberately NO upward search: thicket analyzes the
+ * third. There is deliberately NO upward search: underbrush analyzes the
  * directory it was pointed at, and a run that silently walked up would report
  * a tree the caller did not name -- the same class of surprise as widening a
  * filtered run. Where the nearest project actually is gets named in the error
@@ -525,8 +525,8 @@ export async function runReport(
     JSON.stringify({
       version: VERSION,
       // A different tsgo parses and resolves differently, so it changes the
-      // finding set. It is pinned by construction in a packaged thicket, but
-      // THICKET_TSGO can point at another one -- and the cache is keyed on
+      // finding set. It is pinned by construction in a packaged underbrush, but
+      // UNDERBRUSH_TSGO can point at another one -- and the cache is keyed on
       // this hash, so leaving it out lets a warm cache serve a report produced
       // by a compiler the reader cannot see (AGENTS.md §5).
       tsgo: tsgoVersion(),
@@ -570,7 +570,7 @@ export async function runReport(
     // root won, because it is also where the cache now lives.
     warn(
       `${dir} is not the root of what was analyzed — a tsconfig reaches above it, ` +
-        `so paths and .thicket/ are measured from ${project.root}`,
+        `so paths and .underbrush/ are measured from ${project.root}`,
     );
   }
   // Opened against the project root rather than the cwd, so the cache belongs
@@ -649,7 +649,7 @@ export async function runReport(
     });
     const clusters = subsume(await findDuplication(project, { minNodes, minLines, cache }));
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
-    // but not what the report speaks. Swap in the THK-DUP finding id for the
+    // but not what the report speaks. Swap in the UB-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
     // (PRD §9.1); the shape hash survives as `shapeHash` in the JSON.
     const ranked = rankClusters(clusters, graph.moduleOf).map((r) => ({

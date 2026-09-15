@@ -1,8 +1,8 @@
-# thicket v1 Implementation Plan
+# Underbrush v1 Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Ship the smallest `thicket` that closes the refactoring loop end-to-end — duplication detection (L0/L1), a module dependency graph with cycles, a content-addressed cache, and a ranked, budget-bounded, diffable report.
+**Goal:** Ship the smallest `underbrush` that closes the refactoring loop end-to-end — duplication detection (L0/L1), a module dependency graph with cycles, a content-addressed cache, and a ranked, budget-bounded, diffable report.
 
 **Architecture:** A Bun CLI that drives the TypeScript 7.1 programmatic API (`typescript/unstable/async`) to walk real ASTs with real type information. All contact with that API is sealed behind one adapter module, because four of its behaviors silently produce plausible-but-wrong results (see PRD §2.4). Fragments are content-addressed so identical code is processed once per run and once ever across runs. Findings are ranked, then truncated to a token budget — ranking is the product, since we generate ~10× more candidates than any report can hold.
 
@@ -23,11 +23,11 @@
 
 ```json
 {
-  "name": "thicket",
+  "name": "underbrush",
   "version": "0.1.0",
   "description": "Deterministic complexity reports for TypeScript codebases",
   "type": "module",
-  "bin": { "thicket": "./dist/cli.js" },
+  "bin": { "underbrush": "./dist/cli.js" },
   "engines": { "node": ">=24" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -85,7 +85,7 @@ export default defineConfig({
 node_modules/
 dist/
 *.tsbuildinfo
-.thicket/
+.underbrush/
 .DS_Store
 ```
 
@@ -93,13 +93,13 @@ dist/
 
 ```ts
 #!/usr/bin/env node
-console.log("thicket 0.1.0");
+console.log("underbrush 0.1.0");
 ```
 
 **Step 6: Install and verify**
 
 Run: `npm install && npm run build && node dist/cli.js`
-Expected: prints `thicket 0.1.0`
+Expected: prints `underbrush 0.1.0`
 
 **Step 7: Commit**
 
@@ -1598,11 +1598,11 @@ identical report on a small fixture. Assert on the clusters, not the Markdown.
 
 A cache nothing consults is not a cache. `findDuplication` takes an optional
 `cache` and, per file, either loads its rows or walks it and replaces them;
-`runReport` opens `.thicket/cache.db` under the project root and closes it in
+`runReport` opens `.underbrush/cache.db` under the project root and closes it in
 the same `finally` as the project.
 
 - `runReport` gains `cache?: boolean` (default true); the CLI gains `--no-cache`
-  and a `thicket cache clear` command (PRD §8.2).
+  and an `underbrush cache clear` command (PRD §8.2).
 - `configHash` covers version, `minNodes`, `granularity` and `includeGenerated`.
   It gates the file table too: "this content was analyzed" is only a useful
   claim together with "analyzed this way".
@@ -1615,9 +1615,9 @@ the same `finally` as the project.
 A cache is an optimization and must never be the reason a report cannot be
 produced. `openCache` returns `null` instead of throwing; a corrupt or
 unreadable file is deleted and recreated; a write that fails mid-run (a second
-thicket holding the write lock past the busy timeout, a read-only checkout)
+Underbrush holding the write lock past the busy timeout, a read-only checkout)
 disables the cache for the remainder of the run rather than aborting it. WAL
-plus a 5s busy timeout covers two thicket processes over one repository.
+plus a 5s busy timeout covers two Underbrush processes over one repository.
 
 **Commit:**
 
@@ -1845,8 +1845,8 @@ describe("findingId", () => {
 
   it("encodes the kind as a prefix", async () => {
     await initHash();
-    expect(findingId("DUP", "abc")).toMatch(/^THK-DUP-[0-9a-f]{8}$/);
-    expect(findingId("CYC", "abc")).toMatch(/^THK-CYC-[0-9a-f]{8}$/);
+    expect(findingId("DUP", "abc")).toMatch(/^UB-DUP-[0-9a-f]{8}$/);
+    expect(findingId("CYC", "abc")).toMatch(/^UB-CYC-[0-9a-f]{8}$/);
   });
 
   it("does not depend on file position", async () => {
@@ -1902,7 +1902,7 @@ export type FindingKind = "DUP" | "CYC" | "INV";
  * See PRD §9.1.
  */
 export function findingId(kind: FindingKind, contentKey: string): string {
-  return `THK-${kind}-${hash(contentKey).slice(0, 8)}`;
+  return `UB-${kind}-${hash(contentKey).slice(0, 8)}`;
 }
 ```
 
@@ -1938,9 +1938,9 @@ export function renderMarkdown(input: ReportInput): string {
   const lines: string[] = [];
   const shown = input.duplication.length + input.cycles.length;
 
-  lines.push("# thicket report");
+  lines.push("# underbrush report");
   lines.push(
-    `thicket ${input.version} · config ${input.configHash} · ` +
+    `underbrush ${input.version} · config ${input.configHash} · ` +
       `${input.fileCount} files / ${input.lineCount} LOC · ` +
       `granularity: ${input.granularity} (${input.moduleCount} modules)`,
   );
@@ -2003,7 +2003,7 @@ git commit -m "feat: add content-derived finding ids and markdown report"
 
 ---
 
-## Task 16: CLI wiring — `thicket report`
+## Task 16: CLI wiring — `underbrush report`
 
 **Files:**
 - Modify: `src/cli.ts`
@@ -2019,7 +2019,7 @@ import { fixtureConfig } from "./helpers.js";
 describe("runReport", () => {
   it("produces a report naming the fixture's known duplication", async () => {
     const { markdown } = await runReport({ config: fixtureConfig(), minNodes: 15 });
-    expect(markdown).toContain("# thicket report");
+    expect(markdown).toContain("# underbrush report");
     expect(markdown).toContain("src/alpha.ts");
     expect(markdown).toContain("src/beta.ts");
   });
@@ -2071,7 +2071,7 @@ Run it against a real multi-package TypeScript project outside this repo:
 
 ```bash
 cd /path/to/a/real/typescript/repo
-node ~/projects/thicket/dist/cli.js --config "$PWD/packages/client/tsconfig.json"
+node ~/projects/underbrush/dist/cli.js --config "$PWD/packages/client/tsconfig.json"
 ```
 Expected: a report naming real files. Sanity-check that the top findings are not import boilerplate — if they are, the kind filter in Task 7 regressed.
 
@@ -2079,12 +2079,12 @@ Expected: a report naming real files. Sanity-check that the top findings are not
 
 ```bash
 git add src/cli.ts src/run.ts tests/e2e.test.ts
-git commit -m "feat: wire thicket report end to end"
+git commit -m "feat: wire underbrush report end to end"
 ```
 
 ---
 
-## Task 17: `thicket diff`
+## Task 17: `underbrush diff`
 
 **Files:**
 - Create: `src/report/diff.ts`, `tests/diff.test.ts`
@@ -2138,7 +2138,7 @@ Expected: 3 passed
 
 ```bash
 git add src/report/diff.ts tests/diff.test.ts
-git commit -m "feat: add thicket diff for measuring loop progress"
+git commit -m "feat: add underbrush diff for measuring loop progress"
 ```
 
 ---
@@ -2205,7 +2205,7 @@ git commit -m "test: pin report output with a golden file"
 **Files:**
 - Create: `README.md`
 
-Document: what thicket is, the loop it is designed for, install/usage, every flag, the report format, what the metrics mean, and — importantly — what it deliberately does *not* do (judge, edit, open PRs). Link `docs/PRD.md` for rationale.
+Document: what Underbrush is, the loop it is designed for, install/usage, every flag, the report format, what the metrics mean, and — importantly — what it deliberately does *not* do (judge, edit, open PRs). Link `docs/PRD.md` for rationale.
 
 **Commit:**
 
@@ -2226,7 +2226,7 @@ Before calling v1 done:
 - [ ] Report on a real single-package app selects a granularity with a nonzero edge count (not the 1-module collapse of PRD §2.6)
 - [ ] Running twice on an unchanged repo yields byte-identical output
 - [x] Second run is measurably faster than the first (cache is doing something) — the extraction phase drops ~14x (150ms → 11ms on a 146-file test repository); end to end that is 0.37s → 0.22s, because program load and bind happen either way
-- [ ] `thicket diff` on two runs of an unchanged repo reports zero added, zero resolved
+- [ ] `underbrush diff` on two runs of an unchanged repo reports zero added, zero resolved
 - [ ] Every PRD §2.4 hazard has a regression test that fails when the guard is removed
 
 ## Notes on what comes after v1

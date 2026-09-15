@@ -24,7 +24,7 @@ function runBun(args: string[], timeoutMs: number): Promise<{ code: number | nul
     child.stdout.on("data", (d) => (out += String(d)));
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`thicket did not exit within ${timeoutMs}ms; it printed ${out.length} bytes`));
+      reject(new Error(`underbrush did not exit within ${timeoutMs}ms; it printed ${out.length} bytes`));
     }, timeoutMs);
     child.on("error", (e) => {
       clearTimeout(timer);
@@ -37,14 +37,14 @@ function runBun(args: string[], timeoutMs: number): Promise<{ code: number | nul
   });
 }
 
-describe("the thicket process", () => {
+describe("the underbrush process", () => {
   it("exits on its own once the report is written", async () => {
     const { code, out } = await runBun(
       ["src/cli.ts", "--config", fixtureConfig(), "--no-cache"],
       60_000,
     );
     expect(code).toBe(0);
-    expect(out).toContain("# thicket report");
+    expect(out).toContain("# underbrush report");
   }, 70_000);
 
   // `sourceFileNames` opens an API of its own, so it can strand a `tsgo` child

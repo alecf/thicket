@@ -101,7 +101,7 @@ export interface GraphOptions {
    * found the configs, and only then does `auto` target a module SIZE per
    * workspace instead of one directory depth for the tree.
    *
-   * Confined to that path on purpose: module names are `THK-CYC-*` ids
+   * Confined to that path on purpose: module names are `UB-CYC-*` ids
    * (PRD §9.1), so re-cutting an ordinary single-project repo would churn the
    * ids of every existing user for no gain. Two workspaces are the threshold
    * because one workspace has no peer to be out of scale with.

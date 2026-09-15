@@ -97,8 +97,8 @@ jobs:
         # every directory run, which is what a single reference cannot see.
         run: |
           set -euo pipefail
-          bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
-          bun run thicket tests/fixtures/workspaces --no-cache > from-source-ws.md
+          bun run underbrush --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+          bun run underbrush tests/fixtures/workspaces --no-cache > from-source-ws.md
 
       - name: Build every target
         # Not just the host: the formula names all four tarballs and their
@@ -112,9 +112,9 @@ jobs:
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
           mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
-          tar -xzf "dist-bin/thicket-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
-          mv "$RUNNER_TEMP/thicket-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
-          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+          tar -xzf "dist-bin/underbrush-$version-linux-x64.tar.gz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/underbrush-$version-linux-x64"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/underbrush "$RUNNER_TEMP/prefix/bin/underbrush"
 
       - name: Render the same reports through the installed binary
         # cd out of the checkout: inside it, a stray node_modules could satisfy
@@ -123,10 +123,10 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/prefix/bin/thicket" \
+          "$RUNNER_TEMP/prefix/bin/underbrush" \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
-          "$RUNNER_TEMP/prefix/bin/thicket" \
+          "$RUNNER_TEMP/prefix/bin/underbrush" \
             "$GITHUB_WORKSPACE/tests/fixtures/workspaces" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary-ws.md"
 
@@ -144,7 +144,7 @@ jobs:
         run: |
           set -euo pipefail
           bun run build:formula
-          ruby -c dist-bin/thicket.rb
+          ruby -c dist-bin/underbrush.rb
 
       # Both npm paths exit 0 when they are broken, which is why they are
       # checked here rather than trusted. The launcher once `await import`ed
@@ -157,8 +157,8 @@ jobs:
           set -euo pipefail
           bun run build:npm
           mkdir -p "$RUNNER_TEMP/packs"
-          (cd dist-npm/thicket-linux-x64 && npm pack --pack-destination "$RUNNER_TEMP/packs")
-          (cd dist-npm/thicket && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          (cd dist-npm/underbrush-linux-x64 && npm pack --pack-destination "$RUNNER_TEMP/packs")
+          (cd dist-npm/underbrush && npm pack --pack-destination "$RUNNER_TEMP/packs")
           mkdir -p "$RUNNER_TEMP/npmtest"
           cd "$RUNNER_TEMP/npmtest"
           npm init -y > /dev/null
@@ -177,11 +177,11 @@ jobs:
           set -euo pipefail
           node -e '
             const fs = require("fs");
-            const thin = require("./dist-npm/thicket/package.json");
+            const thin = require("./dist-npm/underbrush/package.json");
             const optional = thin.optionalDependencies ?? {};
             let checked = 0;
             for (const dir of fs.readdirSync("dist-npm")) {
-              if (dir === "thicket") continue;
+              if (dir === "underbrush") continue;
               const pkg = require(`./dist-npm/${dir}/package.json`);
               if (optional[pkg.name] !== pkg.version) {
                 throw new Error(`thin package does not name ${pkg.name}@${pkg.version}`);
@@ -195,7 +195,7 @@ jobs:
               throw new Error(`${checked} platform packages but ${Object.keys(optional).length} optional deps`);
             }
             // The runner is linux-x64, so npm must have a package for it.
-            if (!optional[`@thicket/thicket-${process.platform}-${process.arch}`]) {
+            if (!optional[`@underbrush/underbrush-${process.platform}-${process.arch}`]) {
               throw new Error(`nothing declared for this runner`);
             }
             console.log(`${checked} platform packages, all selectable`);
@@ -205,7 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/npmtest"
-          ./node_modules/.bin/thicket \
+          ./node_modules/.bin/underbrush \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-npm.md"
           cd "$GITHUB_WORKSPACE"
@@ -221,8 +221,8 @@ jobs:
           # brings its own platform tsgo. Install it, then delete the platform
           # binary so the launcher has no choice but the fallback.
           npm install --no-audit --no-fund typescript@"$(node -p "require('$GITHUB_WORKSPACE/package.json').dependencies.typescript")"
-          rm -rf node_modules/@thicket
-          ./node_modules/.bin/thicket \
+          rm -rf node_modules/@underbrush
+          ./node_modules/.bin/underbrush \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-fallback.md"
           cd "$GITHUB_WORKSPACE"
@@ -236,7 +236,7 @@ jobs:
           cd "$RUNNER_TEMP/npmtest"
           rm -rf node_modules/typescript node_modules/@typescript
           set +e
-          out=$(./node_modules/.bin/thicket --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" 2>&1)
+          out=$(./node_modules/.bin/underbrush --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" 2>&1)
           code=$?
           set -e
           test "$code" -ne 0 || { echo "::error::exited 0 with no way to run"; echo "$out"; exit 1; }
@@ -259,7 +259,7 @@ jobs:
   # ever executed -- which is the exact failure this whole branch exists to
   # stop, one level up. Every target is therefore run on a machine of its own
   # kind, against the report the ubuntu job rendered from source: identical
-  # bytes across four platforms is also the determinism thicket promises.
+  # bytes across four platforms is also the determinism underbrush promises.
   smoke:
     needs: package
     name: run the ${{ matrix.target }} artifact
@@ -296,18 +296,18 @@ jobs:
           # upload-artifact roots a multi-path artifact at the least common
           # ancestor of those paths, so `dist-bin/*.tar.gz` plus a workspace-root
           # file lands the tarballs under dist-bin/ rather than at the top.
-          tarball="dist-bin/thicket-$version-${{ matrix.target }}.tar.gz"
+          tarball="dist-bin/underbrush-$version-${{ matrix.target }}.tar.gz"
           test -f "$tarball" || { echo "::error::no $tarball"; find . -name '*.tar.gz'; exit 1; }
           mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
           tar -xzf "$tarball" -C "$RUNNER_TEMP"
-          mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
-          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+          mv "$RUNNER_TEMP/underbrush-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/underbrush "$RUNNER_TEMP/prefix/bin/underbrush"
 
       - name: It must run, and agree byte for byte with the source run
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/prefix/bin/thicket" \
+          "$RUNNER_TEMP/prefix/bin/underbrush" \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
           cd "$GITHUB_WORKSPACE"
@@ -316,7 +316,7 @@ jobs:
             || { echo "::error::${{ matrix.target }} disagrees with the source run"; exit 1; }
           echo "${{ matrix.target }}: byte-identical."
 
-  # thicket's contract is that a report is a pure function of
+  # underbrush's contract is that a report is a pure function of
   # (source, config, version): the harness diffs report N against N+1 to decide
   # whether a refactor made progress, so environment-dependent output registers
   # as false progress.
@@ -345,20 +345,20 @@ jobs:
           bun-version: "1.4"
       - run: bun install --frozen-lockfile
       # No build step: this renders the live TypeScript through `bun run
-      # thicket`, which is the command a reader of the README actually types.
+      # underbrush`, which is the command a reader of the README actually types.
       - name: Confirm the locale actually took effect
         # Without this the job can pass vacuously: if the runtime ignored
         # the locale, both arms would be the same environment and the
         # comparison below would prove nothing.
         run: bun -e 'console.log("resolved:", Intl.Collator().resolvedOptions().locale, "| I vs i:", "I".localeCompare("i"))'
       - name: Render the fixture report
-        run: bun run thicket --config tests/fixtures/sample/tsconfig.json > report.md
+        run: bun run underbrush --config tests/fixtures/sample/tsconfig.json > report.md
       - name: Fail if the report is empty
         # A zero-file analysis must never look like a successful clean report,
         # so "exit 0" is not sufficient evidence that anything was produced.
         run: |
           test -s report.md
-          grep -q '^# thicket report' report.md
+          grep -q '^# underbrush report' report.md
       - uses: actions/upload-artifact@v4
         with:
           name: report-${{ strategy.job-index }}

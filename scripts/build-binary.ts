@@ -1,5 +1,5 @@
 /**
- * Compiles thicket to a self-contained directory per platform, and tars it.
+ * Compiles underbrush to a self-contained directory per platform, and tars it.
  *
  * The binary is not self-contained on its own and cannot be made so: analysis
  * runs through `typescript/unstable/async`, which spawns a NATIVE tsgo child
@@ -115,7 +115,7 @@ function tarIsGnu(): boolean {
 }
 
 async function buildTarget(target: Target): Promise<{ tarball: string; sha256: string }> {
-  const dirName = `thicket-${VERSION}-${target.platform}-${target.arch}`;
+  const dirName = `underbrush-${VERSION}-${target.platform}-${target.arch}`;
   const stage = join(outRoot, dirName);
   rmSync(stage, { recursive: true, force: true });
   mkdirSync(stage, { recursive: true });
@@ -127,7 +127,7 @@ async function buildTarget(target: Target): Promise<{ tarball: string; sha256: s
     `--target=${target.bunTarget}`,
     "src/cli.ts",
     "--outfile",
-    join(stage, "thicket"),
+    join(stage, "underbrush"),
   ]);
 
   const tsgoLib = tsgoLibDir(target);
@@ -156,7 +156,7 @@ async function buildTarget(target: Target): Promise<{ tarball: string; sha256: s
 
   const tarPath = join(outRoot, tarball);
   const sha256 = createHash("sha256").update(readFileSync(tarPath)).digest("hex");
-  const binSize = statSync(join(stage, "thicket")).size;
+  const binSize = statSync(join(stage, "underbrush")).size;
   process.stdout.write(
     `  binary ${human(binSize)} + tsgo ${human(
       statSync(join(tsgoOut, "tsc")).size,

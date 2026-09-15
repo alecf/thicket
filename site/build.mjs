@@ -224,16 +224,16 @@ function page({ title, description, body, mermaid = false, active = "" }) {
 </head>
 <body>
 <header class="site">
-  <a class="brand" href="./"><img src="icon.svg" alt="" width="28" height="28"><span>thicket</span></a>
+  <a class="brand" href="./"><img src="icon.svg" alt="" width="28" height="28"><span>underbrush</span></a>
   <nav>${nav}</nav>
-  <a class="gh" href="https://github.com/alecf/thicket">GitHub</a>
+  <a class="gh" href="https://github.com/alecf/underbrush">GitHub</a>
 </header>
 <main>
 ${body}
 </main>
 <footer class="site">
-  <p>thicket is a CLI that reports candidates. Something else does the judging and the editing.</p>
-  <p><a href="https://github.com/alecf/thicket">Source on GitHub</a> · <a href="report-guide.md">Report guide as raw Markdown</a></p>
+  <p>Underbrush is a CLI that reports candidates. Something else does the judging and the editing.</p>
+  <p><a href="https://github.com/alecf/underbrush">Source on GitHub</a> · <a href="report-guide.md">Report guide as raw Markdown</a></p>
 </footer>
 ${mermaid ? '<script type="module">import m from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";m.initialize({startOnLoad:true,theme:"neutral"});</script>' : ""}
 </body>
@@ -248,7 +248,7 @@ export function build() {
   const guideMarkdown = readFileSync(join(repo, "docs/report-guide.md"), "utf8");
   const exampleMarkdown = readFileSync(join(repo, "tests/golden/sample-report.md"), "utf8");
 
-  // Verbatim, and this is load-bearing: every report thicket emits links to
+  // Verbatim, and this is load-bearing: every report underbrush emits links to
   // this exact URL, and the reader on the other end is a model that expects
   // Markdown.
   writeFileSync(join(dist, "report-guide.md"), guideMarkdown);
@@ -256,8 +256,8 @@ export function build() {
   writeFileSync(
     join(dist, "report-guide.html"),
     page({
-      title: "How to read a thicket report",
-      description: "Field-by-field guide to a thicket report, for agents and humans.",
+      title: "How to read an underbrush report",
+      description: "Field-by-field guide to an underbrush report, for agents and humans.",
       body: `<article class="prose">${markdownToHtml(guideMarkdown)}</article>`,
       active: "report-guide.html",
     }),
@@ -266,11 +266,11 @@ export function build() {
   writeFileSync(
     join(dist, "example.html"),
     page({
-      title: "Example thicket report",
-      description: "A complete thicket report over a small fixture project.",
+      title: "Example underbrush report",
+      description: "A complete underbrush report over a small fixture project.",
       body: `<article class="prose">
 <h1 id="example-report">Example report</h1>
-<p>This is a complete report over a four-file fixture, rendered exactly as thicket emits it. It is the same file the test suite pins byte for byte, so nothing here is an illustration of output the tool would not produce.</p>
+<p>This is a complete report over a four-file fixture, rendered exactly as underbrush emits it. It is the same file the test suite pins byte for byte, so nothing here is an illustration of output the tool would not produce.</p>
 <hr>
 ${markdownToHtml(exampleMarkdown)}
 </article>`,
@@ -282,7 +282,7 @@ ${markdownToHtml(exampleMarkdown)}
   writeFileSync(
     join(dist, "index.html"),
     page({
-      title: "thicket — find what is tangled in a TypeScript codebase",
+      title: "underbrush — find what is tangled in a TypeScript codebase",
       description:
         "A CLI that reports duplication and dependency cycles as a deterministic plaintext report, for an agent to act on.",
       body: readFileSync(join(here, "index.html.part"), "utf8"),

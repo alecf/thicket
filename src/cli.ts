@@ -29,9 +29,9 @@ const DEPTH_PRESETS: Record<
 };
 const DEFAULT_DEPTH = 3;
 
-const USAGE = `thicket ${VERSION}
+const USAGE = `underbrush ${VERSION}
 
-Usage: thicket [dir] [options]
+Usage: underbrush [dir] [options]
 
   [dir]                  directory to analyze (default "."); its workspaces are
                          discovered from package.json / pnpm-workspace.yaml
@@ -52,11 +52,11 @@ Usage: thicket [dir] [options]
   --types <mode>         include | exclude | only (default include) — whether
                          type declarations and type-only imports are analyzed
   --json <path>          also write the JSON sidecar here
-  --no-cache             re-analyze every file, ignoring .thicket/cache.db
+  --no-cache             re-analyze every file, ignoring .underbrush/cache.db
   --help                 show this message
 
 Commands:
-  cache clear            delete .thicket/cache.db for the analyzed project
+  cache clear            delete .underbrush/cache.db for the analyzed project
   diff <a.json> <b.json> compare two --json sidecars: what was resolved, added,
                          and how the metrics moved
 `;
@@ -100,7 +100,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   // `diff` reads two sidecars and analyzes nothing, so it is answered before
-  // any tsconfig is resolved. Resolving one first would make `thicket diff`
+  // any tsconfig is resolved. Resolving one first would make `underbrush diff`
   // fail with "no such tsconfig: ./tsconfig.json" whenever it is run from a
   // directory that has no TypeScript project in it — which is most of them.
   if (positionals[0] === "diff") {
@@ -234,9 +234,9 @@ export async function main(argv: readonly string[]): Promise<number> {
 
 /** True for a path that exists and is a directory. */
 /**
- * Print a thicket diagnostic and hand back an exit code.
+ * Print an underbrush diagnostic and hand back an exit code.
  *
- * The `thicket: ` prefix and the trailing newline live here rather than at
+ * The `underbrush: ` prefix and the trailing newline live here rather than at
  * each of the thirteen failure paths. The prefix is how a harness tells our
  * diagnostics apart from the compiler's, and leaving it to the call site had
  * already produced one function that supplied its own while every other site
@@ -251,7 +251,7 @@ function fail(message: string, opts: { usage?: boolean; code?: number } = {}): n
 
 /** One prefixed line on stderr, for what is not a failure: warnings, and what was done. */
 function note(message: string): void {
-  process.stderr.write(`thicket: ${message}\n`);
+  process.stderr.write(`underbrush: ${message}\n`);
 }
 
 function isDirectory(path: string): boolean {
@@ -276,7 +276,7 @@ function resolveConfigs(given: readonly string[]): string[] | string {
 }
 
 /**
- * `thicket diff before.json after.json` (PRD §9.1).
+ * `underbrush diff before.json after.json` (PRD §9.1).
  *
  * The summary goes to stdout because it is the answer; anything that went
  * wrong goes to stderr with the offending path in it. The exit code is 0 for

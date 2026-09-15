@@ -69,7 +69,7 @@ jobs:
           bun run build:npm
 
       - name: Render the reference report the smoke jobs compare against
-        run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
+        run: bun run underbrush --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
 
       - uses: actions/upload-artifact@v4
         with:
@@ -77,7 +77,7 @@ jobs:
           path: |
             dist-bin/*.tar.gz
             dist-bin/checksums.txt
-            dist-bin/thicket.rb
+            dist-bin/underbrush.rb
             from-source.md
           retention-days: 7
 
@@ -114,14 +114,14 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          tarball="dist-bin/thicket-$version-${{ matrix.target }}.tar.gz"
+          tarball="dist-bin/underbrush-$version-${{ matrix.target }}.tar.gz"
           test -f "$tarball" || { echo "::error::no $tarball"; find . -name '*.tar.gz'; exit 1; }
           mkdir -p "$RUNNER_TEMP/prefix/bin" "$RUNNER_TEMP/prefix/libexec"
           tar -xzf "$tarball" -C "$RUNNER_TEMP"
-          mv "$RUNNER_TEMP/thicket-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
-          ln -s ../libexec/thicket "$RUNNER_TEMP/prefix/bin/thicket"
+          mv "$RUNNER_TEMP/underbrush-$version-${{ matrix.target }}"/* "$RUNNER_TEMP/prefix/libexec/"
+          ln -s ../libexec/underbrush "$RUNNER_TEMP/prefix/bin/underbrush"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/prefix/bin/thicket" \
+          "$RUNNER_TEMP/prefix/bin/underbrush" \
             --config "$GITHUB_WORKSPACE/tests/fixtures/sample/tsconfig.json" \
             --no-cache > "$GITHUB_WORKSPACE/from-binary.md"
           cd "$GITHUB_WORKSPACE"
@@ -171,13 +171,13 @@ jobs:
         # contradicts the promise that a fork builds, verifies and stops.
         if: >-
           startsWith(github.ref, 'refs/tags/v') && env.DRY_RUN != 'true'
-          && github.repository == 'alecf/thicket'
+          && github.repository == 'alecf/underbrush'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
-          assets=(dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/thicket.rb)
+          assets=(dist-bin/*.tar.gz dist-bin/checksums.txt dist-bin/underbrush.rb)
           # Re-runnable, like the npm step. The tap push below is the one path
           # whose credential cannot be checked before a real release; if it
           # fails, the fix is to re-run this job -- and a bare `gh release
@@ -201,11 +201,11 @@ jobs:
           me=$(npm whoami)
           version=$(node -p "require('./package.json').version")
 
-          # Preflight EVERY name before publishing any of them. The unscoped
-          # `thicket` is held by an unrelated package today, and a platform
-          # package could be taken too -- publishing four and failing on the
-          # fifth would strand them on the registry at a version that can never
-          # be republished, pointing at a thin package that does not exist.
+          # Preflight EVERY name before publishing any of them. A name that was
+          # free at release-planning time could be taken by the time this runs
+          # -- publishing four and failing on the fifth would strand them on
+          # the registry at a version that can never be republished, pointing
+          # at a thin package that does not exist.
           for dir in dist-npm/*/; do
             name=$(node -p "require('./$dir/package.json').name")
             if npm view "$name" version > /dev/null 2>&1; then
@@ -231,8 +231,8 @@ jobs:
             fi
             (cd "$dir" && npm publish --access public)
           }
-          for dir in dist-npm/thicket-*; do publish "$dir"; done
-          publish dist-npm/thicket
+          for dir in dist-npm/underbrush-*; do publish "$dir"; done
+          publish dist-npm/underbrush
 
       - name: Push the formula to the Homebrew tap
         if: startsWith(github.ref, 'refs/tags/v') && env.HAS_TAP_TOKEN == 'true' && env.DRY_RUN != 'true'
@@ -242,19 +242,19 @@ jobs:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
           # A shared personal tap, not a per-tool one: a tap holds any number
           # of formulae, and renaming later forces every user to re-tap. Only
-          # Formula/thicket.rb is written and staged below, by name, so a
+          # Formula/underbrush.rb is written and staged below, by name, so a
           # sibling tool's formula in the same tap cannot be clobbered.
           TAP_REPO: ${{ vars.TAP_REPO || 'alecf/homebrew-tap' }}
         run: |
           set -euo pipefail
           git clone "https://x-access-token:$TAP_TOKEN@github.com/$TAP_REPO.git" tap
           mkdir -p tap/Formula
-          cp dist-bin/thicket.rb tap/Formula/thicket.rb
+          cp dist-bin/underbrush.rb tap/Formula/underbrush.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/thicket.rb
-          git diff --staged --quiet || git commit -m "thicket ${GITHUB_REF#refs/tags/v}"
+          git add Formula/underbrush.rb
+          git diff --staged --quiet || git commit -m "underbrush ${GITHUB_REF#refs/tags/v}"
           # `-u origin HEAD` rather than a bare push: cloning a tap that has no
           # commits yet leaves an unborn branch with no upstream, and a bare
           # push there fails with "has no upstream branch".

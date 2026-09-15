@@ -135,7 +135,7 @@ export function workspaceGroups(
  * another, one global depth gives modules of 20 files and modules of 1; a
  * depth per workspace gives 20 and 12.
  *
- * Two properties matter more than the split itself, because `THK-CYC-*` ids
+ * Two properties matter more than the split itself, because `UB-CYC-*` ids
  * derive from module names (PRD §9.1) and a report is read by diffing it
  * against the last one:
  *

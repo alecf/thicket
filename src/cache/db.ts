@@ -6,14 +6,14 @@ import { compareStrings } from "../order.js";
 
 /**
  * Bumped whenever the row format changes. A cache written by a different
- * version is dropped and rebuilt rather than read: an older thicket reading a
- * newer database (or the reverse) is exactly the situation where a cache
+ * version is dropped and rebuilt rather than read: an older underbrush reading
+ * a newer database (or the reverse) is exactly the situation where a cache
  * silently changes the answer.
  */
 export const CACHE_SCHEMA_VERSION = 3;
 
-/** Gitignored already; `thicket cache clear` empties it. */
-const CACHE_DIR = ".thicket";
+/** Gitignored already; `underbrush cache clear` empties it. */
+const CACHE_DIR = ".underbrush";
 const CACHE_FILE = "cache.db";
 
 export function cachePathFor(root: string): string {
@@ -259,7 +259,7 @@ export function clearCache(root: string): boolean {
     }
   }
   try {
-    // Leave nothing behind if the cache was all `.thicket/` held. Non-empty is
+    // Leave nothing behind if the cache was all `.underbrush/` held. Non-empty is
     // the expected outcome once anything else lives there, and rmdir says so.
     rmdirSync(dirname(path));
   } catch {
@@ -273,7 +273,7 @@ export function clearCache(root: string): boolean {
  *
  * Three ways a cache file goes bad, all handled the same way — throw it away:
  * truncated or garbage bytes (a killed process, a bad copy), a schema from a
- * different thicket version, and a stale `config_hash`.
+ * different underbrush version, and a stale `config_hash`.
  */
 function openDatabase(path: string, configHash: string): DatabaseSync | undefined {
   const inMemory = path === ":memory:";
@@ -313,7 +313,7 @@ function openDatabase(path: string, configHash: string): DatabaseSync | undefine
 }
 
 function initialize(db: DatabaseSync, configHash: string): void {
-  // WAL lets a second thicket read while this one writes. `synchronous` drops
+  // WAL lets a second underbrush read while this one writes. `synchronous` drops
   // to NORMAL because the worst case for a cache losing its last transaction
   // is re-walking a file.
   db.exec("PRAGMA journal_mode = WAL");
@@ -355,7 +355,7 @@ function writeMeta(db: DatabaseSync, key: string, value: string): void {
 
 /**
  * Drop every object in the database, not merely the tables this version knows
- * about. A newer thicket may have left tables whose names we cannot guess, and
+ * about. A newer underbrush may have left tables whose names we cannot guess, and
  * leaving them behind means the file never shrinks.
  */
 function dropEverything(db: DatabaseSync): void {

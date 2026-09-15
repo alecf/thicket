@@ -3,7 +3,7 @@ import { compareStrings } from "../order.js";
 /**
  * The subset of the JSON sidecar a diff needs. Deliberately structural and
  * minimal: `ReportJson` satisfies it, and so does a sidecar written by a
- * slightly older thicket that has since grown a field. A diff that refused to
+ * slightly older underbrush that has since grown a field. A diff that refused to
  * run across a version boundary would be useless in exactly the situation it
  * exists for — comparing a report from before a change to one from after.
  */
@@ -122,14 +122,14 @@ function signed(pct: number): string {
 /**
  * Validates a parsed JSON file as a report before diffing it.
  *
- * The two arguments to `thicket diff` are paths a human typed, so the wrong
+ * The two arguments to `underbrush diff` are paths a human typed, so the wrong
  * file is the common case. Without this the failure is a `TypeError` about
  * reading a property of undefined, which names neither file; with it the
  * message names the one that is wrong.
  */
 export function parseReport(value: unknown, source: string): DiffableReport {
   const bad = (why: string): never => {
-    throw new Error(`${source} is not a thicket report: ${why}`);
+    throw new Error(`${source} is not an underbrush report: ${why}`);
   };
 
   if (typeof value !== "object" || value === null) bad("not a JSON object");

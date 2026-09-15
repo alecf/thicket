@@ -94,11 +94,11 @@ describe("import resolution", () => {
  * repository is checked out.
  */
 const mixedCaseRoot = (() => {
-  const dir = mkdtempSync(join(tmpdir(), "thicket-Case-"));
+  const dir = mkdtempSync(join(tmpdir(), "underbrush-Case-"));
   const dest = join(dir, "Sample-Project");
   cpSync(fixtureRoot(), dest, {
     recursive: true,
-    filter: (src) => !src.includes(".thicket"),
+    filter: (src) => !src.includes(".underbrush"),
   });
   return resolve(dest);
 })();

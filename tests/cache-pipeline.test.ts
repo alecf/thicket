@@ -42,13 +42,13 @@ export function accumulateAgain(rows: number[][]): void {
 
 /** A throwaway copy of the sample fixture, so tests may edit and delete files. */
 function scratchProject(): { root: string; config: string } {
-  const root = mkdtempSync(join(tmpdir(), "thicket-proj-"));
+  const root = mkdtempSync(join(tmpdir(), "underbrush-proj-"));
   temps.push(root);
-  // Skip any `.thicket/` the suite left in the fixture: copying one in would
+  // Skip any `.underbrush/` the suite left in the fixture: copying one in would
   // hand a "cold" run a warm cache, and hide exactly what these tests check.
   cpSync(fixtureRoot(), root, {
     recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
+    filter: (src) => !src.split(sep).includes(".underbrush"),
   });
   writeFileSync(join(root, "src/asi.ts"), ASI_SOURCE);
   return { root, config: join(root, "tsconfig.json") };
@@ -171,7 +171,7 @@ describe("runReport with the cache", () => {
     const { root, config } = scratchProject();
     const expected = await runReport({ config, minNodes: MIN_NODES, cache: false });
 
-    // Let a real run create .thicket/, then corrupt what it left behind.
+    // Let a real run create .underbrush/, then corrupt what it left behind.
     await runReport({ config, minNodes: MIN_NODES });
     writeFileSync(cachePathFor(root), "not a database\n".repeat(500));
 

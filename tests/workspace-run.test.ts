@@ -24,18 +24,18 @@ const temps: string[] = [];
 
 /** A throwaway copy of a fixture, so a test may let a cache be written into it. */
 function scratchCopy(from: string): string {
-  const root = mkdtempSync(join(tmpdir(), "thicket-ws-run-"));
+  const root = mkdtempSync(join(tmpdir(), "underbrush-ws-run-"));
   temps.push(root);
   cpSync(from, root, {
     recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
+    filter: (src) => !src.split(sep).includes(".underbrush"),
   });
   return root;
 }
 
 /** A throwaway directory holding exactly `files`, keyed by relative name. */
 function scratchTree(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "thicket-ws-tree-"));
+  const root = mkdtempSync(join(tmpdir(), "underbrush-ws-tree-"));
   temps.push(root);
   for (const [name, text] of Object.entries(files)) {
     const path = join(root, name);
@@ -120,7 +120,7 @@ describe("runReport over a workspace root", () => {
   /**
    * THE REGRESSION THE PIN EXISTS FOR. `project.root` is `commonRootDir` of the
    * configs actually opened, so narrowing to one workspace collapses it into
-   * that workspace and `.thicket/cache.db` lands in a subpackage.
+   * that workspace and `.underbrush/cache.db` lands in a subpackage.
    *
    * The nested fixture, not `workspaces/`: that one's root has a tsconfig of
    * its own, which is always among the primaries, so its common root is the
@@ -171,7 +171,7 @@ describe("runReport over a workspace root", () => {
   });
 
   /**
-   * Module names are `THK-CYC-*` ids (PRD §9.1) and a report is read by
+   * Module names are `UB-CYC-*` ids (PRD §9.1) and a report is read by
    * diffing it against the last one, so narrowing the run must not rename the
    * modules of a workspace that is still in it. Before per-workspace
    * granularity this tree reported `dir:3 (4 modules)` unfiltered and

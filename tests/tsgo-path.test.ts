@@ -10,7 +10,7 @@ import { TSGO_ENV_VAR, resolveTsgoPath, tsgoVersion } from "../src/extract/tsgo-
  * tests pin the fallthrough that replaces it.
  *
  * The order matters more than it looks. Step 3 answering `undefined` is what
- * keeps `bun run thicket` working from source -- there `execPath` is the Bun
+ * keeps `bun run underbrush` working from source -- there `execPath` is the Bun
  * binary, no sibling `tsgo/` exists, and stock resolution must be left alone.
  * An override rather than a fallthrough would break every developer command
  * and the determinism CI job, which runs from source deliberately.
@@ -22,7 +22,7 @@ describe("resolveTsgoPath", () => {
   it("prefers the explicit environment override", () => {
     const r = resolveTsgoPath({
       env: { [TSGO_ENV_VAR]: "/custom/tsc" },
-      execPath: "/opt/thicket/libexec/thicket",
+      execPath: "/opt/underbrush/libexec/underbrush",
       platform: "darwin",
       exists: (p) => p === "/custom/tsc",
     });
@@ -36,22 +36,22 @@ describe("resolveTsgoPath", () => {
     expect(() =>
       resolveTsgoPath({
         env: { [TSGO_ENV_VAR]: "/gone/tsc" },
-        execPath: "/opt/thicket/libexec/thicket",
+        execPath: "/opt/underbrush/libexec/underbrush",
         platform: "darwin",
         exists: noFiles,
       }),
-    ).toThrow(/THICKET_TSGO/);
+    ).toThrow(/UNDERBRUSH_TSGO/);
   });
 
   it("finds the tsgo packaged beside the executable", () => {
     const r = resolveTsgoPath({
       env: {},
-      execPath: "/opt/homebrew/Cellar/thicket/0.1.0/libexec/thicket",
+      execPath: "/opt/homebrew/Cellar/underbrush/0.1.0/libexec/underbrush",
       platform: "darwin",
-      exists: (p) => p === "/opt/homebrew/Cellar/thicket/0.1.0/libexec/tsgo/tsc",
+      exists: (p) => p === "/opt/homebrew/Cellar/underbrush/0.1.0/libexec/tsgo/tsc",
     });
     expect(r.source).toBe("packaged");
-    expect(r.path).toBe("/opt/homebrew/Cellar/thicket/0.1.0/libexec/tsgo/tsc");
+    expect(r.path).toBe("/opt/homebrew/Cellar/underbrush/0.1.0/libexec/tsgo/tsc");
   });
 
   it("leaves resolution to typescript when nothing is packaged", () => {
@@ -69,17 +69,17 @@ describe("resolveTsgoPath", () => {
 
   it("looks for tsc.exe beside the executable on Windows", () => {
     // `path: win32` is load-bearing. With the host's POSIX path module,
-    // dirname("C:\\tools\\thicket\\thicket.exe") is "." and this asserts
+    // dirname("C:\\tools\\underbrush\\underbrush.exe") is "." and this asserts
     // nothing about where the sibling lookup landed -- the old suffix-only
     // assertion passed against the relative path "tsgo/tsc.exe".
     const r = resolveTsgoPath({
       env: {},
-      execPath: "C:\\tools\\thicket\\thicket.exe",
+      execPath: "C:\\tools\\underbrush\\underbrush.exe",
       platform: "win32",
       exists: () => true,
       path: win32,
     });
-    expect(r.path).toBe("C:\\tools\\thicket\\tsgo\\tsc.exe");
+    expect(r.path).toBe("C:\\tools\\underbrush\\tsgo\\tsc.exe");
   });
 });
 
@@ -113,14 +113,14 @@ describe("tsgoVersion", () => {
 
   it("reads the version from the manifest beside the executable", () => {
     const v = tsgoVersion(
-      { path: "/opt/thicket/tsgo/tsc", source: "packaged", searched: [] },
-      io({ "/opt/thicket/tsgo/package.json": '{"version":"7.9.9-custom"}' }),
+      { path: "/opt/underbrush/tsgo/tsc", source: "packaged", searched: [] },
+      io({ "/opt/underbrush/tsgo/package.json": '{"version":"7.9.9-custom"}' }),
     );
     expect(v).toBe("7.9.9-custom");
   });
 
   it("does not trust a manifest an override brought with it", () => {
-    // The sharp case: two different $THICKET_TSGO compilers can each sit beside
+    // The sharp case: two different $UNDERBRUSH_TSGO compilers can each sit beside
     // a manifest claiming the same version -- rebuild a patched tsgo and the
     // version string does not move. Trusting it would hand both the same
     // configHash, and the warm cache would serve findings produced by the other

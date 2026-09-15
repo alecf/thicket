@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Point thicket at a monorepo root and have it analyze every workspace, with turbo-style `--filter` to narrow the run.
+**Goal:** Point Underbrush at a monorepo root and have it analyze every workspace, with turbo-style `--filter` to narrow the run.
 
 **Architecture:** A new `src/extract/workspaces.ts` reads workspace globs from the root manifest, expands them to workspace directories, applies filters, and picks each workspace's tsconfigs. It emits the `configs: string[]` the adapter already accepts, so nothing downstream changes shape. A cheap `sourceFileNames` probe in the adapter (names only, no AST materialization) drives coverage-based sibling selection without paying for a second full program load.
 
@@ -1058,8 +1058,8 @@ Two changes that must land together — the CLI is what supplies the root the ca
 // cache lands in a subpackage.
 it("keeps one cache at the analyzed root even when filtered to one workspace", async () => {
   await runReport({ dir: workspacesRoot(), filter: ["@fix/alpha"] });
-  expect(existsSync(join(workspacesRoot(), ".thicket/cache.db"))).toBe(true);
-  expect(existsSync(join(workspacesRoot(), "tools/alpha/.thicket/cache.db"))).toBe(false);
+  expect(existsSync(join(workspacesRoot(), ".underbrush/cache.db"))).toBe(true);
+  expect(existsSync(join(workspacesRoot(), "tools/alpha/.underbrush/cache.db"))).toBe(false);
 });
 
 // Filters change the finding set but must not change the config hash, or a
@@ -1106,7 +1106,7 @@ Update `USAGE` with `[dir]`, `--filter`, `--no-workspaces`.
 **Step 5: Commit**
 
 ```bash
-git commit -am "feat: thicket [dir], --filter, --no-workspaces; pin the cache to the analyzed root"
+git commit -am "feat: underbrush [dir], --filter, --no-workspaces; pin the cache to the analyzed root"
 ```
 
 ---
@@ -1235,12 +1235,12 @@ git commit -am "fix: stop advising a --config that was already passed"
 
 ### Task 10: Size-targeted granularity, confined to the multi-workspace path
 
-**Risk:** `THK-CYC-*` ids derive from module names. Changing granularity globally churns ids on ordinary repos, and finding ids are the loop's backbone (PRD §9.1). So size-targeting applies **only** when more than one workspace is in play; single-project runs keep today's `selectGranularity` exactly.
+**Risk:** `UB-CYC-*` ids derive from module names. Changing granularity globally churns ids on ordinary repos, and finding ids are the loop's backbone (PRD §9.1). So size-targeting applies **only** when more than one workspace is in play; single-project runs keep today's `selectGranularity` exactly.
 
 **The churn is now observable from a command, not hypothetical.** Since Task 8
 wired the CLI, the same tree reports `granularity: dir:3 (4 modules)` unfiltered
 and `dir:1 (2 modules)` under `--filter` — so module names, and therefore
-`THK-CYC-*` ids, already differ between scopes of the same repository. PRD §9.1
+`UB-CYC-*` ids, already differ between scopes of the same repository. PRD §9.1
 calls finding ids the loop's backbone. Reproduce this before starting, and use
 it as the acceptance test: a workspace's modules must not be renamed by the
 presence or absence of *other* workspaces in the run.
@@ -1305,7 +1305,7 @@ at run time, never committed). They differ in every way that matters: package
 manager, manifest format, root-config style.
 
 ```bash
-bun run thicket <dir> --json /tmp/ws.json > /tmp/ws.md
+bun run underbrush <dir> --json /tmp/ws.json > /tmp/ws.md
 ```
 
 | | Sample C | Sample D |
@@ -1354,7 +1354,7 @@ baseline is 4.5%).
   target, and the node path is exactly where the glob hazard above lives. Check
   whether the bun-compiled-binary work has already changed `engines` before
   editing it, so the two do not fight.
-- `README.md`: document `thicket [dir]`, `--filter`, `--no-workspaces`.
+- `README.md`: document `underbrush [dir]`, `--filter`, `--no-workspaces`.
 - `docs/PRD.md`: a short subsection under §7.1 on per-workspace granularity, noting that a workspace is a semantic boundary where directory depth is not.
 
 ```bash

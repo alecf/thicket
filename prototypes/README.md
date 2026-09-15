@@ -8,7 +8,7 @@ Run them from the root of a TypeScript repo, passing tsconfig paths:
 
 ```bash
 cd /path/to/some-typescript-repo
-node ~/projects/thicket/prototypes/ladder.mjs \
+node ~/projects/underbrush/prototypes/ladder.mjs \
   "$PWD/packages/client/tsconfig.json" \
   "$PWD/packages/server/tsconfig.json" \
   "$PWD/packages/shared/tsconfig.json"

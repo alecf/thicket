@@ -75,7 +75,7 @@ describe("sourceFileNames", () => {
     // ancestor of `commonRootDir(configs)`, so a solution config whose
     // references point DOWN (which is every one we ship) leaves the root
     // exactly where it was.
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-probe-")));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "underbrush-probe-")));
     try {
       const compilerOptions = COMPILER_OPTIONS;
       await mkdir(join(dir, "build"), { recursive: true });
@@ -107,7 +107,7 @@ describe("sourceFileNames", () => {
     // `node_modules/@typescript/...`, so the node_modules rule would catch
     // them even with this one deleted. An ambient declaration file inside the
     // project is the case where the extension is the only rule that applies.
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-probe-dts-")));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "underbrush-probe-dts-")));
     try {
       await mkdir(join(dir, "types"), { recursive: true });
       await writeFile(join(dir, "types/global.d.ts"), "declare const AMBIENT: number;\n");
@@ -141,7 +141,7 @@ describe("sourceFileNames", () => {
     // An unbuilt dependency ships TypeScript, so this is a program file like
     // any other -- and analyzing it reports duplication nobody in this repo
     // can fix.
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-probe-nm-")));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "underbrush-probe-nm-")));
     try {
       await mkdir(join(dir, "node_modules/dep"), { recursive: true });
       await writeFile(

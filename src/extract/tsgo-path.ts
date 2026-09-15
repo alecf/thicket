@@ -5,12 +5,12 @@ import { version as pinnedTypeScriptVersion } from "typescript";
 import { compareStrings } from "../order.js";
 
 /**
- * Escape hatch for pointing thicket at a different tsgo build. It changes the
- * finding set, so `tsgoVersion()` folds the answer into the config hash --
+ * Escape hatch for pointing underbrush at a different tsgo build. It changes
+ * the finding set, so `tsgoVersion()` folds the answer into the config hash --
  * otherwise a warm cache would serve a report produced by a compiler the
  * reader cannot see (AGENTS.md §4b, §5).
  */
-export const TSGO_ENV_VAR = "THICKET_TSGO";
+export const TSGO_ENV_VAR = "UNDERBRUSH_TSGO";
 
 /** Where the tsgo executable came from. */
 export type TsgoSource = "env" | "packaged" | "node_modules";
@@ -54,13 +54,13 @@ export function resolveTsgoPath(opts: {
     if (!exists(override)) {
       throw new Error(
         `${TSGO_ENV_VAR} is set to ${override}, which does not exist. ` +
-          `Unset it to use the tsgo thicket ships with.`,
+          `Unset it to use the tsgo underbrush ships with.`,
       );
     }
     return { path: override, source: "env", searched: [override] };
   }
 
-  // The packaged layout: libexec/thicket beside libexec/tsgo/tsc. `execPath`
+  // The packaged layout: libexec/underbrush beside libexec/tsgo/tsc. `execPath`
   // is used rather than `import.meta.url` because inside a compiled binary the
   // latter is `file:///$bunfs/root/cli` -- a virtual path with no filesystem
   // under it. `execPath` also resolves THROUGH the Homebrew `bin/` symlink to

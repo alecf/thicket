@@ -36,14 +36,14 @@ export interface Workspace {
  * the two ever converge rather than quietly becoming a dead justification.
  *
  * These globs come from the REPOSITORY BEING ANALYZED rather than from whoever
- * ran thicket, which is what makes the cost of a hostile one worth writing
+ * ran underbrush, which is what makes the cost of a hostile one worth writing
  * down. A glob alternating `*` with literals (`*a*a*...*ab`) backtracks
  * exponentially under node's JavaScript glob implementation and is
  * constant-time under bun's native one. Measured end to end on this function --
  * one 40-character package directory, a ten-star glob, the SAME `dist/`
  * JavaScript both times: 6.28s under node 24, 0.000s under bun 1.4. The
  * primitive alone measures 6.38s and 0.000s on that input, and `bun run
- * thicket`, which loads `src/` directly, answers in 0.010s -- so the immunity
+ * underbrush`, which loads `src/` directly, answers in 0.010s -- so the immunity
  * is a property of the RUNTIME, not of how the module is loaded.
  *
  * The node curve grows 3.1-4.0x per further star (0.52s, 2.05s, 6.38s at eight,
@@ -267,7 +267,7 @@ function matchesFilter(ws: Workspace, pattern: string): boolean {
     //
     // This is the one matcher in this file that keeps node's exponential
     // backtracking case; `discoverWorkspaces` carries the figures. Kept on
-    // purpose: thicket targets bun, where the same call is constant-time, the
+    // purpose: underbrush targets bun, where the same call is constant-time, the
     // pattern here is the user's own typing rather than the repository's, and a
     // path pattern needs real `**`-versus-`*` separator semantics that the name
     // matcher below does not implement.
@@ -298,12 +298,12 @@ function matchesFilter(ws: Workspace, pattern: string): boolean {
  *   and several on node. `discoverWorkspaces` quotes 3.1-4.0x for the glob
  *   matcher, which is a different implementation, not a disagreement. The filter is
  *   typed by the person running the tool, so this is a foot-gun rather than an
- *   attack, but "thicket hung" is the worst available way to report a pattern
+ *   attack, but "underbrush hung" is the worst available way to report a pattern
  *   that simply matches nothing. This walk is linear in the name per segment.
  *
  * `posix.matchesGlob` is not the alternative it looks like, and the reason is
  * worth keeping: it backtracks the same way under node -- 6.4s on that input --
- * and not at all under bun, whose glob is native. thicket targets bun, so THAT
+ * and not at all under bun, whose glob is native. underbrush targets bun, so THAT
  * hazard is bounded in practice and `discoverWorkspaces` documents the split in
  * full. The compiled RegExp is the one that survives the runtime choice: it is
  * slow on both, which is what decided this walk.

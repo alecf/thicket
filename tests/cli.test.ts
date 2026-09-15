@@ -58,7 +58,7 @@ afterEach(() => {
  * `tests/fixtures/` is a trap for every tool that walks this repository.
  */
 function scratchTree(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "thicket-cli-tree-"));
+  const root = mkdtempSync(join(tmpdir(), "underbrush-cli-tree-"));
   temps.push(root);
   for (const [name, text] of Object.entries(files)) {
     const path = join(root, name);
@@ -85,13 +85,13 @@ describe("main", () => {
   it("exits 0 and prints a report for a config with source files", async () => {
     const io = capture();
     expect(await main(["--config", fixtureConfig()])).toBe(0);
-    expect(io.stdout()).toContain("# thicket report");
+    expect(io.stdout()).toContain("# underbrush report");
   });
 
   it("exits non-zero when the project has no source files", async () => {
     const io = capture();
     expect(await main(["--config", emptyConfig()])).not.toBe(0);
-    expect(io.stdout()).not.toContain("# thicket report");
+    expect(io.stdout()).not.toContain("# underbrush report");
     expect(io.stderr()).toMatch(/no source files/i);
   });
 
@@ -112,7 +112,7 @@ describe("main", () => {
   /**
    * Every failure path, checked for shape rather than wording.
    *
-   * The prefix is how a harness tells thicket's own diagnostics apart from the
+   * The prefix is how a harness tells underbrush's own diagnostics apart from the
    * compiler's, and the newline is what keeps two of them from running
    * together on one line. Asserted as a property because the per-case
    * assertions above are `toMatch` on a fragment, which stays green if the
@@ -134,11 +134,11 @@ describe("main", () => {
     ["--not-a-flag"],
   ];
 
-  it.each(FAILING_INVOCATIONS)("explains itself on stderr: thicket %s %s", async (...argv) => {
+  it.each(FAILING_INVOCATIONS)("explains itself on stderr: underbrush %s %s", async (...argv) => {
     const io = capture();
     expect(await main(argv)).not.toBe(0);
     const err = io.stderr();
-    expect(err.startsWith("thicket: ")).toBe(true);
+    expect(err.startsWith("underbrush: ")).toBe(true);
     expect(err.endsWith("\n")).toBe(true);
     expect(io.stdout()).toBe("");
   });
@@ -243,7 +243,7 @@ describe("main", () => {
   });
 
   it("--no-cache leaves no cache behind and reports the same thing", async () => {
-    const { root, config } = scratchProject("thicket-cli-", temps);
+    const { root, config } = scratchProject("underbrush-cli-", temps);
     const io = capture();
     expect(await main(["--config", config, "--no-cache"])).toBe(0);
     const plain = io.stdout();
@@ -257,7 +257,7 @@ describe("main", () => {
   });
 
   it("cache clear removes the project's cache, and says so either way", async () => {
-    const { root, config } = scratchProject("thicket-cli-", temps);
+    const { root, config } = scratchProject("underbrush-cli-", temps);
     capture();
     await main(["--config", config]);
     expect(existsSync(cachePathFor(root))).toBe(true);
@@ -266,7 +266,7 @@ describe("main", () => {
     const io = capture();
     expect(await main(["cache", "clear", "--config", config])).toBe(0);
     expect(existsSync(cachePathFor(root))).toBe(false);
-    expect(existsSync(join(root, ".thicket"))).toBe(false);
+    expect(existsSync(join(root, ".underbrush"))).toBe(false);
     expect(io.stdout()).toBe("");
     expect(io.stderr()).toMatch(/cleared/);
 
@@ -297,7 +297,7 @@ describe("main [dir]", () => {
   });
 
   it("errors, naming the nearest ancestor with a project, when a directory has none", async () => {
-    // No upward search: thicket analyzes exactly where it is pointed. Saying
+    // No upward search: underbrush analyzes exactly where it is pointed. Saying
     // where the nearest project IS costs nothing and is the next command the
     // reader will type.
     const io = capture();
@@ -629,7 +629,7 @@ describe("main diff", () => {
   }
 
   it("compares two sidecars and names what was resolved", async () => {
-    const { root, config } = scratchProject("thicket-cli-", temps);
+    const { root, config } = scratchProject("underbrush-cli-", temps);
     const before = await sidecar(config, "before.json", root);
     // Delete one copy of the duplicated function.
     const beta = join(root, "src/beta.ts");
@@ -640,14 +640,14 @@ describe("main diff", () => {
     const io = capture();
     expect(await main(["diff", before, after])).toBe(0);
     expect(io.stdout()).toMatch(/[1-9]\d* findings? resolved/);
-    expect(io.stdout()).toMatch(/THK-DUP-[0-9a-f]{8}/);
+    expect(io.stdout()).toMatch(/UB-DUP-[0-9a-f]{8}/);
     expect(io.stdout()).toContain("propagation cost");
   });
 
   it("needs no tsconfig in the working directory", async () => {
     // `--config` defaults to ./tsconfig.json. A diff analyzes nothing, so
     // requiring one would break the command everywhere but a project root.
-    const { root, config } = scratchProject("thicket-cli-", temps);
+    const { root, config } = scratchProject("underbrush-cli-", temps);
     const before = await sidecar(config, "before.json", root);
     const io = capture();
     const cwd = process.cwd();
@@ -675,13 +675,13 @@ describe("main diff", () => {
   });
 
   it("names the file that is not a report", async () => {
-    const { root, config } = scratchProject("thicket-cli-", temps);
+    const { root, config } = scratchProject("underbrush-cli-", temps);
     const good = await sidecar(config, "good.json", root);
     const junk = join(root, "junk.json");
     writeFileSync(junk, `{"hello":"world"}\n`);
     const io = capture();
     expect(await main(["diff", good, junk])).not.toBe(0);
     expect(io.stderr()).toContain("junk.json");
-    expect(io.stderr()).toMatch(/not a thicket report/);
+    expect(io.stderr()).toMatch(/not an underbrush report/);
   });
 });

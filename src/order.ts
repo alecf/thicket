@@ -1,7 +1,7 @@
 /**
  * Deterministic ordering primitives.
  *
- * The report is a pure function of (source content, config, thicket version),
+ * The report is a pure function of (source content, config, underbrush version),
  * because the harness diffs report N against report N+1 to decide whether a
  * refactor made progress. Any ordering that varies by environment turns a
  * no-op run into apparent churn.

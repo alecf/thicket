@@ -366,7 +366,7 @@ describe("configsFor", () => {
     // Both configs name the same single file, so whichever loses is left out
     // for adding nothing rather than for being second: the workspace ends up
     // with exactly one config, and which one is the whole answer.
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-primary-")));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "underbrush-primary-")));
     try {
       const config = JSON.stringify({
         compilerOptions: { target: "es2022", module: "nodenext", strict: true, noEmit: true },
@@ -395,7 +395,7 @@ describe("configsFor", () => {
     // Written to a temp directory because no committed fixture can hold it --
     // it needs a config OUTSIDE the root being analyzed, and the repository
     // is the outside.
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-escape-")));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "underbrush-escape-")));
     try {
       const compilerOptions = {
         target: "es2022",

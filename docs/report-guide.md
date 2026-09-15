@@ -1,11 +1,11 @@
-# How to read a thicket report
+# How to read an Underbrush report
 
-You are an agent that has been handed a file called `thicket.md` (or similar) and
+You are an agent that has been handed a file called `underbrush.md` (or similar) and
 asked to clean something up. This page explains what is in that file, what each
 field means, and — the part that matters most — how to tell a finding worth
 acting on from one that merely scored well.
 
-thicket reports **candidates**. It does not judge and it does not edit. Deciding
+Underbrush reports **candidates**. It does not judge and it does not edit. Deciding
 what to do is your job, and this guide exists so you can decide well.
 
 ---
@@ -13,8 +13,8 @@ what to do is your job, and this guide exists so you can decide well.
 ## The shape of the report
 
 ```
-# thicket report
-thicket 0.1.0 · config 97d8d00b · 5798 files / 1533990 LOC · granularity: dir:3 (52 modules)
+# underbrush report
+underbrush 0.1.0 · config 97d8d00b · 5798 files / 1533990 LOC · granularity: dir:3 (52 modules)
 
 ## Summary                  — six numbers about the whole codebase
 > ⚠ N files are outside …   — appears only when coverage is partial
@@ -66,7 +66,7 @@ rather than repeating an instruction you have already followed.
 
 That is **not** a claim that no flag anywhere closes the gap. A config elsewhere
 in the tree may well cover those files — a repo-root `tsconfig.eslint.json`
-whose `include` spans everything is the common case — and thicket cannot say
+whose `include` spans everything is the common case — and Underbrush cannot say
 which one without loading it, so it does not guess.
 
 ---
@@ -76,13 +76,13 @@ which one without loading it, so it does not guess.
 Each finding looks like this:
 
 ````
-### THK-DUP-fc3124f7 · 19 copies × ~124 lines · ~2212 lines recoverable
+### UB-DUP-fc3124f7 · 19 copies × ~124 lines · ~2212 lines recoverable
 
 L1 · `ClassDeclaration`
 
 - **every copy imports:** `models/vitals/VitalObservation.ts` → `packages/models/src/wearables/VitalObservation.ts`
 - **varies across copies:** `loincCode` (18), `unit` (13), `junctionKey` (19)
-- **see also `THK-DUP-23e7a775`:** 81% the same shape, 5 more copies
+- **see also `UB-DUP-23e7a775`:** 81% the same shape, 5 more copies
 - **directly imported by:** 5 files outside the cluster, and 17 files more through `models/vitals/index.ts`
 
 ```ts
@@ -145,7 +145,7 @@ how many distinct values each takes. `loincCode (18)` on a 19-copy finding means
 two copies share a value, which is often a bug. This line is the parameter list
 of the abstraction the finding is asking for.
 
-**`see also THK-DUP-…:`** — another printed finding that is nearly this shape.
+**`see also UB-DUP-…:`** — another printed finding that is nearly this shape.
 Handle both together or you will make a second pass.
 
 **`directly imported by:`** — how many files outside the cluster reach into it.
@@ -168,7 +168,7 @@ is not actionable.
 
 ## Is this duplication worth removing?
 
-The honest answer is often no, and thicket cannot always tell. Use this:
+The honest answer is often no, and Underbrush cannot always tell. Use this:
 
 **Ask what varies.** If the copies differ only in the *values* of the same
 fields, they are one concept with a parameter list, and a base class or a
@@ -176,7 +176,7 @@ function absorbs them cleanly. If they differ in *field names* — one is
 `{ labOrderId, memberId, practiceId }` and the next is `{ average, min, max }` —
 they are different things that happen to share a syntax template, and the only
 abstraction available is a generic that no future change will ever benefit from.
-thicket down-ranks the second kind, but it is a weight, not a filter.
+Underbrush down-ranks the second kind, but it is a weight, not a filter.
 
 **Ask what fixing it buys.** The value of removing duplication is "fix it once,
 fixed everywhere". If nothing can ever drift — because the copies are unrelated
@@ -198,7 +198,7 @@ strongly connected component: from any module in it you can reach every other by
 following imports.
 
 ````
-### THK-CYC-a41baf77 · SCC of 12 modules under `apps/web/`
+### UB-CYC-a41baf77 · SCC of 12 modules under `apps/web/`
 
 ```mermaid
 flowchart LR
@@ -236,7 +236,7 @@ the remainder look acyclic.
 ### `file cycles:`
 
 **Read this before doing anything else in this section.** A module SCC is a
-statement about *directories*, and directories are a grouping thicket chose.
+statement about *directories*, and directories are a grouping Underbrush chose.
 
 - *"none cross these modules, so nothing here is circular at runtime"* — no file
   imports its way back to itself across these boundaries. The tangle is layering
@@ -256,13 +256,13 @@ Repoint the specifier and the edge disappears — a re-export is the same bindin
 so the program is unchanged. This is a find-and-replace. Do these first.
 
 **A cut is a decision.** It means inverting a dependency, moving code, or
-agreeing a layering. thicket names the cheapest edge that dissolves the most of
+agreeing a layering. Underbrush names the cheapest edge that dissolves the most of
 the component, and names the files carrying it, but it cannot know which
 direction is architecturally right. Treat it as a starting point, not an
 instruction — if the suggestion looks absurd (severing a component from its own
 hooks, say), it probably is, and the real fix is nearby.
 
-thicket will **not** suggest a cut that is type-only (it changes nothing that
+Underbrush will **not** suggest a cut that is type-only (it changes nothing that
 runs) or a cut for a tangle no file-level cycle underlies (there is nothing to
 break).
 
@@ -308,7 +308,7 @@ histogram tells you which.
 
 ## Working with the report
 
-**Cite finding IDs.** `THK-DUP-fc3124f7` is derived from content, not position,
+**Cite finding IDs.** `UB-DUP-fc3124f7` is derived from content, not position,
 so it survives the code being reformatted or moved. Say which finding you acted
 on.
 

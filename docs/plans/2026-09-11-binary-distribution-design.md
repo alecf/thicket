@@ -1,17 +1,17 @@
-# Compiling thicket to a binary, and shipping it
+# Compiling Underbrush to a binary, and shipping it
 
 *2026-09-11*
 
 ## The constraint everything else follows from
 
-thicket analyzes through `typescript/unstable/async`, which **spawns a native
+Underbrush analyzes through `typescript/unstable/async`, which **spawns a native
 `tsgo` child process**. Three measured facts:
 
 | | |
 |---|---|
 | `tsc` (the tsgo executable) | 23.8 MB, native, per-platform |
 | sibling `lib/*.d.ts` | 3.9 MB, ~110 files, **mandatory** |
-| bun-compiled thicket | 62–83 MB depending on target |
+| bun-compiled Underbrush | 62–83 MB depending on target |
 
 The declaration files are not optional. Stripping them does not degrade
 analysis, it panics the compiler before it answers anything:
@@ -25,7 +25,7 @@ So a single self-contained file was never available for free. `bun build
 but running it fails immediately:
 
 ```
-thicket: analysis failed: ENOENT: no such file or directory, open '/$bunfs/package.json'
+underbrush: analysis failed: ENOENT: no such file or directory, open '/$bunfs/package.json'
 ```
 
 `typescript` finds tsgo by reading its own `package.json` relative to
@@ -50,7 +50,7 @@ which suits a tool whose output is contractually a pure function of
 Layout is flat so a formula can `libexec.install Dir["*"]` and symlink:
 
 ```
-thicket            the CLI binary
+underbrush         the CLI binary
 tsgo/tsc           the native compiler
 tsgo/lib.*.d.ts    its standard library
 tsgo/package.json  read at runtime for the version
@@ -60,7 +60,7 @@ tsgo/package.json  read at runtime for the version
 
 `src/extract/tsgo-path.ts`:
 
-1. `$THICKET_TSGO` — explicit override; **throws** if it points nowhere, because
+1. `$UNDERBRUSH_TSGO` — explicit override; **throws** if it points nowhere, because
    an override that silently degrades to a different compiler changes the report
    while the reader believes they pinned one.
 2. `dirname(process.execPath)/tsgo/tsc` — the packaged layout.
@@ -68,12 +68,12 @@ tsgo/package.json  read at runtime for the version
 
 Step 3 is the one that matters day to day. From source, `process.execPath` is
 the Bun binary, no sibling `tsgo/` exists, and stock resolution is untouched — so
-`bun run thicket` and the determinism CI job are unaffected. An override rather
+`bun run underbrush` and the determinism CI job are unaffected. An override rather
 than a fallthrough would have broken both.
 
 `process.execPath` rather than `import.meta.url` for two reasons: the latter is
 virtual inside a bundle, and the former resolves *through* a symlink to the real
-file, which is the only reason `bin/thicket → ../libexec/thicket` works.
+file, which is the only reason `bin/underbrush → ../libexec/underbrush` works.
 
 ### The tsgo version joins the config hash
 
@@ -118,7 +118,7 @@ while the artifacts move underneath it.
 **GitHub Releases** — the substrate the tap pulls from. Four tarballs, a
 `checksums.txt`, and the formula.
 
-**npm** — the shape `typescript` itself uses: a thin `thicket` whose
+**npm** — the shape `typescript` itself uses: a thin `underbrush` whose
 `optionalDependencies` are per-platform packages gated by `os`/`cpu`, so exactly
 one installs. Each platform package *is* the tarball layout, so `tsgo-path.ts`
 resolves it with no npm-specific code path. `typescript` is an **optional peer**,
@@ -141,7 +141,7 @@ Three bugs, all of which exit 0 — the dangerous kind.
 
 Hence the `package` CI job: extract the tarball into a Homebrew-shaped prefix,
 invoke it through the `bin/` symlink **from outside the checkout**, and require
-byte-identical output to `bun run thicket`. Running it from outside is the
+byte-identical output to `bun run underbrush`. Running it from outside is the
 point — inside, a stray `node_modules` satisfies the resolution the packaged
 layout is supposed to satisfy alone, and the job passes while the artifact is
 broken for everyone.

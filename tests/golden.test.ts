@@ -5,7 +5,7 @@ import { fixtureConfig, scratchProject } from "./helpers.js";
 
 /**
  * The report is contractually a pure function of (source content, config,
- * thicket version) — PRD §9.4. Every other test asserts a property of the
+ * underbrush version) — PRD §9.4. Every other test asserts a property of the
  * output; this one pins the output itself, which is the only way a change that
  * quietly reorders or reformats something shows up as a diff rather than as
  * phantom churn in somebody's loop three weeks later.
@@ -58,7 +58,7 @@ describe("golden report", () => {
     // it costs one extra run to keep proving it on the exact bytes a harness
     // reads, against a file that is checked in and therefore reviewable.
     const golden = readFileSync(GOLDEN, "utf8");
-    const { config } = scratchProject("thicket-golden-", temps);
+    const { config } = scratchProject("underbrush-golden-", temps);
 
     const cold = await runReport({ ...OPTIONS, config, cache: false });
     const primed = await runReport({ ...OPTIONS, config, cache: true }); // writes
@@ -77,7 +77,7 @@ describe("golden report", () => {
     // The outer fence must be longer than the ```ts fences the report itself
     // now contains, so this matches a run of at least four backticks and
     // requires the closing run to be the same one.
-    const example = readme.match(/(`{4,})markdown\n(# thicket report\n[\s\S]*?)\1/);
+    const example = readme.match(/(`{4,})markdown\n(# underbrush report\n[\s\S]*?)\1/);
     expect(example).not.toBeNull();
     expect(example![2]).toBe(readFileSync(GOLDEN, "utf8"));
   });
@@ -89,7 +89,7 @@ describe("golden report", () => {
     const golden = readFileSync(GOLDEN, "utf8");
     const { json } = await runReport({ ...OPTIONS, cache: false });
 
-    expect(golden.startsWith("# thicket report\n")).toBe(true);
+    expect(golden.startsWith("# underbrush report\n")).toBe(true);
     expect(golden.endsWith("\n")).toBe(true);
     expect(golden).not.toContain("\r\n"); // CI compares Linux and macOS bytes
     expect(golden).not.toMatch(/^\//m); // no absolute paths
@@ -98,7 +98,7 @@ describe("golden report", () => {
 
     // Every finding id in the golden is one the run actually produced...
     const ids = new Set([...json.duplication.map((d) => d.id), ...json.cycles.map((c) => c.id)]);
-    const printed = golden.match(/THK-[A-Z]{3}-[0-9a-f]{8}/g) ?? [];
+    const printed = golden.match(/UB-[A-Z]{3}-[0-9a-f]{8}/g) ?? [];
     expect(printed.length).toBeGreaterThan(0);
     for (const id of printed) expect(ids.has(id)).toBe(true);
 

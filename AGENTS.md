@@ -4,11 +4,11 @@ Guidance for AI agents (and humans) working in this repository.
 
 ## What this is
 
-`thicket` is a CLI that analyzes a TypeScript codebase and emits a deterministic plaintext complexity report for an LLM to consume inside a refactoring loop. It reports **candidates**; something else does the judging and the editing.
+`underbrush` is a CLI that analyzes a TypeScript codebase and emits a deterministic plaintext complexity report for an LLM to consume inside a refactoring loop. It reports **candidates**; something else does the judging and the editing.
 
 **Read [`docs/PRD.md`](docs/PRD.md) before making design decisions.** Nearly every choice in it is backed by a measurement, and several of those measurements overturned the obvious answer. If you find yourself about to argue for Go, tree-sitter, or embeddings, the PRD already covers why each was rejected.
 
-Work is tracked in [`docs/plans/2026-08-09-thicket-v1.md`](docs/plans/2026-08-09-thicket-v1.md).
+Work is tracked in [`docs/plans/2026-08-09-underbrush-v1.md`](docs/plans/2026-08-09-underbrush-v1.md).
 
 ## Layout
 
@@ -26,7 +26,7 @@ prototypes/      research scripts (NOT the implementation — see prototypes/REA
 
 ```bash
 bun install
-bun run thicket --config <tsconfig>   # runs src/cli.ts live; no build step
+bun run underbrush --config <tsconfig>   # runs src/cli.ts live; no build step
 bun install --frozen-lockfile --os='*' --cpu='*'   # every platform's tsgo
 bun run build          # compile a binary for THIS platform into dist-bin/
 bun run build:all      # ...and for all four; one host builds the whole matrix
@@ -45,7 +45,7 @@ bundled JS fallback shipped in the npm package still runs under Node ≥24.
 
 ### 1. Determinism is a correctness property
 
-The report must be a pure function of `(source content, config, thicket version)`. Two runs over the same tree must produce byte-identical output, because the whole point is diffing reports across loop iterations.
+The report must be a pure function of `(source content, config, underbrush version)`. Two runs over the same tree must produce byte-identical output, because the whole point is diffing reports across loop iterations.
 
 - Sort every collection before emitting; break ties explicitly (`score desc, id asc`).
 - **Never use `localeCompare`.** Sort strings with `compareStrings` from `src/order.ts`. `localeCompare` depends on the host's ICU data and `LANG`/`LC_ALL`, and it disagrees with code-unit order on inputs we handle constantly — under `en-US`, `"src/Util.ts"` sorts *after* `"src/alpha.ts"` because collation folds case. Any repo with a capitalized filename hits this on the first sort, and two machines then emit differently-ordered reports from identical source.
@@ -128,7 +128,7 @@ the reader cannot see.
 
 ### 5. The cache may never change the answer
 
-`.thicket/cache.db` stores whole fragments — position, size, kind, **and both
+`.underbrush/cache.db` stores whole fragments — position, size, kind, **and both
 normalization hashes on one row** — because clustering decides whether an L1
 finding is genuinely coarser than L0 by asking which L0 shape each member had.
 Split the levels into separate rows and that question becomes unanswerable, so
@@ -178,7 +178,7 @@ and it cannot be engineered away from this side.
   virtual inside a bundle. `execPath` also resolves *through* a symlink to the
   real file, which is the only reason a Homebrew `bin/` → `libexec/` symlink
   works at all.
-- **Resolution is a fallthrough, not an override.** `$THICKET_TSGO`, then
+- **Resolution is a fallthrough, not an override.** `$UNDERBRUSH_TSGO`, then
   `<dirname(execPath)>/tsgo/tsc`, then `undefined` to mean "let `typescript`
   resolve it as it always has". Drop that third step and every developer command
   breaks, along with the determinism job, which runs from source deliberately.

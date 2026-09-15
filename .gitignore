@@ -10,7 +10,7 @@ node_modules/
 # fixture from the repo and the exclusion test then passes vacuously.
 !tests/fixtures/**/dist/
 *.tsbuildinfo
-.thicket/
+.underbrush/
 .DS_Store
 site/dist/
 

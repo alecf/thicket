@@ -134,7 +134,7 @@ describe("openProject: JSON is data, not source", () => {
     // of the top findings -- clusters of identical array literals inside one
     // data file, which is duplication only in the sense that a phone book
     // repeats itself. It also put 126k lines into the reported LOC.
-    const dir = await mkdtemp(join(tmpdir(), "thicket-json-"));
+    const dir = await mkdtemp(join(tmpdir(), "underbrush-json-"));
     try {
       await writeFile(
         join(dir, "codes.json"),

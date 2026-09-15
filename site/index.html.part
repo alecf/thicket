@@ -2,26 +2,26 @@
   <img class="mark" src="icon.svg" alt="" width="88" height="88">
   <h1>Find what is tangled.</h1>
   <p class="lede">
-    <strong>thicket</strong> analyzes a TypeScript codebase and emits a deterministic plaintext
+    <strong>underbrush</strong> analyzes a TypeScript codebase and emits a deterministic plaintext
     report of where it repeats itself and where its modules depend on each other in circles.
     It reports candidates. Something else does the judging and the editing.
   </p>
   <div class="cta">
     <a class="primary" href="report-guide.html">How to read a report</a>
     <a href="example.html">See an example</a>
-    <a href="https://github.com/alecf/thicket">GitHub</a>
+    <a href="https://github.com/alecf/underbrush">GitHub</a>
   </div>
 </section>
 
 <section class="prose">
   <h2 id="quick-start">Quick start</h2>
-  <pre><code class="language-bash">brew install alecf/tap/thicket
+  <pre><code class="language-bash">brew install alecf/tap/underbrush
 
-thicket --config tsconfig.json &gt; thicket.md</code></pre>
+underbrush --config tsconfig.json &gt; underbrush.md</code></pre>
   <p>
     Or download a tarball from
-    <a href="https://github.com/alecf/thicket/releases">Releases</a> and put the
-    <code>thicket</code> binary on your <code>PATH</code> — a symlink is fine, it finds its own
+    <a href="https://github.com/alecf/underbrush/releases">Releases</a> and put the
+    <code>underbrush</code> binary on your <code>PATH</code> — a symlink is fine, it finds its own
     files through one. Prebuilt for macOS and Linux, on arm64 and x64; nothing to compile and no
     runtime to install, because the binary carries its own.
   </p>
@@ -31,9 +31,9 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
   </p>
   <blockquote>
     <p>
-    The download is a <em>directory</em>, not a lone file. thicket analyzes through the
+    The download is a <em>directory</em>, not a lone file. Underbrush analyzes through the
     TypeScript compiler's native <code>tsgo</code> binary, which it spawns as a child process, so
-    the tarball carries <code>tsgo/</code> beside the executable. Keep them together — thicket
+    the tarball carries <code>tsgo/</code> beside the executable. Keep them together — underbrush
     locates <code>tsgo/</code> relative to itself, resolving through symlinks, so installing
     anywhere and linking onto your <code>PATH</code> works; copying the binary out on its own
     does not.
@@ -44,7 +44,7 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
   <p>
     Every report opens with a link to a
     <a href="report-guide.md">field-by-field guide in raw Markdown</a>. Point a coding agent at
-    <code>thicket.md</code> and tell it to clean something up: it can fetch that URL and learn
+    <code>underbrush.md</code> and tell it to clean something up: it can fetch that URL and learn
     what each section means, what the numbers count, and — the part that matters — how to tell
     a finding worth acting on from one that merely scored well.
   </p>
@@ -72,7 +72,7 @@ thicket --config tsconfig.json &gt; thicket.md</code></pre>
   <div class="card">
     <h3>Cheap fixes first</h3>
     <p>
-      An edge whose imports are re-exported from elsewhere is routing, not dependency. thicket
+      An edge whose imports are re-exported from elsewhere is routing, not dependency. Underbrush
       names those separately, because repointing a specifier is a find-and-replace and cutting a
       dependency is a decision.
     </p>

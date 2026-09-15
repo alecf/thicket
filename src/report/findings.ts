@@ -9,5 +9,5 @@ export type FindingKind = "DUP" | "CYC" | "INV";
  * See PRD §9.1.
  */
 export function findingId(kind: FindingKind, contentKey: string): string {
-  return `THK-${kind}-${hash(contentKey).slice(0, 8)}`;
+  return `UB-${kind}-${hash(contentKey).slice(0, 8)}`;
 }

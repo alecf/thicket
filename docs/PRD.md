@@ -1,16 +1,16 @@
-# thicket — Technical PRD
+# Underbrush — Technical PRD
 
 **Status:** Reviewed, decisions resolved · **Date:** 2026-08-09 · **Scope:** high-level technical plan (implementation plan follows separately)
 
 ## 1. Purpose
 
-`thicket` is a CLI that analyzes a TypeScript codebase and emits a **deterministic plaintext complexity report** for consumption by an LLM inside a refactoring loop.
+`underbrush` is a CLI that analyzes a TypeScript codebase and emits a **deterministic plaintext complexity report** for consumption by an LLM inside a refactoring loop.
 
 ```
-thicket report → LLM picks targets → LLM refactors → thicket report → …
+underbrush report → LLM picks targets → LLM refactors → underbrush report → …
 ```
 
-The harness decides when progress is sufficient and when to open PRs. `thicket` never judges, never edits, never opens PRs. It produces **ranked candidates with precise locations** and a small set of **scalar metrics** the harness can watch trend across iterations.
+The harness decides when progress is sufficient and when to open PRs. `underbrush` never judges, never edits, never opens PRs. It produces **ranked candidates with precise locations** and a small set of **scalar metrics** the harness can watch trend across iterations.
 
 ### 1.1 The central thesis: ranking is the bottleneck, not recall
 
@@ -72,7 +72,7 @@ Go was the starting assumption. The measurements don't support it:
 - The only good TypeScript frontend is Node-only. Reaching it from Go means reimplementing an *unstable* JSON-RPC + binary AST protocol under a tool designed to run in a loop.
 - The AST path is already fast enough in Node (§2.2).
 - The CPU-bound stages operate on **thousands** of fragment shapes and **hundreds** of modules — not millions of nodes.
-- Distribution: `npx thicket`. Every target user has Node; they're analyzing a TypeScript codebase.
+- Distribution: `npx underbrush`. Every target user has Node; they're analyzing a TypeScript codebase.
 
 Pipeline stages remain separable, so a hot stage can be relocated later if profiling ever justifies it.
 
@@ -151,7 +151,7 @@ Both repos: tests are 17–21% of files but only **14% of duplicated mass**. 78�
 | Parallelism | `worker_threads` for fingerprinting | Per-file work is embarrassingly parallel |
 | Output | Compact Markdown + `--json` sidecar | §9 |
 
-**Zero native dependencies.** Cutting embeddings (§11.4) removed ONNX Runtime, the 307 MB model, `sqlite-vec`, and the vector index. `thicket` is now pure JS over Node built-ins plus the pinned `typescript` nightly.
+**Zero native dependencies.** Cutting embeddings (§11.4) removed ONNX Runtime, the 307 MB model, `sqlite-vec`, and the vector index. `underbrush` is now pure JS over Node built-ins plus the pinned `typescript` nightly.
 
 **Rejected:** Go (§2.3) · tree-sitter (approximate syntax, no types, and its premise — the real compiler being unreachable — is false) · forking typescript-go (rebase treadmill for an API arriving in ~2 months) · libSQL/Turso (vector storage no longer needed at all).
 
@@ -160,7 +160,7 @@ Both repos: tests are 17–21% of files but only **14% of duplicated mass**. 78�
 ## 4. Architecture
 
 ```
-thicket <command> [--depth N] [--budget-tokens N] [--granularity G]
+underbrush <command> [--depth N] [--budget-tokens N] [--granularity G]
 
   ┌─ extract ──────────────────────────────────────────┐
   │ TS API adapter → files → fragments, symbols, edges │
@@ -279,7 +279,7 @@ The always-same-argument check is the standout: a genuine whole-program fact, in
 
 ### 7.1 Adaptive granularity
 
-Given §2.6, granularity cannot be a fixed default. `thicket` **selects the granularity whose module count lands nearest √(file count), clamped to [8, 64]**, after stripping the longest common directory prefix.
+Given §2.6, granularity cannot be a fixed default. `underbrush` **selects the granularity whose module count lands nearest √(file count), clamped to [8, 64]**, after stripping the longest common directory prefix.
 
 Candidate granularities, coarse to fine: tsconfig project → `package.json` → directory depth 1..N → file. `--depth` shifts the target band; `--granularity` overrides explicitly.
 
@@ -349,7 +349,7 @@ happen anyway.
 
 ### 8.2 Invalidation
 
-Keyed on per-file `content_hash` plus a global `config_hash` (thicket version + normalization rules + thresholds). A config change invalidates derived tables; `thicket cache clear` resets everything.
+Keyed on per-file `content_hash` plus a global `config_hash` (Underbrush version + normalization rules + thresholds). A config change invalidates derived tables; `underbrush cache clear` resets everything.
 
 ---
 
@@ -360,13 +360,13 @@ Keyed on per-file `content_hash` plus a global `config_hash` (thicket version + 
 Each finding gets an ID derived from its *content*, not its position:
 
 ```
-THK-DUP-a3f9c210    THK-CYC-77b1e004    THK-INV-2c8d9f31
+UB-DUP-a3f9c210    UB-CYC-77b1e004    UB-INV-2c8d9f31
 ```
 
 This makes reports **diffable across iterations**, letting the harness detect real progress rather than churn:
 
 ```
-thicket diff before.json after.json
+underbrush diff before.json after.json
   → 3 findings resolved, 1 new, duplicated mass −12%, propagation cost 0.34 → 0.29
 ```
 
@@ -375,8 +375,8 @@ thicket diff before.json after.json
 Compact Markdown — parsed natively by LLMs, debuggable by humans, no decorative nesting.
 
 ```
-# thicket report
-thicket 0.1.0 · config 8f2a1c · 412 files / 84k LOC · granularity: dir:2 (18 modules)
+# underbrush report
+underbrush 0.1.0 · config 8f2a1c · 412 files / 84k LOC · granularity: dir:2 (18 modules)
 
 ## Summary
   duplicated mass      18,240 nodes (7.2%)   [prev 20,700 ▼ 11.9%]
@@ -385,22 +385,22 @@ thicket 0.1.0 · config 8f2a1c · 412 files / 84k LOC · granularity: dir:2 (18 
   findings             38 of 495 shown (dup 24 · tangle 6 · simplify 8)
 
 ## Duplication
-### THK-DUP-a3f9c210 · score 812 · L1 · 5 copies × 34 nodes
+### UB-DUP-a3f9c210 · score 812 · L1 · 5 copies × 34 nodes
   client/src/textures/atlas.ts:211,335,378,383  shared/src/mobs/hostile.ts:26
   ArrowFunction, identical modulo identifiers.
 
-### THK-DUP-1e77b204 · score 640 · L3 · 3 near-miss · Jaccard 0.81  [mixed]
+### UB-DUP-1e77b204 · score 640 · L3 · 3 near-miss · Jaccard 0.81  [mixed]
   shared/src/crafting.ts:88  shared/src/crafting.test.ts:34,50
 
 ## Module tangle
-### THK-CYC-77b1e004 · SCC of 6 modules
+### UB-CYC-77b1e004 · SCC of 6 modules
   cycle: shared/blocks → server/world → shared/entities → shared/blocks
   suggested cuts (2 edges): server/world→shared/entities, client/net→server/world
-  ⚠ these modules share 4 duplicate clusters (THK-DUP-a3f9c210, …)
+  ⚠ these modules share 4 duplicate clusters (UB-DUP-a3f9c210, …)
     → extract to a leaf module; the cycle dissolves
 
 ## Simplification
-### THK-INV-2c8d9f31 · parameter always constant
+### UB-INV-2c8d9f31 · parameter always constant
   server/src/plugin-api.ts:88 `registerPlugin(name, opts, strict)`
   `strict` is `true` at all 7 call sites.
 
@@ -418,7 +418,7 @@ Budget is likely the more useful knob: the harness knows its context window, not
 
 ### 9.4 Determinism guarantees
 
-The report is a pure function of `(source content, config, thicket version)`:
+The report is a pure function of `(source content, config, underbrush version)`:
 
 - Fixed hash and MinHash seeds; no reliance on Map insertion order
 - All collections sorted before emission; ties broken by `(score desc, id asc)`
@@ -464,7 +464,7 @@ The report is a pure function of `(source content, config, thicket version)`:
 3. Module graph: adaptive granularity, Tarjan SCC, propagation cost
 4. Content-addressed cache
 5. Ranked report with stable IDs, `--budget-tokens`, `--json`
-6. `thicket diff`
+6. `underbrush diff`
 
 **Then, in order:**
 

@@ -41,10 +41,10 @@ const ranked = (id: string, over: Partial<Ranked> = {}): Ranked => ({
 });
 
 const base: ReportInput = reportInput({
-  duplication: [ranked("THK-DUP-1")],
+  duplication: [ranked("UB-DUP-1")],
   cycles: [
     {
-      id: "THK-CYC-1",
+      id: "UB-CYC-1",
       modules: ["core", "ui"],
       edges: [
         edge("core", "ui", 4),
@@ -169,7 +169,7 @@ describe("code excerpts", () => {
     const tsx = renderMarkdown({
       ...base,
       duplication: [
-        ranked("THK-DUP-tsx", {
+        ranked("UB-DUP-tsx", {
           cluster: { ...ranked("x").cluster, occurrences: [occurrence("src/App.tsx", 4)] },
         }),
       ],
@@ -183,7 +183,7 @@ describe("code excerpts", () => {
     const out = renderMarkdown({
       ...base,
       duplication: [
-        ranked("THK-DUP-tick", { excerpt: ["const md = `", "```ts", "x", "`;"] }),
+        ranked("UB-DUP-tick", { excerpt: ["const md = `", "```ts", "x", "`;"] }),
       ],
     });
     expect(out).toContain("````ts\n");
@@ -199,7 +199,7 @@ describe("occurrence lists", () => {
   });
 
   it("counts the files it withheld when a cap is configured", () => {
-    const many = ranked("THK-DUP-many", {
+    const many = ranked("UB-DUP-many", {
       cluster: {
         ...ranked("x").cluster,
         occurrences: Array.from({ length: 40 }, (_, i) =>

@@ -8,7 +8,7 @@ import type { ShapedFragment } from "../src/fingerprint/shape.js";
 
 const temps: string[] = [];
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "thicket-cache-"));
+  const dir = mkdtempSync(join(tmpdir(), "underbrush-cache-"));
   temps.push(dir);
   return dir;
 }
@@ -119,7 +119,7 @@ describe("openCache", () => {
     const cache = openCache(path, "config-1")!;
     cache.replaceFile("a.ts", "h1", [frag()]);
     cache.close();
-    // Stand in for a cache written by a future thicket whose row format we
+    // Stand in for a cache written by a future underbrush whose row format we
     // cannot read. Poked directly, because nothing in the API can produce it.
     const db = new DatabaseSync(path);
     db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(

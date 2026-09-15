@@ -1,4 +1,4 @@
-// Prototype of thicket pillar 1: deterministic structural duplication via
+// Prototype of underbrush pillar 1: deterministic structural duplication via
 // normalized post-order Merkle hashing of every AST subtree.
 import { API } from "typescript/unstable/sync";
 import { SyntaxKind } from "typescript/unstable/ast";

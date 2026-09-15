@@ -30,7 +30,7 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as 
   dependencies: Record<string, string>;
 };
 const VERSION = pkg.version;
-const SCOPE = "@thicket";
+const SCOPE = "@underbrush";
 
 const PLATFORMS = [
   { platform: "darwin", arch: "arm64" },
@@ -39,7 +39,7 @@ const PLATFORMS = [
   { platform: "linux", arch: "arm64" },
 ] as const;
 
-const REPOSITORY = { type: "git", url: "git+https://github.com/alecf/thicket.git" };
+const REPOSITORY = { type: "git", url: "git+https://github.com/alecf/underbrush.git" };
 
 rmSync(outRoot, { recursive: true, force: true });
 mkdirSync(outRoot, { recursive: true });
@@ -48,14 +48,14 @@ mkdirSync(outRoot, { recursive: true });
 
 const optionalDependencies: Record<string, string> = {};
 for (const { platform, arch } of PLATFORMS) {
-  const source = join(binRoot, `thicket-${VERSION}-${platform}-${arch}`);
+  const source = join(binRoot, `underbrush-${VERSION}-${platform}-${arch}`);
   if (!existsSync(source)) {
     throw new Error(`missing ${source}. Run \`bun run build:all\` first.`);
   }
-  const name = `${SCOPE}/thicket-${platform}-${arch}`;
-  const dest = join(outRoot, `thicket-${platform}-${arch}`);
+  const name = `${SCOPE}/underbrush-${platform}-${arch}`;
+  const dest = join(outRoot, `underbrush-${platform}-${arch}`);
   mkdirSync(dest, { recursive: true });
-  cpSync(join(source, "thicket"), join(dest, "thicket"));
+  cpSync(join(source, "underbrush"), join(dest, "underbrush"));
   cpSync(join(source, "tsgo"), join(dest, "tsgo"), { recursive: true });
   cpSync(join(repoRoot, "LICENSE"), join(dest, "LICENSE"));
   writeFileSync(
@@ -76,7 +76,7 @@ for (const { platform, arch } of PLATFORMS) {
         // skips them there. Older clients still install it, which is why the
         // launcher also falls back when the binary will not start.
         ...(platform === "linux" ? { libc: ["glibc"] } : {}),
-        files: ["thicket", "tsgo", "LICENSE"],
+        files: ["underbrush", "tsgo", "LICENSE"],
       },
       null,
       2,
@@ -88,7 +88,7 @@ for (const { platform, arch } of PLATFORMS) {
 
 // ---- the thin package -----------------------------------------------------
 
-const thin = join(outRoot, "thicket");
+const thin = join(outRoot, "underbrush");
 mkdirSync(join(thin, "bin"), { recursive: true });
 
 // `typescript` stays external so the fallback uses the one npm resolved rather
@@ -113,7 +113,7 @@ const build = spawnSync(
 if (build.status !== 0) throw new Error("failed to bundle the node fallback");
 
 writeFileSync(
-  join(thin, "bin", "thicket.js"),
+  join(thin, "bin", "underbrush.js"),
   `#!/usr/bin/env node
 /**
  * Runs the per-platform binary npm installed, or explains why it could not.
@@ -128,8 +128,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const pkg = \`${SCOPE}/thicket-\${process.platform}-\${process.arch}\`;
-const exeName = process.platform === "win32" ? "thicket.exe" : "thicket";
+const pkg = \`${SCOPE}/underbrush-\${process.platform}-\${process.arch}\`;
+const exeName = process.platform === "win32" ? "underbrush.exe" : "underbrush";
 
 function run(command, args) {
   const r = spawnSync(command, args, { stdio: "inherit" });
@@ -147,7 +147,7 @@ try {
 let binaryFailed = false;
 if (exe) {
   const r = spawnSync(exe, process.argv.slice(2), { stdio: "inherit" });
-  // A binary that RAN and exited non-zero is thicket's own exit code, and must
+  // A binary that RAN and exited non-zero is underbrush's own exit code, and must
   // be passed through untouched.
   if (!r.error) process.exit(r.status ?? 1);
   // A binary that could not START is a different thing: npm's os/cpu matching
@@ -156,7 +156,7 @@ if (exe) {
   // the JS fallback could have served, so fall through to it.
   binaryFailed = true;
   console.error(
-    \`thicket: the prebuilt binary would not start (\${r.error.code ?? r.error.message}); \` +
+    \`underbrush: the prebuilt binary would not start (\${r.error.code ?? r.error.message}); \` +
       \`falling back to the JavaScript implementation.\`,
   );
 }
@@ -171,8 +171,8 @@ try {
   // start -- the musl case -- sends the reader to the wrong problem entirely.
   console.error(
     (binaryFailed
-      ? \`thicket: the prebuilt binary for \${process.platform}-\${process.arch} would not run, and the\\n\`
-      : \`thicket: no prebuilt binary for \${process.platform}-\${process.arch}, and the\\n\`) +
+      ? \`underbrush: the prebuilt binary for \${process.platform}-\${process.arch} would not run, and the\\n\`
+      : \`underbrush: no prebuilt binary for \${process.platform}-\${process.arch}, and the\\n\`) +
       \`JavaScript fallback needs the 'typescript' package. Install it with:\\n\\n\` +
       \`  npm install typescript@${pkg.dependencies.typescript}\\n\`,
   );
@@ -195,13 +195,13 @@ writeFileSync(
   join(thin, "package.json"),
   JSON.stringify(
     {
-      name: "thicket",
+      name: "underbrush",
       version: VERSION,
       description: pkg.description,
       license: "MIT",
       repository: REPOSITORY,
       type: "module",
-      bin: { thicket: "./bin/thicket.js" },
+      bin: { underbrush: "./bin/underbrush.js" },
       files: ["bin", "fallback.js", "README.md", "LICENSE"],
       engines: { node: ">=24" },
       optionalDependencies,
@@ -216,5 +216,5 @@ writeFileSync(
   ) + "\n",
 );
 
-process.stdout.write(`  thicket (thin, fallback + ${Object.keys(optionalDependencies).length} optional deps)\n`);
+process.stdout.write(`  underbrush (thin, fallback + ${Object.keys(optionalDependencies).length} optional deps)\n`);
 process.stdout.write(`\nnpm packages staged in dist-npm/\n`);

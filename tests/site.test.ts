@@ -24,7 +24,7 @@ describe("the site build", () => {
   });
 
   it("serves the report guide as unaltered Markdown", () => {
-    // Load-bearing: every report thicket emits links to this exact URL, and
+    // Load-bearing: every report underbrush emits links to this exact URL, and
     // the reader on the other end is a model that expects Markdown. Rendering
     // it to HTML at that path, or letting it drift from the source, breaks the
     // one integration the report promises.
@@ -35,7 +35,7 @@ describe("the site build", () => {
   it("publishes the guide at the URL the report prints", () => {
     const markdown = readFileSync(join(repo, "src/report/markdown.ts"), "utf8");
     const url = /const GUIDE_URL = "([^"]+)"/.exec(markdown)?.[1];
-    expect(url).toBe("https://alecf.github.io/thicket/report-guide.md");
+    expect(url).toBe("https://alecf.github.io/underbrush/report-guide.md");
     // The path after the site root must be a file the build actually writes.
     expect(emitted).toContain(url!.split("/").pop());
   });
@@ -45,8 +45,8 @@ describe("the site build", () => {
     // page is generated from the same fixture report the suite pins.
     const golden = readFileSync(join(repo, "tests/golden/sample-report.md"), "utf8");
     const html = read("example.html");
-    expect(golden).toContain("THK-DUP-");
-    for (const id of golden.match(/THK-(?:DUP|CYC)-[0-9a-f]{8}/g) ?? []) {
+    expect(golden).toContain("UB-DUP-");
+    for (const id of golden.match(/UB-(?:DUP|CYC)-[0-9a-f]{8}/g) ?? []) {
       expect(html).toContain(id);
     }
   });
@@ -118,14 +118,14 @@ describe("the Markdown subset the site renders", () => {
   });
 
   it("renders a blockquote as a blockquote", () => {
-    // The scope warning is the only blockquote thicket emits, and it is the
+    // The scope warning is the only blockquote underbrush emits, and it is the
     // one block a reader must not miss.
     expect(markdownToHtml("> **warning** text")).toContain("<blockquote>");
   });
 });
 
 /**
- * The site and the README both tell a newcomer how to install thicket, and
+ * The site and the README both tell a newcomer how to install underbrush, and
  * they drifted the moment one of them was updated: the README moved to `brew`
  * while the landing page still said `npm run build && node dist/cli.js` --
  * naming a file the build had stopped producing entirely. Neither page is
@@ -138,7 +138,7 @@ describe("install instructions", () => {
   it("agrees with the README on the install command", () => {
     const fromReadme = /brew install (\S+)/.exec(readme)?.[1];
     const fromSite = /brew install (\S+)/.exec(landing)?.[1];
-    expect(fromReadme).toBe("alecf/tap/thicket");
+    expect(fromReadme).toBe("alecf/tap/underbrush");
     expect(fromSite).toBe(fromReadme);
   });
 

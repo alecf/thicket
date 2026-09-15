@@ -19,7 +19,7 @@ import { join } from "node:path";
  * Nothing about the layout is built in. `apps`, `packages` and `services` are
  * strings that appear in other people's manifests, never in this file.
  *
- * This is also where manifest formats meet: every one thicket understands is
+ * This is also where manifest formats meet: every one underbrush understands is
  * tried here, in precedence order, and each knows only its own file. Inline the
  * delegation into whichever helper happens to be the only one left and the
  * public contract above -- `undefined` versus `[]`, declaration order, nothing
@@ -272,7 +272,7 @@ export interface ManifestProblem {
  * single-project run this tool has ever had.
  *
  * The three shapes that ARE reported are the ones where a reader's
- * expectation and thicket's answer differ:
+ * expectation and underbrush's answer differ:
  *
  *  - a `package.json` that is not JSON at all;
  *  - a `workspaces` key holding something other than a list (or a yarn-v1
@@ -294,7 +294,7 @@ export function manifestProblems(root: string): ManifestProblem[] {
       const ws = (parsed as { workspaces?: unknown })?.workspaces;
       const list = declaredList(ws);
       if (ws !== undefined && list === undefined) {
-        out.push({ path: pkg, reason: `declares "workspaces" in a shape thicket cannot read` });
+        out.push({ path: pkg, reason: `declares "workspaces" in a shape underbrush cannot read` });
       } else if (list !== undefined) {
         const dropped = list.length - strings(list).length;
         if (dropped > 0) {

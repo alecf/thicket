@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "thicket",
+      "name": "underbrush",
       "dependencies": {
         "typescript": "7.1.0-dev.20260808.1",
         "xxhash-wasm": "^1.1.0",

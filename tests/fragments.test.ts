@@ -31,7 +31,7 @@ describe("extractFragments", () => {
     // took two of the top five report slots, the largest being a destructured
     // parameter list repeated across 136 files -- which is what passing the
     // same seven things around looks like, not an actionable duplication.
-    const dir = await mkdtemp(join(tmpdir(), "thicket-bind-"));
+    const dir = await mkdtemp(join(tmpdir(), "underbrush-bind-"));
     try {
       await writeFile(
         join(dir, "bind.ts"),
@@ -145,7 +145,7 @@ describe("extractFragments", () => {
     // passes even unfixed. The shape that actually breaks is a whole file
     // inside a single construct -- exactly how a 5,000-line `describe()` test
     // file is written.
-    const dir = await mkdtemp(join(tmpdir(), "thicket-big-"));
+    const dir = await mkdtemp(join(tmpdir(), "underbrush-big-"));
     try {
       const body = Array.from(
         { length: 20_000 },

@@ -20,8 +20,8 @@ describe("findingId", () => {
   });
 
   it("encodes the kind as a prefix", () => {
-    expect(findingId("DUP", "abc")).toMatch(/^THK-DUP-[0-9a-f]{8}$/);
-    expect(findingId("CYC", "abc")).toMatch(/^THK-CYC-[0-9a-f]{8}$/);
+    expect(findingId("DUP", "abc")).toMatch(/^UB-DUP-[0-9a-f]{8}$/);
+    expect(findingId("CYC", "abc")).toMatch(/^UB-CYC-[0-9a-f]{8}$/);
   });
 
   it("differs for different content", () => {
@@ -69,7 +69,7 @@ const deps = (direct: number, throughBarrels = 0, barrels: string[] = []) => ({
 });
 
 const twoModuleCycle = {
-  id: "THK-CYC-1",
+  id: "UB-CYC-1",
   modules: ["src/alpha.ts", "src/gamma.ts"],
   edges: [
     edge("src/alpha.ts", "src/gamma.ts", 3),
@@ -96,8 +96,8 @@ describe("renderMarkdown", () => {
     // clean something up. Without this line it has to infer what `L1` or
     // `passThrough` mean from context, and two agents given an earlier report
     // guessed wrong about what the edge numbers counted.
-    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
-    expect(out).toContain("**How to read this report:** https://alecf.github.io/thicket/report-guide.md");
+    const out = renderMarkdown({ ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 });
+    expect(out).toContain("**How to read this report:** https://alecf.github.io/underbrush/report-guide.md");
     // Once per report, not once per section or per finding.
     expect(out.split("How to read this report").length - 1).toBe(1);
     expect(out.indexOf("How to read this report")).toBeLessThan(out.indexOf("## Summary"));
@@ -111,7 +111,7 @@ describe("renderMarkdown", () => {
     renderMarkdown({
       ...base,
       scope: { analyzed: 176, onDisk: 6286, complete: false, gaps },
-      duplication: [ranked("THK-DUP-1")],
+      duplication: [ranked("UB-DUP-1")],
       totalFindings: 1,
     });
 
@@ -130,7 +130,7 @@ describe("renderMarkdown", () => {
     // fabricated --config that would not work.
     expect(out).toMatch(/^> - `vendored` — 848 files$/m);
     // Above the findings, because it changes what every number below it means.
-    expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("THK-DUP-1"));
+    expect(out.indexOf("outside this program")).toBeLessThan(out.indexOf("UB-DUP-1"));
   });
 
   it("lists every untried config in the directory, and does not rank them", () => {
@@ -158,7 +158,7 @@ describe("renderMarkdown", () => {
     expect(out).not.toMatch(/--config/);
   });
 
-  const manyFiles = ranked("THK-DUP-many", {
+  const manyFiles = ranked("UB-DUP-many", {
     occurrences: Array.from({ length: 40 }, (_, i) => ({
       filePath: `src/f${String(i).padStart(2, "0")}.ts`,
       start: 0,
@@ -182,7 +182,7 @@ describe("renderMarkdown", () => {
   });
 
   it("names every line within a file it touches", () => {
-    const repeated = ranked("THK-DUP-repeat", {
+    const repeated = ranked("UB-DUP-repeat", {
       occurrences: Array.from({ length: 30 }, (_, i) => ({
         filePath: "src/table.ts",
         start: i * 100,
@@ -204,7 +204,7 @@ describe("renderMarkdown", () => {
     // hand was its only route to the answer. The list itself stays: a
     // different agent called every entry of a 19-file list "the backbone" and
     // used all of them.
-    const spread = ranked("THK-DUP-spread", {
+    const spread = ranked("UB-DUP-spread", {
       occurrences: Array.from({ length: 20 }, (_, i) => ({
         filePath: i < 12 ? `src/a/f${i}.ts` : i < 18 ? `src/b/f${i}.ts` : `src/c/f${i}.ts`,
         start: 0,
@@ -226,12 +226,12 @@ describe("renderMarkdown", () => {
   it("does not summarize a location list short enough to read", () => {
     // Below the threshold the list IS the summary, and a header restating it
     // is a line of noise on every small finding in the report.
-    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    const out = renderMarkdown({ ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 });
     expect(out).not.toContain("spread across");
   });
 
   it("names only the largest directories and counts the rest", () => {
-    const many = ranked("THK-DUP-many-dirs", {
+    const many = ranked("UB-DUP-many-dirs", {
       occurrences: Array.from({ length: 20 }, (_, i) => ({
         filePath: `src/d${String(i).padStart(2, "0")}/f.ts`,
         start: 0,
@@ -271,7 +271,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1"),
+          ...ranked("UB-DUP-1"),
           context: {
             sharedImports: [{ path: "models/VitalObservation.ts" }],
             dependents: deps(5),
@@ -290,7 +290,7 @@ describe("renderMarkdown", () => {
   it("says nothing about shared imports when the copies share none", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(2) } }],
+      duplication: [{ ...ranked("UB-DUP-1"), context: { sharedImports: [], dependents: deps(2) } }],
       totalFindings: 1,
     });
     expect(out).not.toContain("every copy imports");
@@ -302,7 +302,7 @@ describe("renderMarkdown", () => {
     // the extraction cannot break a caller.
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(0) } }],
+      duplication: [{ ...ranked("UB-DUP-1"), context: { sharedImports: [], dependents: deps(0) } }],
       totalFindings: 1,
     });
     expect(out).toContain("- **directly imported by:** nothing outside the cluster");
@@ -311,7 +311,7 @@ describe("renderMarkdown", () => {
   it("agrees with itself on singular and plural dependents", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), context: { sharedImports: [], dependents: deps(1) } }],
+      duplication: [{ ...ranked("UB-DUP-1"), context: { sharedImports: [], dependents: deps(1) } }],
       totalFindings: 1,
     });
     expect(out).toContain("- **directly imported by:** 1 file outside the cluster");
@@ -325,7 +325,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1"),
+          ...ranked("UB-DUP-1"),
           context: {
             sharedImports: [
               { path: "models/vitals/VitalObservation.ts", forwardsTo: "packages/models/src/wearables/VitalObservation.ts" },
@@ -350,7 +350,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1"),
+          ...ranked("UB-DUP-1"),
           context: { sharedImports: [], dependents: deps(5, 17, ["models/vitals/index.ts"]) },
         },
       ],
@@ -370,7 +370,7 @@ describe("renderMarkdown", () => {
       ...base,
       testDuplication: [
         {
-          ...ranked("THK-DUP-T", {
+          ...ranked("UB-DUP-T", {
             occurrences: [
               { filePath: "src/a.test.ts", start: 0, end: 10, line: 1, endLine: 4, parentId: 1 },
               { filePath: "src/b.test.ts", start: 0, end: 10, line: 1, endLine: 4, parentId: 2 },
@@ -395,7 +395,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1", {
+          ...ranked("UB-DUP-1", {
             alsoAt: [
               { filePath: "apps/web/vitest.setup.tsx", start: 0, end: 9, line: 36, endLine: 50, parentId: 1 },
               { filePath: "apps/web/lib/test/match-media.ts", start: 0, end: 9, line: 11, endLine: 25, parentId: 2 },
@@ -417,7 +417,7 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1", {
+          ...ranked("UB-DUP-1", {
             alsoAt: Array.from({ length: 9 }, (_, i) => ({
               filePath: `src/other${i}.ts`,
               start: 0,
@@ -436,7 +436,7 @@ describe("renderMarkdown", () => {
   });
 
   it("says nothing about other surroundings when there are none", () => {
-    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    const out = renderMarkdown({ ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 });
     expect(out).not.toContain("other surroundings");
   });
 
@@ -448,14 +448,14 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1"),
+          ...ranked("UB-DUP-1"),
           context: { sharedImports: [], dependents: deps(0) },
-          variants: [{ id: "THK-DUP-2", similarity: 0.8125, copies: 5 }],
+          variants: [{ id: "UB-DUP-2", similarity: 0.8125, copies: 5 }],
         },
       ],
       totalFindings: 1,
     });
-    expect(out).toContain("- **see also `THK-DUP-2`:** 81% the same shape, 5 more copies");
+    expect(out).toContain("- **see also `UB-DUP-2`:** 81% the same shape, 5 more copies");
   });
 
   it("agrees with itself on singular and plural copies of a variant", () => {
@@ -463,9 +463,9 @@ describe("renderMarkdown", () => {
       ...base,
       duplication: [
         {
-          ...ranked("THK-DUP-1"),
+          ...ranked("UB-DUP-1"),
           context: { sharedImports: [], dependents: deps(0) },
-          variants: [{ id: "THK-DUP-2", similarity: 0.7, copies: 1 }],
+          variants: [{ id: "UB-DUP-2", similarity: 0.7, copies: 1 }],
         },
       ],
       totalFindings: 1,
@@ -474,18 +474,18 @@ describe("renderMarkdown", () => {
   });
 
   it("contains no timestamps or absolute paths", () => {
-    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    const out = renderMarkdown({ ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 });
     expect(out).not.toMatch(/\/Users\//);
     expect(out).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 
   it("is byte-identical across renders", () => {
-    const input = { ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 };
+    const input = { ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 };
     expect(renderMarkdown(input)).toBe(renderMarkdown(input));
   });
 
   it("groups occurrences by file with 1-based line numbers", () => {
-    const out = renderMarkdown({ ...base, duplication: [ranked("THK-DUP-1")], totalFindings: 1 });
+    const out = renderMarkdown({ ...base, duplication: [ranked("UB-DUP-1")], totalFindings: 1 });
     expect(out).toContain("- `src/alpha.ts:4,16`\n- `src/beta.ts:2`");
     // A byte offset must not leak into the body in place of a line.
     expect(out).not.toContain("src/alpha.ts:60");
@@ -494,7 +494,7 @@ describe("renderMarkdown", () => {
   it("prints the canonical kind name, not a range-marker alias", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-1", { kind: "FirstStatement" })],
+      duplication: [ranked("UB-DUP-1", { kind: "FirstStatement" })],
       totalFindings: 1,
     });
     expect(out).toContain("VariableStatement");
@@ -510,8 +510,8 @@ describe("renderMarkdown", () => {
     // order of two object keys.
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-1"), ranked("THK-DUP-2")],
-      testDuplication: [ranked("THK-DUP-3")],
+      duplication: [ranked("UB-DUP-1"), ranked("UB-DUP-2")],
+      testDuplication: [ranked("UB-DUP-3")],
       totalFindings: 3,
     });
     expect(out).toContain("`L0` matches copies that are identical once formatting is normalized");
@@ -528,7 +528,7 @@ describe("renderMarkdown", () => {
     // print the recoverable-lines figure a second time and read as a bug.
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-1", {}, 2787)],
+      duplication: [ranked("UB-DUP-1", {}, 2787)],
       totalFindings: 1,
     });
     expect(out).not.toContain("score");
@@ -540,7 +540,7 @@ describe("renderMarkdown", () => {
   it("marks test and mixed clusters", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [{ ...ranked("THK-DUP-1"), tag: "mixed" }],
+      duplication: [{ ...ranked("UB-DUP-1"), tag: "mixed" }],
       totalFindings: 1,
     });
     expect(out).toContain("[mixed]");
@@ -549,12 +549,12 @@ describe("renderMarkdown", () => {
   it("emits cycles with their suggested cuts", () => {
     const out = renderMarkdown({ ...base, cycles: [twoModuleCycle], totalFindings: 1 });
     expect(out).toContain("## Module tangle");
-    expect(out).toContain("THK-CYC-1");
+    expect(out).toContain("UB-CYC-1");
     expect(out).toContain("`src/gamma.ts` → `src/alpha.ts`");
   });
 
   it("emits fewer findings under a small budget and states the true omitted count", () => {
-    const duplication = Array.from({ length: 20 }, (_, i) => ranked(`THK-DUP-${i}`, {}, 100 - i));
+    const duplication = Array.from({ length: 20 }, (_, i) => ranked(`UB-DUP-${i}`, {}, 100 - i));
     const full = renderMarkdown({ ...base, duplication, totalFindings: 20 });
     // Tight enough to bite, loose enough to fit the header, the Summary and
     // the Omitted section, which are reserved before any finding is priced.
@@ -563,7 +563,7 @@ describe("renderMarkdown", () => {
     expect(full).toMatch(/\| findings \| 20 of 20 shown \|/);
     expect(full).not.toMatch(/## Omitted/);
 
-    const emitted = [...tight.matchAll(/^### THK-DUP-/gm)].length;
+    const emitted = [...tight.matchAll(/^### UB-DUP-/gm)].length;
     expect(emitted).toBeGreaterThan(0);
     expect(emitted).toBeLessThan(20);
     expect(tight).toContain(`| findings | ${emitted} of 20 shown |`);
@@ -575,15 +575,15 @@ describe("renderMarkdown", () => {
   it("keeps the header and summary even when the budget cannot fit one finding", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-1")],
+      duplication: [ranked("UB-DUP-1")],
       totalFindings: 1,
       budgetTokens: 1,
     });
-    expect(out).toContain("# thicket report");
+    expect(out).toContain("# underbrush report");
     expect(out).toContain("## Summary");
     expect(out).toContain("| findings | 0 of 1 shown |");
     expect(out).toContain("1 of 1 findings are not shown above.");
-    expect(out).not.toContain("THK-DUP-1");
+    expect(out).not.toContain("UB-DUP-1");
   });
 
   it("keeps test duplication in a section of its own, below production work", () => {
@@ -592,33 +592,33 @@ describe("renderMarkdown", () => {
     // the test weight fixed that without also discarding real findings, so the
     // two kinds of work stopped competing for a slot instead.
     const out = renderMarkdown(reportInput({
-      duplication: [ranked("THK-DUP-src")],
-      testDuplication: [ranked("THK-DUP-mock")],
+      duplication: [ranked("UB-DUP-src")],
+      testDuplication: [ranked("UB-DUP-mock")],
       totalFindings: 2,
       census: { duplication: 1, testDuplication: 1 },
     }));
     expect(out).toContain("## Duplication in tests");
     expect(out.indexOf("## Duplication")).toBeLessThan(out.indexOf("## Duplication in tests"));
-    expect(out.indexOf("THK-DUP-src")).toBeLessThan(out.indexOf("THK-DUP-mock"));
+    expect(out.indexOf("UB-DUP-src")).toBeLessThan(out.indexOf("UB-DUP-mock"));
   });
 
   it("spends a tight budget on production duplication before test duplication", () => {
     // The ordering above is also the truncation order: under pressure the
     // report keeps the work it exists to rank.
     const out = renderMarkdown(reportInput({
-      duplication: Array.from({ length: 10 }, (_, i) => ranked(`THK-DUP-src${i}`, {}, 100 - i)),
-      testDuplication: [ranked("THK-DUP-mock")],
+      duplication: Array.from({ length: 10 }, (_, i) => ranked(`UB-DUP-src${i}`, {}, 100 - i)),
+      testDuplication: [ranked("UB-DUP-mock")],
       totalFindings: 11,
       census: { duplication: 10, testDuplication: 1 },
       budgetTokens: 400,
     }));
-    expect(out).toContain("THK-DUP-src0");
-    expect(out).not.toContain("THK-DUP-mock");
+    expect(out).toContain("UB-DUP-src0");
+    expect(out).not.toContain("UB-DUP-mock");
   });
 
   it("names the test section even when production duplication is empty", () => {
     const out = renderMarkdown(reportInput({
-      testDuplication: [ranked("THK-DUP-mock")],
+      testDuplication: [ranked("UB-DUP-mock")],
       totalFindings: 2,
       census: { testDuplication: 2 },
     }));
@@ -638,7 +638,7 @@ describe("renderMarkdown", () => {
     // than a zero the builder supplied on this test's behalf.
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-1")],
+      duplication: [ranked("UB-DUP-1")],
       cycles: [],
       totalFindings: 18808,
       census: {
@@ -671,10 +671,10 @@ describe("renderMarkdown", () => {
 
   it("counts shown cycles against the tangle row, not the duplication row", () => {
     const out = renderMarkdown(reportInput({
-      duplication: [ranked("THK-DUP-1")],
+      duplication: [ranked("UB-DUP-1")],
       cycles: [
         {
-          id: "THK-CYC-1",
+          id: "UB-CYC-1",
           modules: ["a", "b"],
           edges: [
             edge("a", "b", 1),
@@ -693,7 +693,7 @@ describe("renderMarkdown", () => {
 
   it("says nothing about omissions when it printed everything", () => {
     const out = renderMarkdown(reportInput({
-      duplication: [ranked("THK-DUP-1")],
+      duplication: [ranked("UB-DUP-1")],
       totalFindings: 1,
       census: { duplication: 1, bands: [{ label: "10–29", count: 1 }] },
     }));
@@ -703,9 +703,9 @@ describe("renderMarkdown", () => {
   it("emits findings in the order given", () => {
     const out = renderMarkdown({
       ...base,
-      duplication: [ranked("THK-DUP-aaa", {}, 100), ranked("THK-DUP-bbb", {}, 50)],
+      duplication: [ranked("UB-DUP-aaa", {}, 100), ranked("UB-DUP-bbb", {}, 50)],
       totalFindings: 2,
     });
-    expect(out.indexOf("THK-DUP-aaa")).toBeLessThan(out.indexOf("THK-DUP-bbb"));
+    expect(out.indexOf("UB-DUP-aaa")).toBeLessThan(out.indexOf("UB-DUP-bbb"));
   });
 });

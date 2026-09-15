@@ -1,73 +1,71 @@
-# thicket
+# underbrush
 
 A CLI that analyzes a TypeScript codebase and emits a **deterministic plaintext complexity report**, designed to be read by an LLM inside a refactoring loop.
 
 ```
-thicket report → LLM picks targets → LLM refactors → thicket report → …
+underbrush report → LLM picks targets → LLM refactors → underbrush report → …
 ```
 
-thicket never judges, never edits, never opens PRs. It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding when progress is sufficient is the harness's job.
+Underbrush never judges, never edits, never opens PRs. It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding when progress is sufficient is the harness's job.
 
 > **Status: v1, early.** Duplication and module tangle work end to end and are covered by tests; the simplification checks and near-miss duplication described below are not in v1 (see [Known limits](#known-limits)).
 
 ## Install
 
 ```bash
-brew install alecf/tap/thicket
+brew install alecf/tap/underbrush
 ```
 
-Or download a tarball from [Releases](https://github.com/alecf/thicket/releases), extract it, and put the `thicket` binary on your `PATH` — a symlink is fine, it finds its own files through it. Prebuilt for macOS and Linux on arm64 and x64.
-
-The npm name is taken by an unrelated package; `npx thicket` currently fetches something else. That is [being sorted out](https://github.com/alecf/thicket/issues).
+Or download a tarball from [Releases](https://github.com/alecf/underbrush/releases), extract it, and put the `underbrush` binary on your `PATH` — a symlink is fine, it finds its own files through it. Prebuilt for macOS and Linux on arm64 and x64.
 
 ### From a clone
 
 ```bash
 bun install
-bun run thicket --help
+bun run underbrush --help
 ```
 
-`bun run thicket` executes `src/cli.ts` directly — no build step, Bun ≥1.4. The examples below spell that form out; with an installed binary, drop `bun run`.
+`bun run underbrush` executes `src/cli.ts` directly — no build step, Bun ≥1.4. The examples below spell that form out; with an installed binary, drop `bun run`.
 
 ### What is in the tarball
 
-thicket analyzes through the TypeScript compiler's native `tsgo` binary, which it spawns as a child process. So the download is a **directory**, not a lone file:
+Underbrush analyzes through the TypeScript compiler's native `tsgo` binary, which it spawns as a child process. So the download is a **directory**, not a lone file:
 
 ```
-thicket            the CLI (~65–83 MB)
+underbrush         the CLI (~65–83 MB)
 tsgo/tsc           the native compiler (~24 MB)
 tsgo/lib.*.d.ts    its standard library — it will not start without these
 ```
 
-Keep them together. `thicket` locates `tsgo/` relative to its own executable, resolving through symlinks, so installing anywhere and symlinking onto your `PATH` works; copying the binary out on its own does not. To point at a different tsgo build, set `THICKET_TSGO` — its version joins the report's config hash, so a swap invalidates the cache rather than silently changing the answer.
+Keep them together. `underbrush` locates `tsgo/` relative to its own executable, resolving through symlinks, so installing anywhere and symlinking onto your `PATH` works; copying the binary out on its own does not. To point at a different tsgo build, set `UNDERBRUSH_TSGO` — its version joins the report's config hash, so a swap invalidates the cache rather than silently changing the answer.
 
 ## Usage
 
 Point it at a tsconfig. The report goes to stdout, so it pipes:
 
 ```bash
-bun run thicket --config ./tsconfig.json
-bun run thicket --config ./tsconfig.json > report.md
+bun run underbrush --config ./tsconfig.json
+bun run underbrush --config ./tsconfig.json > report.md
 ```
 
 A monorepo takes one `--config` per project. Passing the same path twice does nothing useful — the TypeScript API dedupes by path — but genuinely distinct configs are analyzed as one corpus, so a package duplicated across two of them is found:
 
 ```bash
-bun run thicket --config packages/a/tsconfig.json --config packages/b/tsconfig.json
+bun run underbrush --config packages/a/tsconfig.json --config packages/b/tsconfig.json
 ```
 
 For the loop, keep the JSON sidecar and diff it against the next iteration's:
 
 ```bash
-bun run thicket --config ./tsconfig.json --json before.json > /dev/null
+bun run underbrush --config ./tsconfig.json --json before.json > /dev/null
 # ...an LLM refactors something...
-bun run thicket --config ./tsconfig.json --json after.json  > /dev/null
-bun run thicket diff before.json after.json
+bun run underbrush --config ./tsconfig.json --json after.json  > /dev/null
+bun run underbrush diff before.json after.json
 ```
 
 ```
 1 finding resolved, 0 new, duplicated mass -65.2% (253 -> 88), propagation cost 0.44 -> 0.44
-  - THK-DUP-c389b5be
+  - UB-DUP-c389b5be
 ```
 
 `diff` exits 0 because the comparison ran, not because the numbers improved. Whether a delta is good enough is a policy question, and a tool that encoded one in its exit code would be judging.
@@ -85,7 +83,7 @@ bun run thicket diff before.json after.json
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
 | `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. |
 | `--json <path>` | Additionally write the JSON sidecar here. The Markdown still goes to stdout. |
-| `--no-cache` | Re-analyze every file, ignoring `.thicket/cache.db`. |
+| `--no-cache` | Re-analyze every file, ignoring `.underbrush/cache.db`. |
 | `--help` | Print usage. |
 
 The depth presets, in full:
@@ -105,18 +103,18 @@ The depth presets, in full:
 | Command | Meaning |
 |---|---|
 | `diff <before.json> <after.json>` | Compare two `--json` sidecars: findings resolved, findings added, and how each metric moved. Analyzes nothing, so it needs no tsconfig. |
-| `cache clear` | Delete `.thicket/cache.db` for the analyzed project. Takes the same `--config` flags, because the cache lives with the codebase rather than with the working directory. |
+| `cache clear` | Delete `.underbrush/cache.db` for the analyzed project. Takes the same `--config` flags, because the cache lives with the codebase rather than with the working directory. |
 
 ## Report format
 
-Pointed at this repository's own test fixture, `bun run thicket --config tests/fixtures/sample/tsconfig.json` prints exactly this:
+Pointed at this repository's own test fixture, `bun run underbrush --config tests/fixtures/sample/tsconfig.json` prints exactly this:
 
 `````markdown
-# thicket report
+# underbrush report
 
-thicket 0.1.0 · config 66fac093 · 4 files / 56 LOC · granularity: file (4 modules)
+underbrush 0.1.0 · config 66fac093 · 4 files / 56 LOC · granularity: file (4 modules)
 
-**How to read this report:** https://alecf.github.io/thicket/report-guide.md
+**How to read this report:** https://alecf.github.io/underbrush/report-guide.md
 
 ## Summary
 
@@ -133,7 +131,7 @@ thicket 0.1.0 · config 66fac093 · 4 files / 56 LOC · granularity: file (4 mod
 
 `L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is therefore the copies of one exact shape — a near-variant that differs by an inserted line is a separate finding, cross-referenced as **see also** where one exists.
 
-### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
+### UB-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
 
 L1 · `FunctionDeclaration`
 
@@ -152,7 +150,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 - `src/alpha.ts:4`
 - `src/beta.ts:3,14`
 
-### THK-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
+### UB-DUP-c389b5be · 2 copies × ~10 lines · ~7 lines recoverable
 
 L0 · `Block`
 
@@ -175,7 +173,7 @@ L0 · `Block`
 
 Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. The dotted arrow is the suggested cut.
 
-### THK-CYC-aca08f5a · SCC of 2 modules
+### UB-CYC-aca08f5a · SCC of 2 modules
 
 ```mermaid
 flowchart LR
@@ -229,7 +227,7 @@ This is the report's cheapest pointer at code that may already *be* the extracti
 
 A third line appears when two printed findings are **near-variants of one shape**:
 
-- **`see also THK-DUP-…:`** `81% the same shape, 5 more copies`
+- **`see also UB-DUP-…:`** `81% the same shape, 5 more copies`
 
 L1 equality is exact once identifiers are renamed, so a template and a copy of it with one field inserted become two separate findings with nothing connecting them. On a real report that was 19 duplicated classes and 5 more that sat two lines from the same template — acting on the report alone leaves the five behind and costs a second visit. Similarity is shingle Jaccard over the L1 token stream, computed only among the findings actually printed, and the threshold was measured rather than guessed: across 758 non-overlapping pairs the genuine template-and-variant pair scored **0.813**, the next pair **0.462**, and everything else below 0.31, so the bar sits in the empty band between.
 
@@ -257,7 +255,7 @@ That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI
 
 ## What the metrics mean
 
-**`analyzed`** — how many of the TypeScript files on disk under the project root ended up in the program, and therefore in everything below it. A `tsconfig.json` decides this, and it can decide it very differently from what you expect: one real monorepo's root config excluded `apps` and `packages`, so the default run built its program from **176 of 6,286 files** and reported zero dependency cycles and a propagation cost of 0.05. Both were artifacts of the missing 97%. When the program misses part of the tree, thicket says so above the findings and names the `--config` that closes each gap:
+**`analyzed`** — how many of the TypeScript files on disk under the project root ended up in the program, and therefore in everything below it. A `tsconfig.json` decides this, and it can decide it very differently from what you expect: one real monorepo's root config excluded `apps` and `packages`, so the default run built its program from **176 of 6,286 files** and reported zero dependency cycles and a propagation cost of 0.05. Both were artifacts of the missing 97%. When the program misses part of the tree, underbrush says so above the findings and names the `--config` that closes each gap:
 
 ```
 ⚠ 6110 source files are outside this program. Every number above is drawn from the 2.8% that is inside it.
@@ -287,7 +285,7 @@ No cut is proposed for a tangle **no file-level cycle underlies**. An SCC of mod
 
 The cut is chosen by **how much of the tangle it dissolves**, not by what it costs. Cheapest-edge-that-works reliably finds the least interesting cut — on a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted. Cost is only the tie-break among equally dissolving cuts, and it prefers a type-only edge first (erased at compile time, so the fix is usually moving a types file), then fewest files to edit, then fewest symbols.
 
-Every tangle states **whether anything in it is actually circular at file level**. A module SCC is a claim about directories, and directories are a choice this tool made: on a real 7-module tangle across 417 files there were three file cycles, every one inside a single directory and none crossing a boundary the finding drew — so nothing circular executes, there is no module-init hazard, and the "fix" removes zero real cycles. An agent had to write its own Tarjan implementation to learn that, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict and the reason the line is worth its width. It is the same algorithm one granularity down, over a graph thicket has already built.
+Every tangle states **whether anything in it is actually circular at file level**. A module SCC is a claim about directories, and directories are a choice this tool made: on a real 7-module tangle across 417 files there were three file cycles, every one inside a single directory and none crossing a boundary the finding drew — so nothing circular executes, there is no module-init hazard, and the "fix" removes zero real cycles. An agent had to write its own Tarjan implementation to learn that, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict and the reason the line is worth its width. It is the same algorithm one granularity down, over a graph underbrush has already built.
 
 Every cut states **what it leaves**: `leaves: 6 of 7 modules still mutually dependent`, or `nothing — this breaks the cycle completely`. Without that line, "suggested cuts (1)" reads as "apply this and the tangle is gone", which for a leaf-detaching cut is false.
 
@@ -301,7 +299,7 @@ A finding that names more than a dozen files gets its location list **summarized
 
 The **excerpt scales with the size of one copy** — 60% of its lines, floor three, ceiling ten. A flat three lines failed on exactly the findings that needed it most: on a real 15-line block the elided lines 4–13 were the only thing separating that cluster from five near-identical siblings, so the excerpt showed the reader the agreement and hid the disagreement. Three lines of a 100-line class is still right, which is why it is a fraction rather than a bigger constant.
 
-**Finding IDs** (`THK-DUP-…`, `THK-CYC-…`) are derived from **content, never position**. Code that merely moves — reformatted, shifted down by an added import, reordered within its file — keeps its ID, so `thicket diff` reports what was actually resolved rather than what was merely touched. This is the loop's backbone and it has an end-to-end test that moves real code and asserts the IDs survive.
+**Finding IDs** (`UB-DUP-…`, `UB-CYC-…`) are derived from **content, never position**. Code that merely moves — reformatted, shifted down by an added import, reordered within its file — keeps its ID, so `underbrush diff` reports what was actually resolved rather than what was merely touched. This is the loop's backbone and it has an end-to-end test that moves real code and asserts the IDs survive.
 
 ## What it looks for
 
@@ -321,7 +319,7 @@ We are discarding candidates by two orders of magnitude, which means an extra de
 
 That one conclusion cut embeddings from v1, removed every native dependency, and makes the ranking function the most important code in the project.
 
-## What thicket deliberately does not do
+## What underbrush deliberately does not do
 
 - **It does not judge.** No thresholds, no grades, no pass/fail, no exit code that means "too complex". It reports candidates and metrics; something else decides what is worth fixing.
 - **It does not edit.** No codemods, no autofix, no `--write`.
@@ -330,9 +328,9 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 ## Known limits
 
-- **Near-miss duplication is not in v1.** Only exact (L0) and α-renamed (L1) matches are found. Two functions that differ by one added statement are two separate fragments to thicket. The MinHash/LSH work for near-miss detection exists in `prototypes/` and is not wired up, because ranking, not recall, is the binding constraint.
-- **The simplification checks are not in v1** — parameters that take the same constant at every call site, statically-true conditions, exports nobody imports. The type checker knows all three; nothing consumes that yet. There is no `THK-INV-…` finding in a v1 report.
-- **The ranker cannot tell a data table from a code block.** An object literal repeated 15 times and a function body repeated 15 times look the same to it: same node count, same copy count, same score. Intra-file repetition is down-weighted and per-file copy counts are capped, which stops a config literal from taking the top of the report, but a few data tables still survive into the lower half. Treating them as refactoring candidates is the reader's mistake to avoid; thicket cannot yet make it for you.
+- **Near-miss duplication is not in v1.** Only exact (L0) and α-renamed (L1) matches are found. Two functions that differ by one added statement are two separate fragments to underbrush. The MinHash/LSH work for near-miss detection exists in `prototypes/` and is not wired up, because ranking, not recall, is the binding constraint.
+- **The simplification checks are not in v1** — parameters that take the same constant at every call site, statically-true conditions, exports nobody imports. The type checker knows all three; nothing consumes that yet. There is no `UB-INV-…` finding in a v1 report.
+- **The ranker cannot tell a data table from a code block.** An object literal repeated 15 times and a function body repeated 15 times look the same to it: same node count, same copy count, same score. Intra-file repetition is down-weighted and per-file copy counts are capped, which stops a config literal from taking the top of the report, but a few data tables still survive into the lower half. Treating them as refactoring candidates is the reader's mistake to avoid; underbrush cannot yet make it for you.
 - **Duplication is reported at every granularity that matches.** A cluster and a strictly smaller cluster with the *same* occurrence count are collapsed to the larger one, but an L0 pair nested inside an L1 triple is two findings, as in the example report above. They are genuinely different facts; they still cost two report slots.
 - **A real tsconfig is required.** Import resolution runs through the type checker, so there is no "point it at a directory" mode. Declaration files (`.d.ts`) and `node_modules` are never analyzed.
 
@@ -346,7 +344,7 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 TypeScript on Bun ≥1.4, with **nothing to compile at install time** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/async`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
 
-That compiler is a native binary thicket spawns, which is why a release is a directory rather than a single file. It is prebuilt per platform and shipped in the tarball, so there is no toolchain on your machine for it to need.
+That compiler is a native binary underbrush spawns, which is why a release is a directory rather than a single file. It is prebuilt per platform and shipped in the tarball, so there is no toolchain on your machine for it to need.
 
 ## License
 

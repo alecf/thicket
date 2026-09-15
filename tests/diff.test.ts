@@ -47,10 +47,10 @@ describe("diffReports", () => {
   });
 
   it("diffs cycle findings alongside duplication findings", () => {
-    const before = { ...report(["a"], 10), cycles: [{ id: "THK-CYC-1" }] };
+    const before = { ...report(["a"], 10), cycles: [{ id: "UB-CYC-1" }] };
     const after = { ...report(["a"], 10), cycles: [] };
     const d = diffReports(before, after);
-    expect(d.resolved).toEqual(["THK-CYC-1"]);
+    expect(d.resolved).toEqual(["UB-CYC-1"]);
     expect(d.unchanged).toEqual(["a"]);
   });
 
@@ -100,9 +100,9 @@ describe("parseReport", () => {
     expect(round.duplication.length).toBe(json.duplication.length);
   });
 
-  it("rejects a file that is not a thicket report, naming it", () => {
+  it("rejects a file that is not an underbrush report, naming it", () => {
     expect(() => parseReport({ hello: "world" }, "notes.json")).toThrow(/notes\.json/);
-    expect(() => parseReport({ hello: "world" }, "notes.json")).toThrow(/thicket report/i);
+    expect(() => parseReport({ hello: "world" }, "notes.json")).toThrow(/underbrush report/i);
   });
 
   it("rejects a report whose findings lack ids", () => {
@@ -160,7 +160,7 @@ const dupIds = (json: ReportJson) => json.duplication.map((d) => d.id);
 
 describe("finding ids across a real edit", () => {
   it("keeps every duplication id when the code only moves", async () => {
-    const { root, config } = scratchProject("thicket-diff-", temps);
+    const { root, config } = scratchProject("underbrush-diff-", temps);
     const beta = join(root, "src/beta.ts");
     const before = await reportOn(config);
     expect(before.duplication.length).toBeGreaterThan(0);
@@ -196,7 +196,7 @@ describe("finding ids across a real edit", () => {
   it("reports a genuinely deleted copy as resolved", async () => {
     // The negative control. Without it the test above passes just as happily
     // against a differ that answers "nothing changed" unconditionally.
-    const { root, config } = scratchProject("thicket-diff-", temps);
+    const { root, config } = scratchProject("underbrush-diff-", temps);
     const beta = join(root, "src/beta.ts");
     const before = await reportOn(config);
 

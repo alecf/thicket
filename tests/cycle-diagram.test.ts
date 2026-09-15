@@ -56,11 +56,11 @@ function ring(n: number, extraEdges = 0): CycleFinding {
   for (let i = 0; i < extraEdges; i++) {
     edges.push(edge(modules[0]!, modules[(i + 2) % n]!, 99));
   }
-  return { id: "THK-CYC-ring", modules, edges, cuts: [], residual: n };
+  return { id: "UB-CYC-ring", modules, edges, cuts: [], residual: n };
 }
 
 const twoModule: CycleFinding = {
-  id: "THK-CYC-1",
+  id: "UB-CYC-1",
   modules: ["src/gamma.ts", "src/alpha.ts"], // deliberately unsorted
   edges: [
     edge("src/alpha.ts", "src/gamma.ts", 3),
@@ -112,7 +112,7 @@ describe("the cycle diagram", () => {
     // `app/[id]` is a Next.js dynamic route, not a contrived name: at file
     // granularity a bare `[` opens a node label and wrecks the chart.
     const odd: CycleFinding = {
-      id: "THK-CYC-odd",
+      id: "UB-CYC-odd",
       modules: ["app/[id]/page.tsx", "lib/util.ts"],
       edges: [
         edge("app/[id]/page.tsx", "lib/util.ts", 2),
@@ -134,7 +134,7 @@ describe("the cycle diagram", () => {
     // Naming some nodes by path and others by slug would read as though the
     // two kinds of node were different kinds of thing.
     const mixed: CycleFinding = {
-      id: "THK-CYC-mixed",
+      id: "UB-CYC-mixed",
       modules: ["a b", "clean/path", "other"],
       edges: [
         edge("a b", "clean/path", 1),
@@ -154,7 +154,7 @@ describe("the cycle diagram", () => {
 
   it("escapes a quote in a label rather than ending it early", () => {
     const quoted: CycleFinding = {
-      id: "THK-CYC-quote",
+      id: "UB-CYC-quote",
       modules: ['weird"name', "plain"],
       edges: [
         edge('weird"name', "plain", 1),
@@ -170,7 +170,7 @@ describe("the cycle diagram", () => {
     // `a:b` and `a?b` both slug to `a_b`. Sharing an id would merge two nodes
     // into one and turn a two-module cycle into a self-loop.
     const collide: CycleFinding = {
-      id: "THK-CYC-collide",
+      id: "UB-CYC-collide",
       modules: ["a:b", "a?b"],
       edges: [
         edge("a:b", "a?b", 1),
@@ -192,7 +192,7 @@ describe("the cycle diagram", () => {
   it("slugs a module whose name is a mermaid keyword", () => {
     // A directory really can be called `end`, and `end` closes a subgraph.
     const keyword: CycleFinding = {
-      id: "THK-CYC-kw",
+      id: "UB-CYC-kw",
       modules: ["end", "start"],
       edges: [
         edge("end", "start", 1),
@@ -284,7 +284,7 @@ describe("the cycle diagram", () => {
     // over, on 26 edges. It is the one part of the name that distinguishes
     // nothing, and it crowded the part that does.
     const prefixed: CycleFinding = {
-      id: "THK-CYC-p",
+      id: "UB-CYC-p",
       modules: ["apps/mobile/lib", "apps/mobile/utils", "apps/mobile/hooks"],
       edges: [
         edge("apps/mobile/lib", "apps/mobile/utils", 28),
@@ -295,7 +295,7 @@ describe("the cycle diagram", () => {
       residual: 2,
     };
     const out = render(prefixed);
-    expect(out).toContain("### THK-CYC-p · SCC of 3 modules under `apps/mobile/`");
+    expect(out).toContain("### UB-CYC-p · SCC of 3 modules under `apps/mobile/`");
     expect(diagram(out)).toEqual([
       "flowchart LR",
       "  hooks -->|\"127\"| lib",
@@ -311,7 +311,7 @@ describe("the cycle diagram", () => {
     // `packages/core/mobile` and share the DIRECTORY `packages/core`.
     // Stripping the string would produce a node named `-web/lib`.
     const sibling: CycleFinding = {
-      id: "THK-CYC-s",
+      id: "UB-CYC-s",
       modules: ["packages/core/mobile/lib", "packages/core/mobile-web/lib"],
       edges: [
         edge("packages/core/mobile/lib", "packages/core/mobile-web/lib", 1),
@@ -333,7 +333,7 @@ describe("the cycle diagram", () => {
     // `src/` is the source root: four characters, and it tells the reader
     // where they are. Lifting it churns every node name to save nothing.
     const out = render(twoModule);
-    expect(out).toContain("### THK-CYC-1 · SCC of 2 modules\n");
+    expect(out).toContain("### UB-CYC-1 · SCC of 2 modules\n");
     expect(diagram(out)).toContain("  src/alpha.ts -->|\"3\"| src/gamma.ts");
   });
 
@@ -410,7 +410,7 @@ describe("the cycle diagram", () => {
     // anywhere in a 2,600-line report. It is neither imports nor files, and
     // the difference between 12 symbols and the 7 files you would edit is
     // most of the estimate.
-    const out = renderMarkdown({ ...base, cycles: [twoModule, { ...twoModule, id: "THK-CYC-2" }] });
+    const out = renderMarkdown({ ...base, cycles: [twoModule, { ...twoModule, id: "UB-CYC-2" }] });
     expect(out).toContain("Arrows run importer → imported.");
     // Named for what it counts. "distinct symbols" was wrong: the same symbol
     // imported in eight files counts eight times, and `export … from`

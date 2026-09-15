@@ -285,7 +285,7 @@ describe("buildModuleGraph", () => {
  * The acceptance test for per-workspace granularity, run over a real program
  * rather than over synthetic path strings.
  *
- * `THK-CYC-*` ids derive from module names (PRD §9.1), and the whole point of
+ * `UB-CYC-*` ids derive from module names (PRD §9.1), and the whole point of
  * the report is diffing one run against the last. Before this, the same tree
  * reported `dir:3 (4 modules)` unfiltered and `dir:1 (2 modules)` under
  * `--filter @filt/alpha`, so `pkg/alpha/src/a.ts` was in a module called
@@ -325,7 +325,7 @@ describe("buildModuleGraph across workspaces", () => {
 
   /**
    * One workspace is not a monorepo: there is no second workspace to be a peer
-   * at a different scale, and re-cutting it would churn `THK-CYC-*` ids for a
+   * at a different scale, and re-cutting it would churn `UB-CYC-*` ids for a
    * repo that gains nothing. The common prefix is stripped as it always was,
    * which is what makes these names differ from the ones above.
    */

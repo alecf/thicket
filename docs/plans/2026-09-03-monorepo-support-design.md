@@ -9,7 +9,7 @@ path, or source appears here.
 
 ## 1. The problem, measured
 
-Pointed at Sample C's root, thicket built a program from **333 of 7337 files
+Pointed at Sample C's root, Underbrush built a program from **333 of 7337 files
 (4.5%)**. The root `tsconfig.json` excludes the two directories holding every
 workspace; the 333 are root-level scripts plus whatever the `paths` mapping
 dragged in transitively.
@@ -46,7 +46,7 @@ fixed by the same work:
 - **The cache root is derived, not pinned.** `cachePathFor(project.root)` where
   `project.root = commonRootDir(opened)`. Narrow the config set to one
   workspace and the common root collapses into that workspace, putting
-  `.thicket/cache.db` inside a subpackage.
+  `.underbrush/cache.db` inside a subpackage.
 
 ## 2. Decisions
 
@@ -55,7 +55,7 @@ fixed by the same work:
 | 1 | Discovery is **automatic** when a workspace root is found; `--no-workspaces` turns it off | opt-in `--workspaces` flag; "expand only on shortfall" |
 | 2 | Per workspace, start at `tsconfig.json` and add sibling `tsconfig*.json` **only if it contributes files** | `tsconfig.json` only; every `tsconfig*.json` unconditionally |
 | 3 | `--filter` supports **names, globs, path globs, `!` negation** | exact names only; turbo's `...` dependency traversal |
-| 4 | `thicket [dir]`; **no upward search** — the named directory is the root | walk up to the workspace root |
+| 4 | `underbrush [dir]`; **no upward search** — the named directory is the root | walk up to the workspace root |
 | 5 | Module granularity targets a **module size**, chosen per workspace | one global depth; per-workspace `[8,64]` clamp; workspace-as-module |
 | 6 | Workspace selection and filters are **cache-neutral** — they do not join the config hash | hash them, per a literal reading of AGENTS.md §4b |
 
@@ -65,7 +65,7 @@ New module `src/extract/workspaces.ts`, upstream of the adapter. It emits the
 same `configs: string[]` the adapter already accepts, so nothing downstream
 changes shape.
 
-**Nothing about the layout is built in.** Thicket has no knowledge of any
+**Nothing about the layout is built in.** Underbrush has no knowledge of any
 directory name. Globs are read from exactly two manifests:
 
 - `package.json` → `workspaces`, both the array form and yarn's
@@ -145,16 +145,16 @@ the expansion, and no validated need for it has appeared.
 ## 6. CLI surface
 
 ```
-thicket [dir]                 analyze <dir> (default ".")
+underbrush [dir]              analyze <dir> (default ".")
   --filter <pattern>          select workspaces; repeatable
   --no-workspaces             ignore workspace manifests
 ```
 
 `cache` and `diff` remain reserved first positionals, checked before `[dir]`,
-so `thicket cache clear` and `thicket diff a.json b.json` stay unambiguous; a
+so `underbrush cache clear` and `underbrush diff a.json b.json` stay unambiguous; a
 directory genuinely named `diff` is reachable as `./diff`.
 
-**No upward search.** `thicket` analyzes exactly where it is pointed. Pointing
+**No upward search.** `underbrush` analyzes exactly where it is pointed. Pointing
 at a workspace scopes the run *and* the coverage denominator to that workspace.
 A directory with neither workspaces nor a tsconfig is an error naming the
 nearest ancestor that has one — discoverability without the surprise of a leaf
@@ -232,7 +232,7 @@ Per AGENTS.md, each guard gets a test that fails when the guard is deleted.
 - Filters: each form, negation-first, order significance, and that a
   no-match filter errors rather than emitting an empty report.
 - Denominator: a filtered run reports no gap for unselected workspaces.
-- Cache: assert `cache.db` lands at `<dir>/.thicket/` for a filtered run —
+- Cache: assert `cache.db` lands at `<dir>/.underbrush/` for a filtered run —
   this is the regression that motivated pinning. Assert a filtered run and a
   full run share a cache (row count grows, never resets).
 - Cold/warm cluster-list equality through `tests/cache-pipeline.test.ts`,
@@ -252,7 +252,7 @@ Per AGENTS.md, each guard gets a test that fails when the guard is deleted.
 
 - **`selectGranularity` is currently count-targeted.** Switching to
   size-targeting changes module names on non-monorepo repos too, which moves
-  `THK-CYC-*` ids. Finding ids are the loop's backbone (PRD §9.1), so this
+  `UB-CYC-*` ids. Finding ids are the loop's backbone (PRD §9.1), so this
   needs either a deliberate id-churn note or size-targeting confined to the
   multi-workspace path.
 - **Program load cost scales with workspace count**, and the sibling probe adds

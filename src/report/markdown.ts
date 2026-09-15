@@ -154,7 +154,7 @@ export interface ReportInput {
  * every report ever written the moment the version moved, and the guide states
  * which version it documents at the top instead.
  */
-const GUIDE_URL = "https://alecf.github.io/thicket/report-guide.md";
+const GUIDE_URL = "https://alecf.github.io/underbrush/report-guide.md";
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -371,9 +371,9 @@ function headerLines(input: ReportInput, shown: number): string[] {
   ];
 
   return [
-    "# thicket report",
+    "# underbrush report",
     "",
-    `thicket ${input.version} · config ${input.configHash} · ` +
+    `underbrush ${input.version} · config ${input.configHash} · ` +
       `${input.fileCount} files / ${input.lineCount} LOC · ` +
       `granularity: ${input.granularity} (${input.moduleCount} modules)` +
       (input.types === undefined ? "" : ` · types: ${input.types}`),

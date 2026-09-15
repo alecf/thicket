@@ -450,14 +450,14 @@ function isSkippedSourceName(name: string): boolean {
 }
 
 /**
- * `new API`, with the tsgo executable located the way a packaged thicket needs.
+ * `new API`, with the tsgo executable located the way a packaged underbrush needs.
  *
  * Without this the compiled binary fails with `ENOENT: no such file or
  * directory, open '/$bunfs/package.json'` -- the `typescript` package finds
  * tsgo by reading its own package.json relative to `import.meta.url`, which
  * inside a bundle is a virtual path. The message names a file the user does
  * not have and a directory that does not exist, so it is rewritten here into
- * one that says where thicket actually looked.
+ * one that says where underbrush actually looked.
  */
 function createAPI(cwd: string): API {
   const tsgo = resolveTsgo();
@@ -470,7 +470,7 @@ function createAPI(cwd: string): API {
       ? `Used ${tsgo.path}, from ${tsgo.source === "env" ? TSGO_ENV_VAR : "the packaged tsgo/ directory"}.`
       : `Looked for a packaged tsgo at ${tsgo.searched.join(", ")}, then in the installed \`typescript\` package.`;
     throw new Error(
-      `could not start the tsgo executable thicket analyzes with. ${where} ` +
+      `could not start the tsgo executable underbrush analyzes with. ${where} ` +
         `Set ${TSGO_ENV_VAR} to point at one. (${e instanceof Error ? e.message : String(e)})`,
     );
   }

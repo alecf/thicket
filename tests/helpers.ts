@@ -67,8 +67,8 @@ export const TSCONFIG = JSON.stringify({
  *
  * Copied rather than analyzed in place so a test may write a cache or rewrite
  * sources without racing the rest of the suite over
- * `tests/fixtures/sample/.thicket`; it doubles as a check that the report does
- * not depend on where the project sits on disk. Any `.thicket/` already in the
+ * `tests/fixtures/sample/.underbrush`; it doubles as a check that the report does
+ * not depend on where the project sits on disk. Any `.underbrush/` already in the
  * fixture is skipped -- copying one in would hand a "cold" run a warm cache.
  *
  * The directory is pushed onto `temps` for the caller's own `afterEach` to
@@ -81,7 +81,7 @@ export function scratchProject(prefix: string, temps: string[]): { root: string;
   temps.push(root);
   cpSync(fixtureRoot(), root, {
     recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
+    filter: (src) => !src.split(sep).includes(".underbrush"),
   });
   return { root, config: join(root, "tsconfig.json") };
 }
@@ -396,7 +396,7 @@ export function pnpmWorkspacesRoot(): string {
  * a workspace root's members live in subdirectories of it.
  */
 export function withRoot(files: Record<string, string>, body: (root: string) => void): void {
-  const root = mkdtempSync(join(tmpdir(), "thicket-ws-"));
+  const root = mkdtempSync(join(tmpdir(), "underbrush-ws-"));
   try {
     for (const [name, text] of Object.entries(files)) {
       const path = join(root, name);
@@ -457,7 +457,7 @@ export function nestedWorkspacesRoot(): string {
  * of a real `tsconfig.eslint.json`. Under `--filter @filt/alpha`, `pkg/beta`'s
  * files are covered by no chosen config, and if the root is blamed for them
  * this config is exactly what closes that gap. The run then analyzes beta
- * anyway, and since every number thicket reports is computed over the file set
+ * anyway, and since every number underbrush reports is computed over the file set
  * -- propagation cost, duplicated coverage, cycles, clusters -- alpha's own
  * figures change, measured over a tree the reader explicitly excluded, with
  * nothing in the output saying so.

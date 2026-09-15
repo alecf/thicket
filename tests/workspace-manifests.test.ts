@@ -290,7 +290,7 @@ describe("globsFromPnpmText", () => {
     // The BOM defeats `/^packages:\s*$/` on the very first line, so the whole
     // manifest is discarded and a pnpm monorepo reads as a plain single
     // project -- the same silent symptom the BOM strip on `package.json`
-    // exists to prevent, and thicket-specific: YAML permits a leading BOM and
+    // exists to prevent, and underbrush-specific: YAML permits a leading BOM and
     // pnpm reads the file fine. Stripped here rather than at the read, so this
     // pure function is correct on its own and the case needs no filesystem.
     expect(globsFromPnpmText("\uFEFFpackages:\n  - a/*\n")).toEqual(["a/*"]);
