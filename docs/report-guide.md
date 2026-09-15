@@ -10,31 +10,31 @@ what to do is your job, and this guide exists so you can decide well.
 
 ## This is not a lint report
 
-Nothing in the file is a defect, and the list is not a queue to be emptied.
-thicket ran a deterministic search — every AST node above a size threshold,
-fingerprinted exactly and again with identifiers erased, across every file in
-the program — and printed the highest-ranked few dozen of what can easily be
-tens of thousands of matches. The ranking is about size and contained-ness, not
-about whether a change is a good idea. There is no grade for the codebase, no
-threshold, and no exit code that means "too complex" — findings are ordered by
-an internal rank score (present in the JSON sidecar, not in Markdown) and that
-ordering means nothing outside the list. A repository with eighteen
-thousand candidates is not failing anything.
+Nothing in this file is a defect. The list is not a queue to empty.
 
-That division is the point of handing you the report rather than a diff. The
-search is the part a model does badly and expensively: two copies of a helper
-live in two files that were never open at the same time, and reading the whole
-tree to find them costs the whole tree in tokens. The judgement is the part a
-search cannot do at all. So the expected outcome of reading this file is **a
-small number of findings acted on and a stated reason for rejecting the rest** —
-not a large mechanical diff, and not a clean sheet.
+thicket searched the whole program. It looked at every AST node above a size
+threshold, twice: once as written, and once with the identifiers erased. That
+can easily turn up tens of thousands of matches, and it printed the top few
+dozen. The ranking is about how big a finding is and how contained it is. It
+says nothing about whether the change is a good idea.
 
-This matters most on code that was itself written by models, which is where
-thicket is usually pointed. An agent reimplements what it cannot see, so the
-same shape accumulates across files that never appear in one diff, often with
-every identifier renamed — which is exactly what an `L1` finding is. Expect
-genuine duplication, expect a lot of it, and expect a meaningful share of it to
-be fine as it is.
+There is no grade, no threshold, and no exit code that means "too complex". The
+rank score lives in the JSON sidecar, not in the Markdown, and it only orders
+this list. A repository with eighteen thousand candidates is not failing
+anything.
+
+You get a report instead of a diff because the two halves of this job need
+different tools. Searching is slow and expensive for you: two copies of a
+helper sit in two files you would never open together, and reading the whole
+tree costs the whole tree in tokens. Deciding is the part a search cannot do at
+all. So a good outcome here is **a few findings fixed, and a reason given for
+the ones you skipped**. Not a huge mechanical diff, and not an empty list.
+
+This matters most for code that models wrote, which is where thicket usually
+runs. An agent rewrites what it cannot see. The same shape spreads across files
+that never appear in one diff, often with every name changed. That is what an
+`L1` finding is. Expect real duplication, expect a lot of it, and expect a fair
+share of it to be fine as it is.
 
 ---
 

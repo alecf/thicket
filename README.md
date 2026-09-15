@@ -12,7 +12,7 @@ thicket never judges, never edits, never opens PRs. There is no score, no grade 
 
 ## How you use it
 
-thicket finds candidates. An LLM decides what to do about them. There are two ways to arrange that.
+thicket finds the candidates. An LLM decides which ones to fix. You can run thicket yourself, or let the agent run it.
 
 ### Run it yourself, hand the report over
 
@@ -20,27 +20,27 @@ thicket finds candidates. An LLM decides what to do about them. There are two wa
 thicket > thicket.md
 ```
 
-With no arguments it analyzes the current directory. It finds the tsconfig files itself, including every workspace of a monorepo — see [Usage](#usage).
+With no arguments it analyzes the current directory. It finds the tsconfig files on its own. In a monorepo it covers every workspace. See [Usage](#usage).
 
 Then ask an agent to read the file:
 
-> Read `thicket.md`. It lists duplication and dependency-cycle candidates, and it has not judged them. The top of the file links to a guide; fetch that first. Pick the findings worth acting on. Tell me what you rejected and why. Then do the top one.
+> Read `thicket.md`. It lists duplication and dependency-cycle candidates, and it has not judged them. The top of the file links to a guide. Fetch that first. Pick the findings worth acting on. Tell me what you rejected and why. Then do the top one.
 
-Every report links to [the field guide](https://alecf.github.io/thicket/report-guide.md), served as raw Markdown. The agent fetches that one URL and learns what each field means. It also learns how to tell a finding worth acting on from one that merely scored well.
+Every report links to [the field guide](https://alecf.github.io/thicket/report-guide.md), as raw Markdown. The agent fetches it and learns what every field means. The guide also says which findings to skip and why.
 
 ### Let the agent run it
 
-It is one command with text output, so the agent can do the run too:
+It is one command that prints text, so the agent can run it too:
 
 > Run `thicket > thicket.md` and read the report. Pick the one finding you are most sure about, and fix it. Then re-run thicket and show me that the finding is gone.
 
-If you do this often, put the command in the repository's own `CLAUDE.md` or `AGENTS.md`:
+If you do this often, put the command in your `CLAUDE.md` or `AGENTS.md`. Then the agent already knows it:
 
 ```markdown
 ## Finding cleanup work
 
 `thicket > thicket.md` reports duplicated code and dependency cycles. The
-findings are candidates, not defects, and plenty are not worth fixing. The
+findings are candidates, not defects. Plenty of them are not worth fixing. The
 report links to a guide that explains every field. Read it before acting.
 ```
 
@@ -60,34 +60,34 @@ thicket diff before.json after.json
   - THK-DUP-c389b5be
 ```
 
-Finding IDs come from content, not from position. So `diff` reports what the agent resolved, not what it touched. An agent that reformatted the copies and declared victory shows up as zero resolved.
+A finding gets its ID from the code itself, not from where the code sits. So the diff shows you what the agent really fixed. Code that only moved keeps its ID, and an agent that reformatted the copies and called it done shows up as zero resolved.
 
 ## It is not a linter
 
 thicket does not score your codebase. Nothing in the report is a defect.
 
-- **No grade and no threshold.** It exits 0 whether it found 3 findings or 18,000. Whether that is too much duplication depends on your deadlines and your team, and a tool that answered it would be guessing.
-- **The summary numbers are trends.** `duplicated mass` double-counts nested clusters on purpose. Compare one codebase against itself after a refactor. Do not compare two codebases.
-- **Every finding is a candidate**, and the answer is frequently no. Nineteen classes that differ only in the *values* of `loincCode` and `unit` are one concept with a parameter list. A hundred and ninety-three objects that differ in their *field names* are different things sharing a syntax template. The only abstraction available there is a generic `pick` that no future change benefits from. The report ranks with that distinction in mind, and [the guide says how to check it](docs/report-guide.md#is-this-duplication-worth-removing).
+- **No grade and no threshold.** It exits 0 whether it found 3 findings or 18,000. Is that too much duplication? That depends on your deadlines and your team. A tool that answered would be guessing.
+- **The summary numbers are trends.** `duplicated mass` counts nested clusters twice, on purpose. Compare one codebase against itself after a refactor. Do not compare two different codebases.
+- **Every finding is a candidate**, and often the answer is no. Ask what changes between the copies. If nineteen classes differ only in the *value* of `loincCode` and `unit`, that is one class with two settings, and merging them pays off. If a hundred objects each use *different field names*, they are different things that happen to look alike. Merging those gets you a `pick` helper and nothing else. The report ranks with that in mind, and [the guide says how to check](docs/report-guide.md#is-this-duplication-worth-removing).
 
-The split of labour is the design. A deterministic pass finds every exact and α-renamed repeat in the tree. The model then spends its judgement on the few dozen candidates that come back, rather than on the search.
+That split is the point. thicket does the searching: it finds every repeat in the tree, including copies where the names were changed. The agent does the thinking, on the few dozen candidates that come back.
 
-That order is also the cheap one. A model cannot see duplication in files it never opened. Reading a whole repository to look for it costs a whole repository in tokens. One real application here is 5,798 files and 1.5M lines.
+It is also the cheap way round. A model only sees the files it opens, and opening every file costs tokens for every file. One real application here is 5,798 files and 1.5M lines.
 
 ## Especially for code an LLM wrote
 
-An agent writes what it can see. It cannot see the helper in a file it did not open, so it writes that helper again. Each diff looks fine on its own, and the copies pile up. The next session starts with an empty context and does it again.
+An agent writes what it can see. It misses the helper in a file it never opened, so it writes that helper again. Every diff looks fine on its own. The copies add up. The next session starts fresh and does it again.
 
-That is the pattern thicket finds: the same code in files that never share a diff, often with every identifier renamed. `L1` matching exists for that case.
+thicket finds exactly that. It matches the same code across files, even when every name is different. That is what `L1` matching is for.
 
-The report is a pure function of the source, so it is safe to run on a schedule. Run it weekly and compare against the last one:
+The same code always gives the same report, so you can run it on a schedule. Run it once a week and compare it to last week:
 
 ```bash
 thicket --json .thicket/this-week.json > thicket.md
 thicket diff .thicket/last-week.json .thicket/this-week.json
 ```
 
-Then hand `thicket.md` to an agent. Treat it as cleanup, not as a gate: a required check would make it the linter it is not.
+Then hand `thicket.md` to an agent. Use it for cleanup. Do not turn it into a required check, because that would make it the linter it is not.
 
 ## Install
 
