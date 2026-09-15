@@ -147,6 +147,47 @@ the warm path invents findings the cold path suppresses (114 of them on a
 
 Analysis and benchmarking happen against real private repositories. **Do not name them, path them, or quote their source in code, comments, docs, commit messages, or test fixtures.** Refer to "a sample project," "test repositories," or the anonymized "Sample A"/"Sample B" used in the PRD. Fixtures live in `tests/fixtures/` and are written by hand.
 
+### 6b. Write in Technical Standard English
+
+This applies to everything: the README, the site, `docs/`, code comments, commit
+messages, PR descriptions, CLI output, and what you say to the person you are
+working with. One voice, everywhere.
+
+The rules:
+
+- **One idea per sentence.** Twenty words is the ceiling. Fifteen is better.
+- **Subject, verb, object, in that order.** Active voice. Present tense.
+- **No chained clauses.** No em dash carrying the meaning, no semicolon joining
+  two balanced halves, no "not X but Y", no trailing "instead of Z", no
+  appositive stacked on an appositive. If a sentence needs a dash to hold
+  together, it is two sentences.
+- **Plain words.** Write "thicket does the searching", not "a deterministic
+  pass finds". Write "the agent decides", not "the model spends its judgement".
+  Say the thing. Do not narrate it.
+- **Name the actor.** "thicket follows a re-export shim" beats "a re-export shim
+  is followed through".
+- **One term per concept, reused.** A finding is a finding on every page. Do
+  not reach for a synonym to vary the prose.
+- **Put the point first.** State the fact, then the evidence for it. Do not
+  build to it.
+
+What this does NOT license:
+
+- **Deleting the evidence.** Every measurement in this repository is here
+  because someone got the answer wrong without it. Rewrite the sentence, keep
+  the number. When a section is dense with facts, break it into subheadings
+  rather than cutting it down.
+- **Dropping precision.** "α-renamed" and "strongly connected component" are
+  the right words and there is no simpler one. Plain means plainly built, not
+  vague.
+
+The failure mode this exists to stop is prose that reads as though a model wrote
+it. A real reader hit a five-clause sentence about symlink resolution, and gave
+up on the page before the install command. Measure the result rather than
+trusting your ear: a rewritten page should come in around 10 words per sentence
+with almost no em dashes. `README.md` went from 19.3 words and 101 em dashes to
+13.2 and 6, and the six that remain are quoting the report's own output.
+
 ### 7. What ships is a directory, and the binary must be run to be tested
 
 Analysis goes through `typescript/unstable/async`, which spawns a **native tsgo

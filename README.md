@@ -6,7 +6,7 @@ A CLI that analyzes a TypeScript codebase and emits a **deterministic plaintext 
 thicket report → LLM picks targets → LLM refactors → thicket report → …
 ```
 
-thicket never judges, never edits, never opens PRs. There is no score, no grade and no pass/fail — [it is not a linter](#it-is-not-a-linter). It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding what is worth fixing, and when progress is sufficient, is the reader's job.
+thicket never judges, never edits, and never opens PRs. There is no score, no grade and no pass or fail. [It is not a linter](#it-is-not-a-linter). It produces **ranked candidates with precise locations** plus a handful of scalar metrics a harness can watch trend across iterations. Deciding what is worth fixing, and when progress is sufficient, is the reader's job.
 
 > **Status: v1, early.** Duplication and module tangle work end to end and are covered by tests; the simplification checks and near-miss duplication described below are not in v1 (see [Known limits](#known-limits)).
 
@@ -95,9 +95,9 @@ Then hand `thicket.md` to an agent. Use it for cleanup. Do not turn it into a re
 brew install alecf/tap/thicket
 ```
 
-Or download a tarball from [Releases](https://github.com/alecf/thicket/releases), extract it, and put the `thicket` binary on your `PATH` — a symlink is fine, it finds its own files through it. Prebuilt for macOS and Linux on arm64 and x64.
+You can also download a tarball from [Releases](https://github.com/alecf/thicket/releases). Unpack it and put `thicket` on your `PATH`. A symlink works. macOS and Linux are prebuilt, for arm64 and x64.
 
-The npm name is taken by an unrelated package; `npx thicket` currently fetches something else. That is [being sorted out](https://github.com/alecf/thicket/issues).
+The npm name belongs to an unrelated package, so `npx thicket` fetches something else right now. That is [being sorted out](https://github.com/alecf/thicket/issues).
 
 ### From a clone
 
@@ -106,44 +106,46 @@ bun install
 bun run thicket --help
 ```
 
-`bun run thicket` executes `src/cli.ts` directly — no build step, Bun ≥1.4. The examples below spell that form out; with an installed binary, drop `bun run`.
+`bun run thicket` runs `src/cli.ts` directly. There is no build step. You need Bun 1.4 or later. The examples below use that form. With an installed binary, drop the `bun run`.
 
 ### What is in the tarball
 
-thicket analyzes through the TypeScript compiler's native `tsgo` binary, which it spawns as a child process. So the download is a **directory**, not a lone file:
+thicket analyzes your code with `tsgo`, the TypeScript compiler's native binary, and it starts `tsgo` as a child process. So the download is a **folder**, not a single file:
 
 ```
 thicket            the CLI (~65–83 MB)
 tsgo/tsc           the native compiler (~24 MB)
-tsgo/lib.*.d.ts    its standard library — it will not start without these
+tsgo/lib.*.d.ts    its standard library. tsgo will not start without these
 ```
 
-Keep them together. `thicket` locates `tsgo/` relative to its own executable, resolving through symlinks, so installing anywhere and symlinking onto your `PATH` works; copying the binary out on its own does not. To point at a different tsgo build, set `THICKET_TSGO` — its version joins the report's config hash, so a swap invalidates the cache rather than silently changing the answer.
+Keep them together. `thicket` looks for `tsgo/` next to its own executable, and it follows symlinks to get there. So you can install the folder anywhere and link `thicket` onto your `PATH`. Copying the binary out on its own does not work.
+
+To use a different tsgo build, set `THICKET_TSGO`. Its version is part of the report's config hash, so switching builds clears the cache instead of quietly changing the answer.
 
 ## Usage
 
-Point it at a directory, or at nothing, which means `.`. The report goes to stdout, so it pipes:
+Point it at a directory. With no argument it uses the current one. The report goes to stdout, so it pipes:
 
 ```bash
 bun run thicket
 bun run thicket ./packages/web > report.md
 ```
 
-thicket finds the tsconfigs itself: it reads the directory's `package.json` and `pnpm-workspace.yaml` for declared workspaces and analyzes each one's config, falling back to `<dir>/tsconfig.json` when there are none. `--no-workspaces` skips the manifests entirely.
+thicket finds the tsconfig files itself. It reads `package.json` and `pnpm-workspace.yaml` for declared workspaces, then analyzes each workspace's config. If there are no workspaces, it uses `<dir>/tsconfig.json`. `--no-workspaces` skips the manifests entirely.
 
-`--filter` narrows that selection the way turbo and pnpm do — by package name or by `./path`, where `*` is a wildcard and `!` negates. Filters are repeatable and applied in order:
+`--filter` narrows that selection, the way turbo and pnpm do. Match a package by name or by `./path`. `*` is a wildcard and a leading `!` removes matches. Filters are repeatable, and they apply in order:
 
 ```bash
 bun run thicket --filter '@acme/*' --filter '!@acme/legacy-ui'
 ```
 
-`--config` names tsconfigs explicitly instead, and turns discovery off. Passing the same path twice does nothing useful — the TypeScript API dedupes by path — but genuinely distinct configs are analyzed as one corpus, so a package duplicated across two of them is found:
+`--config` names the tsconfig files yourself, and turns discovery off. Repeat it for each one. Passing the same path twice does nothing, because the TypeScript API drops duplicates. Passing different configs analyzes them together as one body of code, so thicket finds a package that was duplicated across two of them:
 
 ```bash
 bun run thicket --config packages/a/tsconfig.json --config packages/b/tsconfig.json
 ```
 
-For the loop, keep the JSON sidecar and diff it against the next iteration's, as in [Close the loop](#close-the-loop) above:
+For the loop, keep the JSON sidecar and diff it against the next one. [Close the loop](#close-the-loop) above shows the short form:
 
 ```bash
 bun run thicket --config ./tsconfig.json --json before.json > /dev/null
@@ -152,27 +154,27 @@ bun run thicket --config ./tsconfig.json --json after.json  > /dev/null
 bun run thicket diff before.json after.json
 ```
 
-`diff` exits 0 because the comparison ran, not because the numbers improved. Whether a delta is good enough is a policy question, and a tool that encoded one in its exit code would be judging.
+`diff` exits 0 because the comparison ran, not because the numbers got better. Whether a change is good enough is your call. A tool that answered it in an exit code would be judging.
 
 ### Flags
 
 | Flag | Meaning |
 |---|---|
 | `[dir]` | Directory to analyze, default `.`. Its workspaces are discovered from `package.json` / `pnpm-workspace.yaml`. |
-| `--filter <pattern>` | Analyze only these workspaces, by package name or `./path`; `*` is a wildcard and a leading `!` negates. **Repeatable**, applied in order. |
+| `--filter <pattern>` | Analyze only these workspaces. Match by package name or `./path`. `*` is a wildcard and a leading `!` removes matches. **Repeatable**, applied in order. |
 | `--no-workspaces` | Ignore workspace manifests and analyze `<dir>/tsconfig.json` alone. |
-| `--config <path>` | tsconfig to analyze, instead of discovering any. **Repeatable.** A solution-style config that owns no files and only lists `references` is expanded. |
-| `--depth <1..5>` | Preset for how deep to look: sets the minimum fragment size and the findings cap per section. Default `3`. |
-| `--min-nodes <n>` | Override the depth preset's minimum fragment size, in AST nodes. Smaller means more, finer candidates. |
-| `--min-lines <n>` | Override the depth preset's minimum fragment size, in lines. A node count does not bound this — 15 AST nodes fit on one line — and extracting a one-line shape is a strict loss. |
-| `--budget-tokens <n>` | Hard ceiling on the whole report. Findings are dropped from the bottom of the ranking and the count dropped is always printed. |
-| `--max-locations <n>` | Cap the files each finding names. Unset — the default — names every one, so an agent can reach every copy. |
+| `--config <path>` | tsconfig to analyze, instead of finding them. **Repeatable.** A solution-style config that owns no files and only lists `references` is expanded. |
+| `--depth <1..5>` | How deep to look. Sets the smallest fragment size and the findings cap per section. Default `3`. |
+| `--min-nodes <n>` | Set the smallest fragment size in AST nodes, overriding `--depth`. Smaller means more and finer candidates. |
+| `--min-lines <n>` | Set the smallest fragment size in lines, overriding `--depth`. The node count does not control this, because 15 AST nodes can fit on one line. Extracting a one-line shape always costs more than it saves. |
+| `--budget-tokens <n>` | Hard ceiling on the whole report. Findings drop off the bottom of the ranking, and the report always prints how many it dropped. |
+| `--max-locations <n>` | Cap the files each finding names. By default there is no cap, so an agent can reach every copy. |
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
-| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and friends, which are excluded by default. Matching is by whole path segment, so `src/distance/` is source either way. It also stops honouring a file's own `@generated` banner. |
-| `--no-banner-scan` | Stop treating an `@generated` / "auto-generated" banner as generated, without bringing the excluded directories back. Each opinion has its own off switch. |
-| `--exclude <glob>` | Skip files matching this glob. **Repeatable.** An instruction rather than a guess, so `--include-generated` does not cancel it. |
-| `--types <mode>` | `include` (default), `exclude`, or `only` — whether type declarations and type-only imports are analyzed. |
-| `--json <path>` | Additionally write the JSON sidecar here. The Markdown still goes to stdout. |
+| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and the like, which are skipped by default. Matching is on whole path segments, so `src/distance/` counts as source either way. This also stops thicket honouring a file's own `@generated` banner. |
+| `--no-banner-scan` | Stop reading an `@generated` or "auto-generated" banner as a sign the file is generated. The skipped directories stay skipped. Each opinion has its own off switch. |
+| `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
+| `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
+| `--json <path>` | Also write the JSON sidecar here. The Markdown still goes to stdout. |
 | `--no-cache` | Re-analyze every file, ignoring `.thicket/cache.db`. |
 | `--help` | Print usage. |
 
@@ -186,14 +188,14 @@ The depth presets, in full:
 | 4 | 10 | 3 | 80 |
 | 5 | 6 | 2 | 200 |
 
-`--depth` is the knob a human turns; `--budget-tokens` is the knob a harness turns, because a harness knows its context window and not its desired depth.
+`--depth` is the knob a person turns. `--budget-tokens` is the knob a harness turns, because a harness knows its context window but not how deep you want to look.
 
 ### Commands
 
 | Command | Meaning |
 |---|---|
-| `diff <before.json> <after.json>` | Compare two `--json` sidecars: findings resolved, findings added, and how each metric moved. Analyzes nothing, so it needs no tsconfig. |
-| `cache clear` | Delete `.thicket/cache.db` for the analyzed project. Takes the same `--config` flags, because the cache lives with the codebase rather than with the working directory. |
+| `diff <before.json> <after.json>` | Compare two `--json` sidecars. Shows findings resolved, findings added, and how each metric moved. It analyzes nothing, so it needs no tsconfig. |
+| `cache clear` | Delete `.thicket/cache.db` for the project. Takes the same `--config` flags, because the cache lives with the codebase and not with your working directory. |
 
 ## Report format
 
@@ -277,75 +279,115 @@ flowchart LR
 
 `````
 
-That fixture holds three structurally identical `normalize` functions, two of which are byte-identical, and an `alpha ↔ gamma` import cycle. Both duplication findings are real and they are not the same finding: the **L1** one covers all three functions (identical once identifiers are α-renamed), the **L0** one covers only the two that match byte for byte — and it is reported as a `Block` rather than a `FunctionDeclaration` because the two functions have different *names*, so the largest exactly-equal node is the body.
+That fixture holds three `normalize` functions with the same structure, two of them byte-identical, plus an `alpha ↔ gamma` import cycle. Both duplication findings are real, and they are not the same finding. The **L1** one covers all three functions, which match once the identifiers are α-renamed. The **L0** one covers only the two that match byte for byte. It is reported as a `Block` rather than a `FunctionDeclaration` because those two functions have different *names*, so the largest node that matches exactly is the body.
 
-Findings appear under `## Duplication`, then `## Module tangle`, then `## Duplication in tests` — which is also the order a token budget spends itself in, so pressure costs test hygiene before it costs production work.
+Findings run in this order: `## Duplication`, then `## Module tangle`, then `## Duplication in tests`. A token budget cuts from the bottom, so a tight budget costs you test hygiene before it costs production work.
 
-Reading a finding: the heading carries the id to cite and the size to judge by, and the line under it carries `L0`/`L1` (the normalization level), the AST kind, the ranker's `score` (only the ordering is meaningful, not the units), and a `[test]`/`[mixed]` tag where one applies. `~10 lines` is the median span of one copy, and `~16 lines recoverable` is what a successful extraction deletes — `(copies − 1) × (lines − 1)`, less the signature the extracted definition costs. Locations are collapsed to one entry per file — `src/beta.ts:3,14` is two occurrences in one file — and **every** location is listed. They used to be capped at six files, which read as `… and 13 more files`: a line that tells an agent work remains and gives it no way to reach the work, leaving it to grep for the shape by hand. `--max-locations <n>` restores a cap for callers who would rather truncate a finding than lose it whole to a token budget.
+### Reading a finding
 
-**The report is valid CommonMark**, and that is a tested property rather than an aspiration: `tests/markdown-validity.test.ts` checks the rendered report, the golden file, a scope-warning report and a truncated one for indented prose, unseparated headings, unbalanced fences, and tables missing a delimiter row. It matters because the earlier plaintext-ish format was *not* valid Markdown in a way that only showed up once rendered — every body line was indented two spaces, which CommonMark folds into the preceding paragraph, so the whole Summary collapsed onto one line and the four-space excerpt was swallowed by the location list above it instead of becoming a code block. (An indented code block cannot interrupt a paragraph; only a fenced one can.) Excerpt fences are tagged with the language of the file they came from and are lengthened past any backtick run in the source, so a fragment containing a template literal or a Markdown snippet cannot close its own block and spill the rest of the report onto the page as prose.
+The heading gives you the id to cite and the size to judge by. The line under it gives you `L0` or `L1`, the AST kind, the rank score, and a `[test]` or `[mixed]` tag when one applies. Only the order of the score means anything; the units do not.
 
-The fenced block under each finding is the head of its first occurrence. An AST kind alone — `PropertyAssignment`, `Block` — does not say whether a finding is worth acting on, and deciding without an excerpt means opening files that a single cluster can span a hundred of.
+`~10 lines` is the median size of one copy. `~16 lines recoverable` is what a successful extraction deletes: `(copies − 1) × (lines − 1)`, minus the signature the extracted version costs.
 
-Above the excerpt, each finding carries two facts about its **surroundings**:
+Locations list one entry per file, so `src/beta.ts:3,14` means two copies in one file. **Every** location is listed. They used to stop at six files and print `… and 13 more files`, which told an agent there was work left and gave it no way to reach the work. It grepped for the shape by hand instead. `--max-locations <n>` brings the cap back if you would rather truncate a finding than lose it to a token budget.
 
-- **`every copy imports:`** repo files that every file in the cluster imports, excluding ones the rest of the codebase imports just as often. This is where the copies' shared vocabulary already lives, and often where the abstraction already is. On a real report the top finding was 19 duplicated classes, and this line named the base class that already had the exact generic factory methods all 19 reimplement — the difference between "design an abstraction" and "delete the overrides".
+The fenced block under each finding is the head of its first copy. An AST kind on its own, like `PropertyAssignment` or `Block`, tells you nothing about whether the finding is worth acting on. Without the excerpt you have to open files, and one cluster can span a hundred of them.
 
-  A **re-export shim is followed through**: `models/vitals/VitalObservation.ts → packages/models/src/wearables/VitalObservation.ts`. Naming only the first is how that same finding failed on the next run — the file it named is nine lines of `export * from`, and the 1012-line base class the whole refactor turns on was one hop further on, leaving an agent to find it by hand. A file is followed only when it forwards exactly one module and imports nothing on its own account; a thirty-module barrel stands for no single thing, so it is named as itself.
-- **`directly imported by:`** how many files outside the cluster reach into it. This is what turns "this looks big" into "this is contained", and it is what decides whether a finding gets scheduled. A re-export barrel among those importers hides its own consumers behind it, so what it hides is counted and the barrel named: `5 files outside the cluster, and 17 files more through models/vitals/index.ts`. The bare 5 was a floor presented as a total, and an agent that went and checked concluded the number was a bug.
+### The report is valid CommonMark
 
-  The line is **omitted entirely for a cluster of test files**, where it is a constant dressed as evidence: nothing imports a test file, so `nothing outside the cluster` holds for every such finding and distinguishes none of them.
+This is a tested property, not an aspiration. `tests/markdown-validity.test.ts` checks the rendered report, the golden file, a scope-warning report, and a truncated one. It looks for indented prose, headings with no blank line before them, unbalanced fences, and tables missing their delimiter row.
 
-Findings are also weighted by **whether consolidating them would buy anything**. Copy count measures how much is duplicated; it says nothing about whether merging leaves the code better. Two clusters can look identical to the ranker and have opposite answers:
+It matters because the older plaintext-ish format was not valid Markdown, and you only saw it once something rendered the file. Every body line was indented two spaces. CommonMark folds that into the paragraph above. The whole Summary collapsed onto one line, and the location list swallowed the four-space excerpt instead of letting it become a code block. An indented code block cannot interrupt a paragraph. Only a fenced one can.
 
-- 19 observation classes differing only in the strings `loincCode`, `unit` and `junctionKey` hold. Same fields, different values — one concept with a parameter list, which a base class absorbs. Worth ~2200 lines.
-- 193 three-field projections spanning 89 key-sets, 62 appearing exactly once — `{ labOrderId: p.labOrderId, … }` beside `{ average: s.average, … }`. Different fields, so these are different objects that happen to share a syntax template, and the only abstraction available is a generic `pick` no future change can benefit from.
+Excerpt fences carry the language of the file they came from. They are also longer than any run of backticks inside them. So a fragment holding a template literal or a Markdown snippet cannot close its own block and spill the rest of the report onto the page as prose.
 
-Both are L1 clusters with almost no exactly-identical members, and the second one ranked **second in the report** while two agents asked to act on it independently declined. The discriminator is whether the copies' *field names* drift: same names with different values is one shape parameterized; different names is several shapes wearing one template. Renamed locals do not count — that is what an L1 match already means, and it is extractable. The penalty is graded by the share of field names that drift, and applies to a pool three times the section's size before the slice is taken, because the signal needs token streams the ranker cannot afford across eighteen thousand candidates.
+### What each finding says about its surroundings
 
-A fourth names **what differs between the copies**:
+Two lines above the excerpt describe the code around the copies.
+
+- **`every copy imports:`** files that every copy in the cluster imports. Files the rest of the codebase imports just as often are left out. This is where the copies' shared vocabulary already lives, and often where the abstraction already lives too. On a real report, the top finding was 19 duplicated classes, and this line named the base class that already had the generic factory methods all 19 reimplement. That is the difference between designing an abstraction and deleting the overrides.
+
+  thicket **follows a re-export shim through** to the real file: `models/vitals/VitalObservation.ts → packages/models/src/wearables/VitalObservation.ts`. Naming only the first file is how that same finding failed on the next run. The file it named is nine lines of `export * from`, and the 1012-line base class the whole refactor turns on was one hop further on. The agent had to find it by hand. thicket follows a file only when it forwards exactly one module and imports nothing of its own. A thirty-module barrel does not stand for any single thing, so it is named as itself.
+- **`directly imported by:`** how many files outside the cluster reach into it. This turns "this looks big" into "this is contained", and it usually decides whether the work gets scheduled. A re-export barrel hides its own consumers, so thicket counts what the barrel hides and names it: `5 files outside the cluster, and 17 files more through models/vitals/index.ts`. The bare 5 was a floor printed as a total. An agent checked it, found 22, and reported the number as a bug.
+
+  The line is **left out for a cluster of test files**. Nothing imports a test file, so `nothing outside the cluster` is true of every such finding and tells you nothing about any of them.
+
+### Whether merging would buy anything
+
+Copy count tells you how much is duplicated. It does not tell you whether merging leaves the code better. Two clusters can look the same to the ranker and have opposite answers:
+
+- 19 observation classes that differ only in the strings `loincCode`, `unit` and `junctionKey`. Same fields, different values. That is one concept with a parameter list, and a base class absorbs it. Worth about 2200 lines.
+- 193 three-field projections covering 89 different key sets, 62 of which appear exactly once. `{ labOrderId: p.labOrderId, … }` next to `{ average: s.average, … }`. Different fields, so these are different objects that happen to share a syntax template. The only abstraction available is a generic `pick`, and no future change benefits from it.
+
+Both are L1 clusters with almost no exactly-identical members. The second ranked **second in the report**, and two agents asked to act on it turned it down. So thicket asks whether the *field names* drift. Same names with different values is one shape with parameters. Different names is several shapes wearing one template. Renamed locals do not count, because that is what an L1 match already means, and it extracts fine.
+
+The penalty scales with the share of field names that drift. It runs on a pool three times the size of the section, before the top findings are sliced off. It needs token streams, and the ranker cannot afford those across eighteen thousand candidates.
+
+### What varies between the copies
 
 - **`varies across copies:`** `loincCode` (18), `loincDisplay` (19), `unit` (13), `unitCode` (13)
 
-Reporting the sameness without the variation is what made a real finding read as "19 similar classes" when it was "19 rows of a config table that got compiled into classes" — and the second phrasing hands you the abstraction: a base class with four static fields. An agent asked to act on that finding spent most of its investigation rebuilding this list by hand. Only **literal values** are named: an identifier that differs is what an L1 match already means, and reporting each renamed local under whatever identifier precedes it buries the constants that matter under a dozen `x`, `y`, `sqrt`. The number is distinct values, and it is worth reading — the line above comes from a 19-copy cluster with 18 distinct LOINC codes, because two of the classes declare the same one. That is a live query-correctness bug with nothing to do with duplication, and the agent that found it had to extract the constants itself to see it.
+Report the sameness without the variation and a real finding reads as "19 similar classes". It was really 19 rows of a config table that someone compiled into classes, and that second phrasing hands you the abstraction: a base class with four static fields. One agent spent most of its investigation rebuilding this list by hand.
 
-A line also appears when the same shape occurs somewhere it is **not** a copy of this finding:
+Only **literal values** are named. An identifier that differs is what an L1 match already means, and listing every renamed local buries the constants that matter under a dozen entries for `x`, `y` and `sqrt`.
+
+The number is how many distinct values that field takes, and it is worth reading. The line above comes from a 19-copy cluster with 18 distinct LOINC codes, because two of the classes declare the same one. That is a live query-correctness bug, and it has nothing to do with duplication. The agent that found it had to extract the constants itself to see it.
+
+### Where the fix might already exist
 
 - **`same shape in other surroundings:`** `apps/web/vitest.setup.tsx:36`, … and 19 more files
 
-This is the report's cheapest pointer at code that may already *be* the extraction, and it costs nothing to compute — it is what subsumption was already throwing away. When a smaller cluster collapses into a larger one, the occurrences of the smaller that do not sit inside the larger are exactly "this fragment, nested differently", and that is where a deduplicated version tends to live. On a real application, 115 copies of a `matchMedia` stub read as "extract a helper into 115 files" until you know the identical block already sits in the project's configured Vitest setup file behind one extra guard — at which point all 115 are dead code and the work is to delete them. An agent given the finding without this line planned the wrong refactor. Locations are ordered **shallowest path first**, because a shared thing lives higher in the tree than its copies do; alphabetical order buried that setup file under twenty test files nested six directories deeper.
+This is the report's cheapest pointer at code that may already *be* the extraction, and it costs nothing to compute. It is what subsumption used to throw away. When a smaller cluster collapses into a larger one, the copies of the smaller that do not sit inside the larger are the same fragment nested somewhere else. That is where a deduplicated version tends to live.
 
-A third line appears when two printed findings are **near-variants of one shape**:
+On a real application, 115 copies of a `matchMedia` stub read as "extract a helper into 115 files". The identical block already sat in the project's Vitest setup file behind one extra guard, which made all 115 dead code. The work was to delete them. An agent that got the finding without this line planned the wrong refactor.
+
+Locations are sorted **shallowest path first**, because a shared thing lives higher in the tree than its copies do. Alphabetical order buried that setup file under twenty test files six directories deeper.
+
+### Near-variants of the same shape
 
 - **`see also THK-DUP-…:`** `81% the same shape, 5 more copies`
 
-L1 equality is exact once identifiers are renamed, so a template and a copy of it with one field inserted become two separate findings with nothing connecting them. On a real report that was 19 duplicated classes and 5 more that sat two lines from the same template — acting on the report alone leaves the five behind and costs a second visit. Similarity is shingle Jaccard over the L1 token stream, computed only among the findings actually printed, and the threshold was measured rather than guessed: across 758 non-overlapping pairs the genuine template-and-variant pair scored **0.813**, the next pair **0.462**, and everything else below 0.31, so the bar sits in the empty band between.
+An L1 match is exact once identifiers are renamed. So a template, and a copy of it with one field inserted, become two findings with nothing linking them. On a real report that was 19 duplicated classes, plus 5 more that sat two lines from the same template. Act on the report alone and you leave the five behind and pay for a second visit.
 
-The pairs it must *not* link are fragments and their own ancestors, which PRD §5.4 flags and which the same measurement confirmed — the two most similar pairs of all scored 1.000 and 0.921 and both were a node beside the node containing it. Overlapping occurrences are excluded outright.
+Similarity is shingle Jaccard over the L1 token stream, computed only among the findings actually printed. The threshold was measured, not guessed. Across 758 non-overlapping pairs, the real template-and-variant pair scored **0.813**, the next pair scored **0.462**, and everything else came in below 0.31. The bar sits in the empty band between.
 
-All three came from handing a report to agents that had never seen this tool and asking whether its top finding was actionable. Three of them, independently, named the same gap — the report said "here are 19 identical things" and nothing about the code around them, and the surrounding facts were what decided feasibility in every case.
+The pairs it must *not* link are fragments and their own ancestors, which PRD §5.4 flags. The same measurement confirmed it: the two most similar pairs scored 1.000 and 0.921, and both were a node next to the node containing it. Overlapping occurrences are excluded outright.
 
-Size is the point of those two numbers. Three duplicated lines are not worth a refactor and thirty are, and a reader cannot tell which they are looking at from an AST node count: 17 nodes is four lines in one finding and eleven in the next.
+All three of these lines came from handing a report to agents that had never seen this tool, and asking whether the top finding was actionable. Three of them named the same gap independently. The report said "here are 19 identical things" and said nothing about the code around them, and the surrounding code decided feasibility every time.
 
-`findings 3 of 3 shown` is load-bearing. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is finished.
+### The numbers in the heading
 
-When findings are held back, an **Omitted** section says what is in them: a count per category, and a histogram of the duplication candidates by recoverable lines. A bare count does not survive contact with a real repository — one run reported `18768 further findings omitted`, which argues equally well for a codebase drowning in cycles, for one tangle restated thousands of times, and for thresholds that admit mostly noise. The breakdown settled it in two lines: exactly **2** of the 18,808 were cycles, and **62%** of the duplication recovers fewer than ten lines. The histogram covers every candidate, not only the withheld ones, because the question is what kind of pile the printed findings came off.
+Size is why both numbers are there. Three duplicated lines are not worth a refactor and thirty are, and you cannot tell which you are looking at from an AST node count. 17 nodes is four lines in one finding and eleven in the next.
+
+`findings 3 of 3 shown` carries weight. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is done.
+
+When findings are held back, an **Omitted** section says what is in them: a count per category, and a histogram of the duplication candidates by recoverable lines. A bare count does not survive a real repository. One run reported `18768 further findings omitted`, which reads equally well as a codebase drowning in cycles, as one tangle restated thousands of times, or as thresholds that admit mostly noise. The breakdown settled it in two lines. Exactly **2** of the 18,808 were cycles, and **62%** of the duplication recovers fewer than ten lines. The histogram covers every candidate, not just the withheld ones, because the question is what kind of pile the printed findings came off.
 
 ### Two duplication sections
 
-Duplication whose copies are mostly test files goes in a **`## Duplication in tests`** section of its own, with its own much smaller cap, below the production findings and below the module tangle.
+Duplication whose copies are mostly test files goes in its own **`## Duplication in tests`** section. It sits below the production findings and below the module tangle, and it gets a much smaller cap.
 
-This is a split rather than a weight because no weight worked. Test scaffolding took **10 of the top 40** slots on a real application — 231 copies of `{ info: vi.fn(), warn: vi.fn() }`, 124 of `afterEach(() => vi.restoreAllMocks())` — and the ranker was right that they were large: `recoverableLines` is `(copies − 1) × (linesPerCopy − 1)`, so a 6-line shape repeated 231 times genuinely does dominate a 30-line clone repeated twice. Sweeping the test down-weight from 0.4 to 0 moved the count from 10 to 0 continuously, with no natural break anywhere on the curve — every threshold was an arbitrary point on a smooth tradeoff, and the ones low enough to clear the top 40 also buried real cross-test duplication.
+This is a split rather than a weight because no weight worked. On a real application, test scaffolding took **10 of the top 40** slots: 231 copies of `{ info: vi.fn(), warn: vi.fn() }`, and 124 copies of `afterEach(() => vi.restoreAllMocks())`. The ranker was right that they were large. `recoverableLines` is `(copies − 1) × (linesPerCopy − 1)`, so a 6-line shape repeated 231 times really does beat a 30-line clone repeated twice.
 
-Separating the sections makes the question moot: the two kinds of work no longer compete for a slot, and neither has to be scored against the other. On that application the production section's lead finding became a **19×-duplicated 124-line class (2,212 recoverable lines)** that mock setup had been sitting on top of. A tie counts as test — a cluster half of whose copies are test files is as much scaffolding as it is production duplication — and the split is on the measured share, never on the `[mixed]` tag, since a cluster that is 95% test files is tagged `mixed` and is still scaffolding.
+Sweeping the test down-weight from 0.4 to 0 moved that count from 10 to 0 smoothly, with no natural break anywhere on the curve. Every threshold was an arbitrary point on a smooth tradeoff, and the ones low enough to clear the top 40 also buried real duplication between tests.
 
-Note that raising `--min-lines` does **not** substitute for this. Going from 4 to 10 on that repository dropped 29 of the top 40 findings and 32% of the recoverable lines — deleting 67 copies of a column-selection object and 39 copies of a shared static method along with the noise — while the test-scaffolding count in the top 40 went only from 10 to 9.
+Separate sections make the question go away. The two kinds of work no longer compete for a slot, so neither has to be scored against the other. On that application, the production section's new lead finding was a **124-line class duplicated 19 times, worth 2,212 recoverable lines**, which mock setup had been sitting on top of.
 
-That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI additionally renders it on Linux and on macOS under a locale whose collation disagrees with code-unit order, and fails if the two machines disagree by a single byte.
+A tie counts as test: a cluster with half its copies in test files is as much scaffolding as it is production duplication. The split uses the measured share, never the `[mixed]` tag, because a cluster that is 95% test files is tagged `mixed` and is still scaffolding.
+
+Raising `--min-lines` is not a substitute. Going from 4 to 10 on that repository dropped 29 of the top 40 findings and 32% of the recoverable lines. It deleted 67 copies of a column-selection object and 39 copies of a shared static method along with the noise. The test scaffolding in the top 40 went from 10 findings to 9.
+
+That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI also renders it on Linux and on macOS, under a locale whose sort order disagrees with code-unit order, and fails if the two machines differ by a single byte.
 
 ## What the metrics mean
 
-**`analyzed`** — how many of the TypeScript files on disk under the project root ended up in the program, and therefore in everything below it. A `tsconfig.json` decides this, and it can decide it very differently from what you expect: one real monorepo's root config excluded `apps` and `packages`, so the default run built its program from **176 of 6,286 files** and reported zero dependency cycles and a propagation cost of 0.05. Both were artifacts of the missing 97%. When the program misses part of the tree, thicket says so above the findings and names the `--config` that closes each gap:
+### `analyzed`
+
+How many of the TypeScript files on disk under the project root made it into the program, and so into everything else in the report. A `tsconfig.json` decides that, and it can decide it very differently from what you expect.
+
+One real monorepo's root config excluded `apps` and `packages`. The default run built its program from **176 of 6,286 files**, then reported zero dependency cycles and a propagation cost of 0.05. Both numbers were artifacts of the missing 97%.
+
+When the program misses part of the tree, thicket says so above the findings, and names the `--config` that closes each gap:
 
 ```
 ⚠ 6110 source files are outside this program. Every number above is drawn from the 2.8% that is inside it.
@@ -353,88 +395,122 @@ That whole report is pinned byte for byte in `tests/golden/sample-report.md`. CI
     apps/mobile  451 files  → --config apps/mobile/tsconfig.json
 ```
 
-The denominator counts hand-written TypeScript only — no `.d.ts`, no generated directories, and nothing under a dot-directory, because an agent worktree in `.claude/` is a second copy of the whole repository and would halve every coverage figure in the report.
+The denominator counts hand-written TypeScript only. No `.d.ts` files, no generated directories, and nothing under a dot-directory. An agent worktree in `.claude/` is a second copy of the whole repository, and it would halve every coverage figure in the report.
 
-**`duplicated mass`** — Σ *nodes × (copies − 1)* over the reported clusters: roughly "how many AST nodes a perfect deduplication would delete". Clusters **overlap and nest** — a `Block` sits inside the `FunctionDeclaration` containing it, and both are reported — so the same source is charged more than once. It is **not a fraction of anything**, and it is not comparable between two different codebases. It is a trend number: watch it fall across iterations of one loop.
+### `duplicated mass`
 
-**`duplicated coverage`** — the fraction of source bytes covered by at least one *redundant* occurrence. Within each cluster the first occurrence in sorted order is the original a refactor would keep; the rest are redundant, and their byte ranges are unioned across every cluster, so overlapping and nested findings contribute their shared bytes once. This is a genuine fraction in [0, 1] and it is the number that answers "how much of this codebase is redundant".
+Σ *nodes × (copies − 1)* over the reported clusters. Roughly: how many AST nodes a perfect deduplication would delete.
 
-**`propagation cost`** — the density of the module dependency graph's transitive closure: of all *n²* ordered module pairs, the share where the first transitively depends on the second. It is the "change one thing, how much can be affected" number. A module inside a cycle reaches itself, which is why cycles push it up.
+Clusters **overlap and nest**. A `Block` sits inside the `FunctionDeclaration` that contains it, and thicket reports both, so the same source gets charged more than once. This is **not a fraction of anything**, and you cannot compare it between two codebases. It is a trend number. Watch it fall across the iterations of one loop.
 
-**`dependency cycles` / `largest SCC`** — strongly connected components of the module graph with more than one member, via Tarjan. Each is reported with a **suggested cut**: not "there is a cycle" but "removing this edge breaks it", verified by re-running Tarjan on the graph without that edge. When no single edge suffices, the report says so rather than guessing.
+### `duplicated coverage`
 
-Before any cut, the report looks for edges that are **routing rather than dependency**. An import that resolves through a re-export is a dependency on the *origin*, not on the file it names — so if nearly everything crossing an edge is forwarded from outside the module being depended on, the edge can be **dissolved**: repoint the specifier at the origin and it disappears. Nothing changes, because a re-export is the same binding.
+The share of source bytes covered by at least one *redundant* copy.
 
-That is a different kind of act from a cut, and strictly cheaper: a cut is a design decision (invert a dependency, move code, agree a layering), a dissolve is a find-and-replace. So dissolves are listed first, and a cut is only suggested for whatever survives them. On a real 12-module tangle this found five edges — `lib → app` (72 of 81 imports), `actions → app` (all 45), `data → app`, `models → app` and one more — every one of them passing through a single file that re-exports `lib/errors.ts`. An agent that investigated that tangle by hand called those five lines "the entire actionable content of this finding".
+In each cluster, the first copy in sorted order is the original a refactor would keep. The rest are redundant. thicket takes the union of their byte ranges across every cluster, so overlapping and nested findings count their shared bytes once. This is a real fraction between 0 and 1, and it is the number that answers "how much of this codebase repeats itself".
 
-Deliberately **not** a rule about barrel files. A package's own entry point is structurally identical — 100% forwarded — and dissolving it would reach past a boundary that exists on purpose. What separates the two is whether what the file forwards lives in *another module*, which is a fact about the dependency rather than an opinion about file layout. The `passthrough` fixture pins both cases, and removing either condition fails a test.
+### `propagation cost`
 
-No cut is proposed for a tangle **no file-level cycle underlies**. An SCC of modules is a claim about directories; if no file in those modules imports its way back to itself across a boundary, severing an edge removes no cycle that exists. A real 7-module tangle was exactly this, and the cut it used to propose removed zero real cycles.
+How dense the module graph is once you follow every path. Of all *n²* ordered pairs of modules, the share where the first one depends on the second, directly or through anything else.
 
-**Type-only edges are never proposed as cuts.** They are erased at compile time, so cutting one changes nothing that runs. They used to be *preferred*, on the reasoning that moving a types file is the cheapest fix — which produced precisely the wrong recommendation on a real 12-module tangle: a two-symbol `types → models` cut that an agent executed in ten minutes and correctly reported as a no-op, because by the report's own definition that edge was never a runtime dependency. The tangle fixture reproduces this: a package attached to a clique by two `import type` edges is the *best available cut by dissolution* and worth nothing.
+This is the "change one thing, how much can it affect" number. A module inside a cycle reaches itself, which is why cycles push it up.
 
-The cut is chosen by **how much of the tangle it dissolves**, not by what it costs. Cheapest-edge-that-works reliably finds the least interesting cut — on a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted. Cost is only the tie-break among equally dissolving cuts, and it prefers a type-only edge first (erased at compile time, so the fix is usually moving a types file), then fewest files to edit, then fewest symbols.
+### `dependency cycles` and `largest SCC`
 
-Every tangle states **whether anything in it is actually circular at file level**. A module SCC is a claim about directories, and directories are a choice this tool made: on a real 7-module tangle across 417 files there were three file cycles, every one inside a single directory and none crossing a boundary the finding drew — so nothing circular executes, there is no module-init hazard, and the "fix" removes zero real cycles. An agent had to write its own Tarjan implementation to learn that, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict and the reason the line is worth its width. It is the same algorithm one granularity down, over a graph thicket has already built.
+Strongly connected components of the module graph with more than one member, found with Tarjan's algorithm.
 
-Every cut states **what it leaves**: `leaves: 6 of 7 modules still mutually dependent`, or `nothing — this breaks the cycle completely`. Without that line, "suggested cuts (1)" reads as "apply this and the tangle is gone", which for a leaf-detaching cut is false.
+Each one comes with a **suggested cut**. Not "there is a cycle here", but "remove this edge and the cycle breaks". thicket verifies that by running Tarjan again on the graph without that edge. When no single edge is enough, the report says so instead of guessing.
 
-A prefix shared by every module in a component is **lifted into the heading** — `SCC of 7 modules under apps/mobile/` — so the chart reads `components -->|148 (34 type)| lib` rather than repeating `apps/mobile/` fourteen times on seven nodes. Whole path segments only, and only when the prefix is at least two deep: `src/` is the source root and tells the reader where they are, while `apps/mobile/` is the one part of every name that distinguishes nothing.
+**Dissolve before you cut.** First thicket looks for edges that are routing rather than dependency. An import that resolves through a re-export depends on the *origin*, not on the file it names. So if nearly everything crossing an edge is forwarded from outside the module being depended on, you can **dissolve** the edge: point the import at the origin and the edge disappears. Nothing else changes, because a re-export is the same binding.
 
-Each tangle is drawn as a **mermaid flowchart** of the whole component — every intra-SCC edge, labelled with the number of import sites crossing it, with the suggested cut as a dotted arrow. A legend above the section says what the number is — import sites, one per symbol per importing file, re-exports included — because it is neither distinct symbols nor files, and an agent that assumed the former mismatched every edge of a 26-edge tangle and concluded the tool was broken.
+That is a different job from a cut, and a much cheaper one. A cut is a design decision, so you invert a dependency, move code, or agree a layering. A dissolve is a find-and-replace. thicket lists dissolves first, and only suggests a cut for whatever survives them.
 
-Edges that are **entirely `import type`** are marked `type` in the chart. Such an edge is erased at compile time: there is no module-init order to get wrong, no bundler cycle, and breaking it usually means relocating a types file rather than inverting a dependency. On a real 12-module tangle the single most interesting edge was 100% type-only while the suggested cut was a value import — reporting the two identically sends a reader after the wrong one. A single value import anywhere across the module pair clears the flag, and a side-effect `import "./x.js"` binds no names yet is emphatically not erasable — which is why the flag is vetoed rather than derived from the counts, since an import binding zero names erases zero and would vanish from `erased === weight`. An edge that is only **mostly** erased says so: `5 (4 type)` means four of its five bindings are `import type` and the whole runtime dependency is one import in one file, which is usually the cheapest cut available. A real 7-module tangle printed that edge as a bare `5` and nothing suggested looking at it. Edge weights are what make the picture actionable: a 12-module tangle in a real application turned out to be held together by a handful of 1–3 symbol edges among links carrying two thousand. Every edge label is **quoted**, because an unquoted mermaid label ends at the first `(`, `[`, `{` or `|` — which is how the `59 (4 type)` form shipped a chart that would not render. The chart is drawn in full or not at all, never truncated — drop arrows from a cycle and what remains can be acyclic, so a partial chart is not a weaker claim but a wrong one. Past 20 modules or 120 edges it is replaced by the member list and a line saying so.
+On a real 12-module tangle this found five edges: `lib → app` (72 of 81 imports), `actions → app` (all 45), `data → app`, `models → app`, and one more. Every one of them passed through a single file that re-exports `lib/errors.ts`. An agent that had investigated that tangle by hand called those five lines "the entire actionable content of this finding".
 
-A finding that names more than a dozen files gets its location list **summarized above the list, not instead of it**: `spread across 1 directory: apps/web/models/member/vitals ×19`, or `spread across 66 directories: … and 63 more directories`. One agent handed a 115-file list wanted nine tenths of it replaced by exactly this — whether the finding is one directory's convention or a cross-package problem was the thing it could not see and had to count by hand. Another, holding a 19-file list, called every entry of it "the finding's backbone" and used all of them. Both are right about their own finding, so the list stays and gains a header.
+**This is not a rule about barrel files.** A package's own entry point looks identical: 100% forwarded. Dissolving it would reach past a boundary that exists on purpose. What separates the two cases is whether the forwarded code lives in *another module*. That is a fact about the dependency, not an opinion about file layout. The `passthrough` fixture pins both cases, and a test fails if you remove either condition.
 
-The **excerpt scales with the size of one copy** — 60% of its lines, floor three, ceiling ten. A flat three lines failed on exactly the findings that needed it most: on a real 15-line block the elided lines 4–13 were the only thing separating that cluster from five near-identical siblings, so the excerpt showed the reader the agreement and hid the disagreement. Three lines of a 100-line class is still right, which is why it is a fraction rather than a bigger constant.
+**No cut for a tangle with no file cycle under it.** A module SCC is a claim about directories. If no file in those modules imports its way back to itself across a boundary, then cutting an edge removes no cycle, because there is no cycle. A real 7-module tangle was exactly this, and the cut thicket used to propose removed nothing.
 
-**Finding IDs** (`THK-DUP-…`, `THK-CYC-…`) are derived from **content, never position**. Code that merely moves — reformatted, shifted down by an added import, reordered within its file — keeps its ID, so `thicket diff` reports what was actually resolved rather than what was merely touched. This is the loop's backbone and it has an end-to-end test that moves real code and asserts the IDs survive.
+**A type-only edge is never the suggested cut.** Those edges are erased at compile time, so cutting one changes nothing that runs. thicket used to *prefer* them, on the grounds that moving a types file is the cheapest fix. On a real 12-module tangle that produced exactly the wrong recommendation: a two-symbol `types → models` cut that an agent did in ten minutes and correctly reported as a no-op, because by the report's own definition that edge was never a runtime dependency. The tangle fixture reproduces it. A package attached to a clique by two `import type` edges is the best available cut by dissolution, and it is worth nothing.
+
+**The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a type-only edge, then the fewest files to edit, then the fewest symbols.
+
+**Every tangle says whether any file is really circular.** A module SCC is a claim about directories, and the directories are a choice this tool made. On a real 7-module tangle across 417 files there were three file cycles. All three sat inside a single directory, and none crossed a boundary the finding drew. So nothing circular executes, there is no module-init hazard, and the fix removes no real cycle. An agent had to write its own Tarjan implementation to work that out, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict. That is why the line earns its space. It is the same algorithm one granularity down, on a graph thicket has already built.
+
+**Every cut says what it leaves behind**: `leaves: 6 of 7 modules still mutually dependent`, or `nothing — this breaks the cycle completely`. Without that line, "suggested cuts (1)" reads as "apply this and the tangle is gone", and for a cut that only detaches a leaf, that is false.
+
+### How a tangle is drawn
+
+Each tangle is a **mermaid flowchart** of the whole component. Every edge inside the SCC is drawn, labelled with the number of import sites crossing it, and the suggested cut is a dotted arrow.
+
+A legend above the section says what that number counts: import sites, one per symbol per importing file, re-exports included. It is neither distinct symbols nor files. An agent that assumed it was distinct symbols mismatched every edge of a 26-edge tangle and concluded the tool was broken.
+
+If every module in the component shares a path prefix, that prefix moves **into the heading**: `SCC of 7 modules under apps/mobile/`. Then the chart reads `components -->|148 (34 type)| lib`, instead of repeating `apps/mobile/` fourteen times across seven nodes. Whole path segments only, and only when the prefix is at least two deep. `src/` is the source root and tells you where you are. `apps/mobile/` is the one part of every name that distinguishes nothing.
+
+Edges made **entirely of `import type`** are marked `type`. Such an edge is erased at compile time. There is no module-init order to get wrong and no bundler cycle, and breaking it usually means moving a types file rather than inverting a dependency. On a real 12-module tangle, the most interesting edge was 100% type-only while the suggested cut was a value import. Print the two the same way and you send the reader after the wrong one.
+
+One value import anywhere across the module pair clears the flag. A side-effect import like `import "./x.js"` binds no names, and it is emphatically not erasable, so thicket vetoes the flag rather than deriving it from the counts. An import that binds zero names erases zero, and `erased === weight` would call it type-only.
+
+An edge that is only **mostly** erased says so. `5 (4 type)` means four of its five bindings are `import type`, so the entire runtime dependency is one import in one file. That is usually the cheapest cut available. A real 7-module tangle printed that edge as a bare `5`, and nothing about it suggested a second look. Edge weights are what make the picture usable: a 12-module tangle in a real application turned out to be held together by a handful of 1–3 symbol edges, among links carrying two thousand.
+
+Every edge label is **quoted**. An unquoted mermaid label ends at the first `(`, `[`, `{` or `|`, which is how the `59 (4 type)` form shipped a chart that would not render.
+
+The chart is drawn in full or not at all. Drop arrows from a cycle and what is left can look acyclic, so a partial chart is not a weaker claim. It is a wrong one. Past 20 modules or 120 edges, thicket prints the member list and a line saying why.
+
+### Locations, excerpts, and IDs
+
+A finding that names more than a dozen files gets a **summary above its location list**, not instead of it: `spread across 1 directory: apps/web/models/member/vitals ×19`, or `spread across 66 directories: … and 63 more directories`.
+
+One agent handed a 115-file list wanted nine tenths of it replaced by exactly that summary. Whether the finding was one directory's convention or a problem across packages was the thing it could not see, and it counted by hand. Another agent, holding a 19-file list, called every entry "the finding's backbone" and used all of them. Both were right about their own finding, so the list stays and gets a header.
+
+The **excerpt scales with the size of one copy**: 60% of its lines, never fewer than three and never more than ten. A flat three lines failed on the findings that needed it most. On a real 15-line block, the hidden lines 4 to 13 were the only thing separating that cluster from five near-identical siblings. The excerpt showed the reader the agreement and hid the disagreement. Three lines of a 100-line class is still the right amount, which is why this is a fraction rather than a bigger constant.
+
+**Finding IDs** (`THK-DUP-…`, `THK-CYC-…`) come from **content, never position**. Code that only moves keeps its ID, whether it was reformatted, pushed down by a new import, or reordered inside its file. So `thicket diff` reports what was actually resolved, not what was merely touched. This is the backbone of the loop, and an end-to-end test moves real code and checks that the IDs survive.
 
 ## What it looks for
 
-**Duplication** — every AST node above a size threshold becomes a fragment, so granularities nest naturally: a function is a fragment, the loop inside it is a fragment, the conditional inside that is a fragment. Fragments are fingerprinted at two normalization levels — **L0** exact, and **L1** α-renamed so that renamed variables still match — and clustered by union-find over identical hashes.
+**Duplication.** Every AST node above a size threshold becomes a fragment, so the granularities nest on their own. A function is a fragment, the loop inside it is a fragment, and the conditional inside that is a fragment. thicket fingerprints each fragment at two levels: **L0** matches exactly, and **L1** α-renames identifiers so that renamed variables still match. Fragments with identical hashes are clustered with union-find.
 
-**Module tangle** — imports are resolved through the type checker, files are grouped into modules at an adaptively chosen granularity, and the resulting graph is analyzed for cycles and propagation cost.
+**Module tangle.** thicket resolves imports through the type checker, groups files into modules at a granularity it picks for the repo, then looks for cycles and propagation cost in the resulting graph.
 
-The interesting result is the **join** between the two: *modules A, B and C form a cycle and share 4 duplicated clusters — extract the shared logic into a leaf module and the cycle dissolves as a side effect.* Neither analysis surfaces that alone.
+The interesting result is the **join** between the two. *Modules A, B and C form a cycle and share 4 duplicated clusters. Extract the shared logic into a leaf module and the cycle dissolves on its own.* Neither analysis finds that alone.
 
 ## The design constraint that shapes everything
 
-A 48-file repository produces roughly **495 duplication candidates**. A report budget realistically holds 20–50 findings.
+A 48-file repository produces about **495 duplication candidates**. A report budget realistically holds 20 to 50 findings.
 
-We are discarding candidates by two orders of magnitude, which means an extra detection technique only adds to a pile that is already being truncated. So:
+So thicket throws away candidates by two orders of magnitude. Another detection technique would only add to a pile that is already being truncated:
 
-> **Rank well, then detect more — never the reverse.**
+> **Rank well, then detect more. Never the other way round.**
 
 That one conclusion cut embeddings from v1, removed every native dependency, and makes the ranking function the most important code in the project.
 
 ## What thicket deliberately does not do
 
-- **It does not judge.** No thresholds, no grades, no pass/fail, no exit code that means "too complex". It reports candidates and metrics; something else decides what is worth fixing — see [It is not a linter](#it-is-not-a-linter).
+- **It does not judge.** No thresholds, no grades, no pass or fail, no exit code that means "too complex". It reports candidates and metrics. Something else decides what is worth fixing. See [It is not a linter](#it-is-not-a-linter).
 - **It does not edit.** No codemods, no autofix, no `--write`.
-- **It does not open PRs**, post review comments, or touch your VCS in any way.
-- **It does not report progress for you.** `diff` prints what changed between two reports. Whether that constitutes enough progress to stop is the harness's call.
+- **It does not open PRs**, post review comments, or touch your version control in any way.
+- **It does not report progress for you.** `diff` prints what changed between two reports. Whether that is enough progress to stop is your call.
 
 ## Known limits
 
-- **Near-miss duplication is not in v1.** Only exact (L0) and α-renamed (L1) matches are found. Two functions that differ by one added statement are two separate fragments to thicket. The MinHash/LSH work for near-miss detection exists in `prototypes/` and is not wired up, because ranking, not recall, is the binding constraint.
-- **The simplification checks are not in v1** — parameters that take the same constant at every call site, statically-true conditions, exports nobody imports. The type checker knows all three; nothing consumes that yet. There is no `THK-INV-…` finding in a v1 report.
-- **The ranker cannot tell a data table from a code block.** An object literal repeated 15 times and a function body repeated 15 times look the same to it: same node count, same copy count, same score. Intra-file repetition is down-weighted and per-file copy counts are capped, which stops a config literal from taking the top of the report, but a few data tables still survive into the lower half. Treating them as refactoring candidates is the reader's mistake to avoid; thicket cannot yet make it for you.
-- **Duplication is reported at every granularity that matches.** A cluster and a strictly smaller cluster with the *same* occurrence count are collapsed to the larger one, but an L0 pair nested inside an L1 triple is two findings, as in the example report above. They are genuinely different facts; they still cost two report slots.
-- **A real tsconfig is still required — thicket just finds it for you.** Import resolution runs through the type checker, so a directory with no tsconfig anywhere in it cannot be analyzed; pointing at a directory discovers the configs, it does not do without them. Declaration files (`.d.ts`) and `node_modules` are never analyzed.
+- **Near-miss duplication is not in v1.** thicket finds exact (L0) and α-renamed (L1) matches only. Two functions that differ by one added statement are two separate fragments to it. The MinHash and LSH work for near-miss detection sits in `prototypes/`, unused, because the binding constraint is ranking and not recall.
+- **The simplification checks are not in v1.** Those are parameters that take the same constant at every call site, conditions that are always true, and exports nobody imports. The type checker knows all three, and nothing reads that yet. A v1 report has no `THK-INV-…` findings.
+- **The ranker cannot tell a data table from a code block.** An object literal repeated 15 times and a function body repeated 15 times look the same to it: same node count, same copy count, same score. thicket down-weights repetition inside one file and caps the copies counted per file, which keeps a config literal off the top of the report. A few data tables still reach the lower half. Do not treat those as refactoring candidates. thicket cannot yet make that call for you.
+- **Duplication is reported at every size that matches.** A cluster and a smaller cluster with the *same* number of copies collapse into the larger one. An L0 pair nested inside an L1 triple stays as two findings, as in the example report above. They are genuinely different facts, and they still cost two report slots.
+- **You still need a real tsconfig. thicket just finds it for you.** Import resolution runs through the type checker, so it cannot analyze a directory with no tsconfig anywhere in it. Pointing at a directory finds the configs; it does not do without them. Declaration files (`.d.ts`) and `node_modules` are never analyzed.
 
 ## Design notes
 
-- [`docs/PRD.md`](docs/PRD.md) — the technical PRD, and the rationale for essentially every decision above. Each is backed by measurement against real codebases, and several measurements overturned the starting premises (Go was the original implementation language; embeddings were the original duplication mechanism).
-- [`AGENTS.md`](AGENTS.md) — the non-negotiables for anyone, human or otherwise, changing this code. Determinism is a correctness property here, not a nicety.
-- [`prototypes/`](prototypes/) — the throwaway scripts that produced those measurements, kept because each one implements an algorithm the real code needs.
+- [`docs/PRD.md`](docs/PRD.md) is the technical PRD, and the reasoning behind nearly every decision above. Each one is backed by measurement against real codebases, and several of those measurements overturned the starting premise. Go was the original implementation language, and embeddings were the original duplication mechanism.
+- [`AGENTS.md`](AGENTS.md) holds the non-negotiables for anyone changing this code, human or otherwise. Determinism is a correctness property here, not a nicety.
+- [`prototypes/`](prototypes/) holds the throwaway scripts that produced those measurements. They are kept because each one implements an algorithm the real code needs.
 
 ## Stack
 
-TypeScript on Bun ≥1.4, with **nothing to compile at install time** — `node:sqlite` for the content-addressed cache, and `typescript@next` for the frontend. TypeScript 7.1 exposes a real programmatic API (`typescript/unstable/async`) backed by the Go compiler, which is the only way to get genuine type information rather than approximate syntax.
+TypeScript on Bun 1.4 or later, with **nothing to compile at install time**. The cache uses `node:sqlite`, and the frontend uses `typescript@next`. TypeScript 7.1 ships a real programmatic API, `typescript/unstable/async`, backed by the Go compiler. That is the only way to get real type information instead of approximate syntax.
 
-That compiler is a native binary thicket spawns, which is why a release is a directory rather than a single file. It is prebuilt per platform and shipped in the tarball, so there is no toolchain on your machine for it to need.
+That compiler is a native binary, and thicket starts it as a child process. It is why a release is a folder rather than a single file. Each platform's build ships in the tarball, so you do not need a toolchain for it.
 
 ## License
 
