@@ -118,6 +118,36 @@ export function openCache(path: string, configHash: string): Cache | null {
     }
   }
 
+  /**
+   * `body` between BEGIN IMMEDIATE and COMMIT, rolled back if it throws.
+   *
+   * The rollback is itself guarded and does not mask the original error: by
+   * the time a statement has failed the transaction may already be gone, and a
+   * throw from ROLLBACK would replace the error that explains what happened
+   * with one that does not. Releasing the lock is the part `guard` cannot
+   * cover -- it turns the failure into "cache off" for THIS connection, while
+   * an abandoned transaction goes on holding RESERVED against every other one.
+   *
+   * An arrow rather than a `function`: a hoisted declaration could be called
+   * before the `if (!db) return null` above it, so TypeScript drops the
+   * narrowing inside one and `db` reads as possibly undefined.
+   */
+  const transact = <T,>(body: () => T): T => {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = body();
+      db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // The transaction is already gone; nothing to undo.
+      }
+      throw err;
+    }
+  };
+
   return {
     isUnchanged: (p, contentHash) =>
       guard(false, () => {
@@ -149,8 +179,7 @@ export function openCache(path: string, configHash: string): Cache | null {
         // One transaction per file: a half-written file must never be readable
         // as a whole one, and a run interrupted between files still leaves the
         // files it did finish usable.
-        db.exec("BEGIN IMMEDIATE");
-        try {
+        transact(() => {
           deleteFragments.run(p);
           for (const [seq, f] of fragments.entries()) {
             insertFragment.run(
@@ -169,15 +198,7 @@ export function openCache(path: string, configHash: string): Cache | null {
             );
           }
           insertFile.run(p, contentHash);
-          db.exec("COMMIT");
-        } catch (err) {
-          try {
-            db.exec("ROLLBACK");
-          } catch {
-            // The transaction is already gone; nothing to undo.
-          }
-          throw err;
-        }
+        });
       }),
 
     purgeExcept: (paths) =>
@@ -188,22 +209,13 @@ export function openCache(path: string, configHash: string): Cache | null {
           .filter((p) => !keep.has(p))
           .sort(compareStrings);
         if (stale.length === 0) return 0;
-        db.exec("BEGIN IMMEDIATE");
-        try {
+        return transact(() => {
           for (const p of stale) {
             deleteFragments.run(p);
             deleteFile.run(p);
           }
-          db.exec("COMMIT");
-        } catch (err) {
-          try {
-            db.exec("ROLLBACK");
-          } catch {
-            // Already rolled back.
-          }
-          throw err;
-        }
-        return stale.length;
+          return stale.length;
+        });
       }),
 
     close: () => {

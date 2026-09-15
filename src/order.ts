@@ -31,3 +31,31 @@ export function compareStrings(a: string, b: string): number {
 export function byScoreThenId<T extends { score: number; id: string }>(a: T, b: T): number {
   return b.score - a.score || compareStrings(a.id, b.id);
 }
+
+/**
+ * The key carrying the largest value, ties broken by key.
+ *
+ * The tie-break is what makes this belong here rather than at either call
+ * site: `Map` iteration follows insertion order, so an argmax that scans the
+ * map as-is answers whichever tied key happened to be seen first -- a function
+ * of file visit order, not of the graph (AGENTS.md §1). Empty in, `{ key: "",
+ * weight: 0 }` out; every caller's values are positive, so a real entry always
+ * beats that.
+ */
+export function heaviestKey(weights: ReadonlyMap<string, number>): {
+  key: string;
+  weight: number;
+} {
+  let best = { key: "", weight: 0 };
+  for (const [key, weight] of [...weights].sort((a, b) => compareStrings(a[0], b[0]))) {
+    if (weight > best.weight) best = { key, weight };
+  }
+  return best;
+}
+
+/** The most frequent value, ties broken by the value itself. See `heaviestKey`. */
+export function mostFrequent(values: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return heaviestKey(counts).key;
+}

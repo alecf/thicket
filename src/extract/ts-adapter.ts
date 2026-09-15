@@ -3,10 +3,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/async";
 import { hash, initHash } from "../hash.js";
-import { compareStrings } from "../order.js";
+import { compareStrings, mostFrequent } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
 import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
-import { forEachChildSafe, walk } from "./traverse.js";
+import { forEachChildSafe, safeText, walk } from "./traverse.js";
 import type { FileHandle, Node, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
@@ -181,21 +181,6 @@ function bindingCount(decl: Node): { count: number; erased: number; names: strin
   return { count, erased, names };
 }
 
-/** The most frequent entry, ties broken by name so the answer is stable. */
-function commonest(values: readonly string[]): string {
-  const counts = new Map<string, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best = "";
-  let bestCount = 0;
-  for (const [value, count] of [...counts].sort((a, b) => compareStrings(a[0], b[0]))) {
-    if (count > bestCount) {
-      best = value;
-      bestCount = count;
-    }
-  }
-  return best;
-}
-
 /**
  * The name a specifier publishes locally: `B` in `{ A as B }`, `A` in `{ A }`.
  * The LAST identifier, since only the aliased form has two.
@@ -203,7 +188,7 @@ function commonest(values: readonly string[]): string {
 function localNameOf(spec: Node): string {
   const identifiers: string[] = [];
   forEachChildSafe(spec, (child) => {
-    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(safeText(child));
   });
   return identifiers[identifiers.length - 1] ?? "";
 }
@@ -219,22 +204,9 @@ function localNameOf(spec: Node): string {
 function importedNameOf(spec: Node): string {
   const identifiers: string[] = [];
   forEachChildSafe(spec, (child) => {
-    if (child.kind === SyntaxKind.Identifier) identifiers.push(nodeText(child));
+    if (child.kind === SyntaxKind.Identifier) identifiers.push(safeText(child));
   });
   return identifiers[0] ?? "";
-}
-
-/**
- * `getText()` behind a guard. It reads back through the source file, which
- * throws for a synthesized node -- and a throw here would abort the whole
- * import walk for one unreadable identifier.
- */
-function nodeText(node: Node): string {
-  try {
-    return node.getText();
-  } catch {
-    return "";
-  }
 }
 
 /**
@@ -760,7 +732,7 @@ export async function openProject(
         erased: d.erased,
         erasable: d.erasable,
         passThrough: d.passThrough,
-        ...(d.origins.length > 0 ? { origin: commonest(d.origins) } : {}),
+        ...(d.origins.length > 0 ? { origin: mostFrequent(d.origins) } : {}),
       }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }

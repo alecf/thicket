@@ -6,23 +6,7 @@ import {
   type ReportInput,
   type TangleEdge,
 } from "../src/report/markdown.js";
-
-/**
- * A tangle edge. `files` defaults to one synthetic importer, because the
- * report prints file counts and a zero-length list would make every edge look
- * free to cut.
- */
-const edge = (from: string, to: string, weight: number, over: Partial<TangleEdge> = {}): TangleEdge => ({
-  from,
-  to,
-  weight,
-  files: [`${from}/importer.ts`],
-  erased: 0,
-  topTarget: { path: `${to}/index.ts`, weight },
-  passThrough: 0,
-  typeOnly: false,
-  ...over,
-});
+import { edge, reportInput } from "./report-fixtures.js";
 
 beforeAll(async () => {
   await initHash();
@@ -47,28 +31,10 @@ beforeAll(async () => {
  * the bytes. That holds for labels nobody has thought of yet.
  */
 
-const base: ReportInput = {
-  version: "0.1.0",
-  configHash: "abc123",
-  fileCount: 4,
-  lineCount: 60,
-  granularity: "dir:1",
-  moduleCount: 2,
-  metrics: {
-    duplicatedMass: 100,
-    redundantByteFraction: 0.05,
-    propagationCost: 0.5,
-    cycleCount: 1,
-    largestScc: 2,
-  },
-  scope: { analyzed: 4, onDisk: 4, complete: true, gaps: [] },
-  duplication: [],
-  typeDuplication: [],
-  testDuplication: [],
-  cycles: [],
+const base: ReportInput = reportInput({
   totalFindings: 1,
-  census: { duplication: 0, cycles: 1, bands: [], typeDuplication: 0, testDuplication: 0, singleFile: 0 },
-};
+  census: { cycles: 1 },
+});
 
 /** The mermaid source of the first diagram in a report, fence excluded. */
 function diagram(markdown: string): string[] {

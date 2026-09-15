@@ -1,9 +1,7 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { runReport } from "../src/run.js";
-import { fixtureConfig, fixtureRoot } from "./helpers.js";
+import { fixtureConfig, scratchProject } from "./helpers.js";
 
 /**
  * The report is contractually a pure function of (source content, config,
@@ -25,24 +23,6 @@ const temps: string[] = [];
 afterEach(() => {
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });
 });
-
-/**
- * A copy of the sample fixture at a fresh absolute path.
- *
- * Used for the warm-cache runs so they cannot race the rest of the suite over
- * `tests/fixtures/sample/.thicket`, and it doubles as a check that the report
- * does not depend on where the project sits on disk: the same bytes must come
- * out of a directory with a random name in it.
- */
-function scratchProject(): { root: string; config: string } {
-  const root = mkdtempSync(join(tmpdir(), "thicket-golden-"));
-  temps.push(root);
-  cpSync(fixtureRoot(), root, {
-    recursive: true,
-    filter: (src) => !src.split(sep).includes(".thicket"),
-  });
-  return { root, config: join(root, "tsconfig.json") };
-}
 
 describe("golden report", () => {
   it("matches the committed golden file", async () => {
@@ -78,7 +58,7 @@ describe("golden report", () => {
     // it costs one extra run to keep proving it on the exact bytes a harness
     // reads, against a file that is checked in and therefore reviewable.
     const golden = readFileSync(GOLDEN, "utf8");
-    const { config } = scratchProject();
+    const { config } = scratchProject("thicket-golden-", temps);
 
     const cold = await runReport({ ...OPTIONS, config, cache: false });
     const primed = await runReport({ ...OPTIONS, config, cache: true }); // writes

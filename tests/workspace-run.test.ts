@@ -4,7 +4,12 @@ import { dirname, join, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cachePathFor } from "../src/cache/db.js";
 import { runReport } from "../src/run.js";
-import { filterWorkspacesRoot, nestedWorkspacesRoot, workspacesRoot } from "./helpers.js";
+import {
+  filterWorkspacesRoot,
+  nestedWorkspacesRoot,
+  TSCONFIG,
+  workspacesRoot,
+} from "./helpers.js";
 
 /**
  * `runReport` with a `dir` is the whole monorepo path: discovery, filtering,
@@ -39,17 +44,6 @@ function scratchTree(files: Record<string, string>): string {
   }
   return root;
 }
-
-const TSCONFIG = JSON.stringify({
-  compilerOptions: {
-    target: "es2022",
-    module: "nodenext",
-    moduleResolution: "nodenext",
-    strict: true,
-    noEmit: true,
-  },
-  include: ["src/**/*.ts"],
-});
 
 afterEach(() => {
   while (temps.length > 0) rmSync(temps.pop()!, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openProject } from "../src/extract/ts-adapter.js";
-import { forEachChildSafe, walk } from "../src/extract/traverse.js";
+import { forEachChildSafe, safeText, walk } from "../src/extract/traverse.js";
 import { fixtureConfig } from "./helpers.js";
 
 describe("forEachChildSafe", () => {
@@ -36,5 +36,27 @@ describe("forEachChildSafe", () => {
     walk(sf, () => { all++; });
 
     expect(all).toBeGreaterThan(top);
+  });
+});
+
+describe("safeText", () => {
+  it("returns the node's source text", async () => {
+    const project = await openProject(fixtureConfig());
+    const sf = project.getSourceFile("src/beta.ts")!;
+    expect(safeText(sf)).toBe(sf.getText());
+    expect(safeText(sf).length).toBeGreaterThan(0);
+  });
+
+  it("answers empty rather than throwing for a node with no source behind it", () => {
+    // The hazard this wrapper exists for: `getText()` reads back through the
+    // source file and throws for a synthesized node. Unguarded, one unreadable
+    // identifier aborts the whole import walk -- which reads downstream as
+    // "this repo has no imports" rather than as an error (AGENTS.md §3).
+    const synthesized = {
+      getText() {
+        throw new Error("Debug Failure. Node has no source file");
+      },
+    } as unknown as Parameters<typeof safeText>[0];
+    expect(safeText(synthesized)).toBe("");
   });
 });

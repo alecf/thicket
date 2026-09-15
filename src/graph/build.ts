@@ -1,5 +1,5 @@
 import type { Project } from "../extract/ts-adapter.js";
-import { compareStrings } from "../order.js";
+import { compareStrings, heaviestKey, mostFrequent } from "../order.js";
 import {
   selectGranularity,
   selectGranularityAcross,
@@ -11,10 +11,14 @@ export interface ModuleEdge {
   from: string;
   to: string;
   /**
-   * Distinct symbols the `from` module imports out of the `to` module,
-   * summed over its files. Counting imports instead would make nearly every
-   * weight 1 and lose the difference between pulling one constant and pulling
-   * thirty (PRD §7.2).
+   * Import sites across the edge: one per symbol per importing file, with
+   * `export … from` re-exports counted as the imports they are. NOT distinct
+   * symbol names -- a symbol imported in eight files counts eight times, which
+   * is the point, since it is a proxy for how many edits severing the edge
+   * costs.
+   *
+   * Counting declarations instead would make nearly every weight 1 and lose
+   * the difference between pulling one constant and pulling thirty (PRD §7.2).
    */
   weight: number;
   /**
@@ -117,31 +121,10 @@ export interface GraphOptions {
  */
 const KEY_SEP = "\u0000";
 
-/**
- * The heaviest imported file on an edge. Ties break by path so the answer is a
- * function of the graph and not of file iteration order (AGENTS.md §1).
- */
+/** The heaviest imported file on an edge, under the field name `ModuleEdge` uses. */
 function topTargetOf(targets: ReadonlyMap<string, number>): { path: string; weight: number } {
-  let best = { path: "", weight: 0 };
-  for (const [path, weight] of [...targets].sort((a, b) => compareStrings(a[0], b[0]))) {
-    if (weight > best.weight) best = { path, weight };
-  }
-  return best;
-}
-
-/** Most frequent origin, ties broken by path so the answer is stable. */
-function commonestOrigin(origins: readonly string[]): string {
-  const counts = new Map<string, number>();
-  for (const o of origins) counts.set(o, (counts.get(o) ?? 0) + 1);
-  let best = "";
-  let bestCount = 0;
-  for (const [path, count] of [...counts].sort((a, b) => compareStrings(a[0], b[0]))) {
-    if (count > bestCount) {
-      best = path;
-      bestCount = count;
-    }
-  }
-  return best;
+  const { key, weight } = heaviestKey(targets);
+  return { path: key, weight };
 }
 
 export function buildModuleGraph(project: Project, opts: GraphOptions = {}): ModuleGraph {
@@ -235,7 +218,7 @@ export function buildModuleGraph(project: Project, opts: GraphOptions = {}): Mod
         erased: edge.erased,
         topTarget: topTargetOf(edge.targets),
         passThrough: edge.passThrough,
-        ...(edge.origins.length > 0 ? { origin: commonestOrigin(edge.origins) } : {}),
+        ...(edge.origins.length > 0 ? { origin: mostFrequent(edge.origins) } : {}),
         typeOnly: edge.typeOnly,
       };
     })
