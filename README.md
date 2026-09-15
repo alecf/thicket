@@ -32,7 +32,7 @@ That link is the part that makes this work without you explaining anything. Ever
 
 Nothing needs a human in the middle. The whole thing is one command with text output, so an agent can do the run too:
 
-> Run `thicket > thicket.md` and read the report — it links to a guide explaining how to read it. Pick the one finding you are most confident is worth consolidating, do it, then re-run thicket and show me that the finding is gone.
+> Run `thicket > thicket.md` and read the report — it links to a guide explaining how to read it. Pick the one finding you are most confident is worth acting on, do it, then re-run thicket and show me that the finding is gone.
 
 If you do this more than once, put the command in the repository's own `CLAUDE.md` or `AGENTS.md` so it is already in context:
 
@@ -71,9 +71,9 @@ This is the thing to get straight before reading a report, because everything in
 - The summary numbers are **trend numbers, not measurements of quality.** `duplicated mass` deliberately double-counts nested clusters; comparing it between two codebases means nothing at all. Comparing it against itself one refactor later is the entire point of it.
 - A finding is a **candidate**, and it is phrased like one: *these 19 things are the same shape, here is every location, here is what differs between the copies, here is the base class all of them already import.* Whether consolidating them is an improvement is a design judgement — and the honest answer is frequently **no**. Nineteen classes differing only in the *values* of `loincCode` and `unit` are one concept with a parameter list. A hundred and ninety-three objects differing in every *field name* are ninety-odd unrelated things sharing a syntax template, and the only abstraction available is a generic `pick` that no future change will benefit from. The report ranks with that distinction in mind and [tells you how to check it](docs/report-guide.md#is-this-duplication-worth-removing); it does not make the call.
 
-The split of labour is the whole design. A **deterministic** pass finds every exact and α-renamed repeat across the entire tree — identically on every run, with no context window and no sampling — and the model then spends its judgement on the few dozen candidates that come back, instead of spending it on the search.
+The split of labour is the whole design. A **deterministic** pass finds every exact and α-renamed repeat across the analyzed program — identically on every run, with no context window and no sampling — and the model then spends its judgement on the few dozen candidates that come back, instead of spending it on the search.
 
-That ordering is also the cheap one. Asking a model to find duplication means feeding it the codebase: one real application here is 5,798 files and 1.5M lines, which no context window holds and nobody wants to pay to re-read weekly. And cross-file duplication is the specific thing a model is worst placed to find, because the two copies live in two files it never held open at the same time. thicket reads all of them outside the model, costs no tokens to do it, and hands back a report bounded by `--budget-tokens`.
+That ordering is also the cheap one. Asking a model to find duplication means feeding it the codebase, which is often far larger than any context window and expensive to re-read repeatedly. And cross-file duplication is the specific thing a model is worst placed to find, because the two copies live in two files it never held open at the same time. thicket reads all of them outside the model, costs no tokens to do it, and hands back a report bounded by `--budget-tokens`.
 
 ## Especially for code an LLM wrote
 
@@ -81,7 +81,7 @@ An agent writes what it can see. It cannot see the helper in the file it did not
 
 That is precisely the shape this tool is built for: the same structure, in files that never appear in one diff together, often with every identifier renamed — which is what `L1` matching exists to catch. An agent-written codebase accumulates it quietly and steadily, and no amount of care inside a single session prevents it.
 
-Because the report is a pure function of the source, it is safe to run on a schedule — a weekly job, a cron, a `workflow_dispatch` — and compare against the last one:
+Because the report is a pure function of source content, config, and thicket version, it is safe to run on a schedule — a weekly job, a cron, a `workflow_dispatch` — and compare against the last one:
 
 ```bash
 thicket --json .thicket/this-week.json > thicket.md

@@ -83,7 +83,7 @@ thicket &gt; thicket.md</code></pre>
     <p>
       Run <code>thicket &gt; thicket.md</code> and read the report — it
       links to a guide explaining how to read it. Pick the one finding you are most confident is
-      worth consolidating, do it, then re-run thicket and show me that the finding is gone.
+      worth acting on, do it, then re-run thicket and show me that the finding is gone.
     </p>
   </blockquote>
   <p>
@@ -167,14 +167,16 @@ thicket diff before.json after.json</code></pre>
       <strong>A finding is a candidate, phrased like one.</strong> <em>These 19 things are the
       same shape, here is every location, here is what differs between the copies, here is the
       base class all of them already import.</em> Whether consolidating that is an improvement is
-      a design judgement — and the answer is frequently no.
+      a design judgement — and the answer is frequently no. Nineteen classes differing only in the
+      <em>values</em> of the same fields are one concept with a parameter list; hundreds of objects
+      differing in every <em>field name</em> are unrelated things sharing a syntax template.
     </li>
   </ul>
   <p>
     The split of labour is the whole design. A <strong>deterministic</strong> pass finds every
-    exact and α-renamed repeat across the entire tree — identically on every run, with no context
-    window and no sampling — and the model then spends its judgement on the few dozen candidates
-    that come back, instead of spending it on the search.
+    exact and α-renamed repeat across the analyzed program — identically on every run, with no
+    context window and no sampling — and the model then spends its judgement on the few dozen
+    candidates that come back, instead of spending it on the search.
   </p>
   <p>
     That ordering is also the cheap one. Asking a model to find duplication means feeding it the
@@ -198,8 +200,9 @@ thicket diff before.json after.json</code></pre>
     quietly, and no amount of care inside a single session prevents it.
   </p>
   <p>
-    Because the report is a pure function of the source, it is safe to run on a schedule — a
-    weekly job, a cron, a manual dispatch — and compare against the last one:
+    Because the report is a pure function of source content, config, and thicket version, it is
+    safe to run on a schedule — a weekly job, a cron, a manual dispatch — and compare against the
+    last one:
   </p>
   <pre><code class="language-bash">thicket --json .thicket/this-week.json &gt; thicket.md
 thicket diff .thicket/last-week.json .thicket/this-week.json</code></pre>

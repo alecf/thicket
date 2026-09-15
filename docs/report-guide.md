@@ -16,8 +16,9 @@ fingerprinted exactly and again with identifiers erased, across every file in
 the program — and printed the highest-ranked few dozen of what can easily be
 tens of thousands of matches. The ranking is about size and contained-ness, not
 about whether a change is a good idea. There is no grade for the codebase, no
-threshold, and no exit code that means "too complex" — the per-finding `score`
-orders the list and means nothing outside it. A repository with eighteen
+threshold, and no exit code that means "too complex" — findings are ordered by
+an internal rank score (present in the JSON sidecar, not in Markdown) and that
+ordering means nothing outside the list. A repository with eighteen
 thousand candidates is not failing anything.
 
 That division is the point of handing you the report rather than a diff. The
