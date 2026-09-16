@@ -416,20 +416,24 @@ function deepestScope(scopes: readonly string[], file: string): string {
  * and nothing overlaps at all: the entire tree reads as a gap, every workspace
  * looks uncovered, and every sibling config in the repo becomes a candidate.
  *
- * A probe root ABOVE the repo root throws instead. It means a config
+ * A probe root ABOVE the repo root answers `undefined`. It means a config
  * `references` one outside the tree, and a repo-relative path cannot express
- * a file outside the repo -- there is no prefix to rebase by, so the honest
- * answer is to say so rather than to emit `../` paths that match nothing on
- * either side of the coverage figure.
+ * a file outside the repo -- there is no prefix to rebase by, and emitting
+ * `../` paths would match nothing on either side of the coverage figure, so
+ * every workspace would read as uncovered and every sibling in the repo would
+ * become a candidate.
+ *
+ * `undefined` rather than a throw: the gap is unanswerable, which is not the
+ * same as the run being impossible. `openProject` roots itself at the same
+ * common ancestor and `run.ts` says which root the paths are measured from,
+ * so the run produces a report -- as it already does when `--config` names
+ * such a config directly. Refusing here made the two entry points disagree
+ * about one tree. What the caller must NOT do is carry on and compute a gap
+ * from names it could not rebase.
  */
-function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
+function rebaseOnto(root: string, probeRoot: string): ((name: string) => string) | undefined {
   const prefix = toPosix(relative(resolve(root), probeRoot));
-  if (prefix === ".." || prefix.startsWith("../") || isAbsolute(prefix)) {
-    throw new Error(
-      `the tsconfigs under ${root} resolved to files outside it (common root ${probeRoot}); ` +
-        `a project reference reaches above the analyzed root, which repo-relative paths cannot express`,
-    );
-  }
+  if (prefix === ".." || prefix.startsWith("../") || isAbsolute(prefix)) return undefined;
   return prefix === "" ? (name) => name : (name) => `${prefix}/${name}`;
 }
 
@@ -602,8 +606,27 @@ export async function configsFor(
   // problem to report, not an exception from config selection.
   if (primaries.length === 0) return { configs: [], rejected: [] };
 
+  // Nothing a probe could learn can change the answer when no scope has a
+  // sibling: `candidates` is built from `siblings` and from nothing else, so
+  // it is already known to be empty and the early return below is already
+  // known to be the one taken. Everything between here and there -- a `tsgo`
+  // spawn, a whole program load, and a walk of the tree on disk -- computes a
+  // gap that only siblings could close.
+  //
+  // This is the common shape and not a corner. On a sample monorepo every one
+  // of eighteen scopes held exactly one `tsconfig.json`, and the probe it did
+  // not need was 3.1s of a 13s run. `owned` is built from `scopes`, which is
+  // what the candidate loop walks, so its values are exactly the siblings
+  // that loop could ever reach.
+  if ([...owned.values()].every((c) => c.siblings.length === 0)) {
+    return { configs: primaries, rejected: [] };
+  }
+
   const primaryProbe = await sourceFileNames(primaries.map((c) => resolve(root, c)));
   const rebasePrimary = rebaseOnto(root, primaryProbe.root);
+  // Unrebasable: a reference reached outside the tree, so there is no gap to
+  // measure and the conservative answer is to adopt nothing. See `rebaseOnto`.
+  if (rebasePrimary === undefined) return { configs: primaries, rejected: [] };
   const covered = new Set(primaryProbe.names.map(rebasePrimary));
 
   const gapOf = new Map<string, Set<string>>();
@@ -635,7 +658,10 @@ export async function configsFor(
   const candidateProbe = await sourceFileNames(
     [...primaries, ...candidates.map((c) => c.config)].map((c) => resolve(root, c)),
   );
+  // Opening the candidates can only move the common root further UP, so this
+  // can escape where the primary probe did not. Same answer: adopt nothing.
   const rebaseCandidate = rebaseOnto(root, candidateProbe.root);
+  if (rebaseCandidate === undefined) return { configs: primaries, rejected: [] };
   const kept = candidates.filter(({ config, scope }) => {
     const gap = gapOf.get(scope);
     // `byConfig`, not the union: with two siblings beside one workspace the

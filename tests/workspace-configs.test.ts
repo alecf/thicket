@@ -97,16 +97,39 @@ describe("configsFor", () => {
     expect(probeCalls()).toBe(2);
   });
 
-  it("probes once when no workspace has a gap a sibling could close", async () => {
-    // `libs/beta` and the root cover everything they own, so there is nothing
-    // for a second probe to answer. The second probe is conditional, not
-    // unconditional -- a fixed pair pays for a `tsgo` spawn nobody asked for
-    // on the common case, where every workspace has exactly one config.
+  it("probes once when a sibling exists but no scope has a gap it could close", async () => {
+    // The filter fixture's root carries `tsconfig.all.json` beside its own
+    // config, so the FIRST probe is earned -- something here could be adopted.
+    // Nothing is missing once it runs, so the second has no question to answer.
+    // Conditional, not a fixed pair: a second probe is a `tsgo` spawn and a
+    // whole program load.
+    //
+    // The selection matters. Pick a scope set with no sibling anywhere and this
+    // passes at ZERO probes, testing the guard below instead of the property
+    // named here -- which is what the previous version of this test did the
+    // moment that guard landed.
+    const all = discoverWorkspaces(filterWorkspacesRoot());
+    await configsFor(filterWorkspacesRoot(), {
+      selected: [{ dir: "pkg/alpha", name: "@filt/alpha" }],
+      discovered: all,
+    });
+    expect(probeCalls()).toBe(1);
+  });
+
+  it("does not probe at all when no scope offers a sibling", async () => {
+    // The probe exists to answer one question: does a sibling config close a
+    // gap? `candidates` is built from `siblings` alone, so where no scope has
+    // one the answer cannot change the result, and the whole probe -- a tsgo
+    // spawn and a full program load -- is spent to learn nothing.
+    //
+    // This is the common shape rather than a corner: on a sample monorepo all
+    // eighteen scopes held exactly one `tsconfig.json`, and the wasted probe
+    // was 3.1s of a 13s run. The root and `libs/beta` are that shape here.
     await configsFor(workspacesRoot(), {
       selected: [{ dir: "libs/beta", name: "beta" }],
       discovered: FIXTURE_WORKSPACES,
     });
-    expect(probeCalls()).toBe(1);
+    expect(probeCalls()).toBe(0);
   });
 
   it("contributes no config for a workspace that has none", async () => {
@@ -386,11 +409,23 @@ describe("configsFor", () => {
     }
   });
 
-  it("refuses a probe root above the repository root", async () => {
-    // A repo-relative path cannot express a file outside the repo, so a probe
-    // whose root sits above the repository root has nothing to rebase
-    // against. It happens when a config `references` one outside the tree:
-    // `expandReferences` opens it, and the common ancestor moves up.
+  it("adopts no sibling when a project reference escapes the analyzed root", async () => {
+    // A probe measures from the common ancestor of the configs it OPENED, so a
+    // reference reaching outside the tree puts that ancestor above the repo
+    // root and there is no prefix to rebase by. The gap is then unanswerable
+    // rather than empty: rebased names would carry `../` and match nothing on
+    // either side of the coverage figure, so every workspace would read as
+    // uncovered and every sibling in the repo would become a candidate.
+    //
+    // So the answer is the conservative one -- adopt nothing, keep the
+    // primaries -- which errs toward an honest coverage gap rather than toward
+    // a widened analysis, the same direction a declined candidate errs in.
+    // `openProject` then moves the root up and `run.ts` says so; a run of this
+    // shape reports, and names the root its paths are measured from.
+    //
+    // `pkg` carries a sibling so the probe actually runs: with one config it
+    // would return before probing and this would pass without exercising the
+    // escape at all.
     //
     // Written to a temp directory because no committed fixture can hold it --
     // it needs a config OUTSIDE the root being analyzed, and the repository
@@ -404,7 +439,7 @@ describe("configsFor", () => {
         strict: true,
         noEmit: true,
       };
-      await mkdir(join(dir, "repo/pkg"), { recursive: true });
+      await mkdir(join(dir, "repo/pkg/src"), { recursive: true });
       await mkdir(join(dir, "outside/src"), { recursive: true });
       await writeFile(join(dir, "repo/package.json"), JSON.stringify({ name: "escape-root" }));
       // A solution config owns no files, which is the only shape
@@ -414,17 +449,23 @@ describe("configsFor", () => {
         JSON.stringify({ files: [], references: [{ path: "../../outside" }] }),
       );
       await writeFile(
+        join(dir, "repo/pkg/tsconfig.extra.json"),
+        JSON.stringify({ compilerOptions, include: ["src/**/*.ts"] }),
+      );
+      await writeFile(join(dir, "repo/pkg/src/a.ts"), "export const a = 1;\n");
+      await writeFile(
         join(dir, "outside/tsconfig.json"),
         JSON.stringify({ compilerOptions, include: ["src/**/*.ts"] }),
       );
       await writeFile(join(dir, "outside/src/x.ts"), "export const x = 1;\n");
 
       const pkg = [{ dir: "pkg" }];
-      await expect(
-        configsFor(join(dir, "repo"), { selected: pkg, discovered: pkg }),
-      ).rejects.toThrow(
-        /outside|above/i,
-      );
+      const { configs, rejected } = await configsFor(join(dir, "repo"), {
+        selected: pkg,
+        discovered: pkg,
+      });
+      expect(configs).toEqual(["pkg/tsconfig.json"]);
+      expect(rejected).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
