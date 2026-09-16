@@ -125,11 +125,17 @@ describe("configsFor", () => {
     // This is the common shape rather than a corner: on a sample monorepo all
     // eighteen scopes held exactly one `tsconfig.json`, and the wasted probe
     // was 3.1s of a 13s run. The root and `libs/beta` are that shape here.
-    await configsFor(workspacesRoot(), {
+    const { configs, rejected } = await configsFor(workspacesRoot(), {
       selected: [{ dir: "libs/beta", name: "beta" }],
       discovered: FIXTURE_WORKSPACES,
     });
     expect(probeCalls()).toBe(0);
+    // The selection too, and the exact list. A guard that skipped the probe and
+    // returned the wrong configs -- an empty list above all, which is what a
+    // misplaced early return produces -- costs nothing on a probe count and
+    // silently analyzes a different repository.
+    expect(configs).toEqual(["libs/beta/tsconfig.json", "tsconfig.json"]);
+    expect(rejected).toEqual([]);
   });
 
   it("contributes no config for a workspace that has none", async () => {
