@@ -107,8 +107,8 @@ thicket diff before.json after.json</code></pre>
   <div class="card">
     <h3>Identical runs</h3>
     <p>
-      Same code in, same report out, byte for byte. Diff two reports to see if your refactor
-      worked.
+      Same code, same settings, same version: the same report, byte for byte. Diff two reports
+      to see if your refactor worked.
     </p>
   </div>
 </section>
@@ -118,7 +118,11 @@ thicket diff before.json after.json</code></pre>
   <p>thicket does not score your codebase. Nothing in the report is a defect.</p>
   <ul>
     <li>No pass or fail. It exits 0 whether it finds 3 findings or 18,000.</li>
-    <li>The summary numbers track one codebase over time. They do not compare two codebases.</li>
+    <li>
+      The summary numbers are not grades. Duplicated coverage and propagation cost are real
+      fractions, but duplicated mass counts nested clusters twice, so it only means anything as
+      a trend for one codebase.
+    </li>
     <li>
       Every finding is a candidate. Plenty are not worth fixing, and
       <a href="report-guide.html#is-this-duplication-worth-removing">the guide says how to tell</a>.

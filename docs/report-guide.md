@@ -290,9 +290,16 @@ direction is architecturally right. Treat it as a starting point, not an
 instruction — if the suggestion looks absurd (severing a component from its own
 hooks, say), it probably is, and the real fix is nearby.
 
-thicket will **not** suggest a cut that is type-only (it changes nothing that
-runs) or a cut for a tangle no file-level cycle underlies (there is nothing to
-break).
+thicket will **not** suggest a cut for a tangle with no file-level cycle under
+it, because there is nothing to break. It will not suggest one that leaves more
+than two thirds of the tangle standing either. When every option fails that
+test, it says so and names the best it rejected.
+
+A type-only cut is **demoted, not banned**. A runtime edge wins any tie, because
+only a runtime cycle can fail at module-init time. But a type-only edge that
+breaks the cycle completely is still proposed, labelled `type-only`. Nothing
+changes at runtime when you take it. What you get back is a knot the reader no
+longer has to hold in their head.
 
 ### `leaves:`
 

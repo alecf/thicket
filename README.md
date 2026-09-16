@@ -70,7 +70,7 @@ thicket does not score your codebase. Nothing in the report is a defect.
 - **The summary numbers are trends.** `duplicated mass` counts nested clusters twice, on purpose. Compare one codebase against itself after a refactor. Do not compare two different codebases.
 - **Every finding is a candidate**, and often the answer is no. Ask what changes between the copies. If nineteen classes differ only in the *value* of `loincCode` and `unit`, that is one class with two settings, and merging them pays off. If a hundred objects each use *different field names*, they are different things that happen to look alike. Merging those gets you a `pick` helper and nothing else. The report ranks with that in mind, and [the guide says how to check](docs/report-guide.md#is-this-duplication-worth-removing).
 
-That split is the point. thicket does the searching: it finds every repeat in the tree, including copies where the names were changed. The agent does the thinking, on the few dozen candidates that come back.
+That split is the point. thicket does the searching. It reads every file in the program, and finds every repeat above the size threshold, including copies where the names were changed. The agent does the thinking, on the few dozen candidates that come back.
 
 It is also the cheap way round. A model only sees the files it opens, and opening every file costs tokens for every file. One real application here is 5,798 files and 1.5M lines.
 
@@ -80,7 +80,7 @@ An agent writes what it can see. It misses the helper in a file it never opened,
 
 thicket finds exactly that. It matches the same code across files, even when every name is different. That is what `L1` matching is for.
 
-The same code always gives the same report, so you can run it on a schedule. Run it once a week and compare it to last week:
+The same code, settings and thicket version always give the same report, so you can run it on a schedule. Run it once a week and compare it to last week:
 
 ```bash
 thicket --json .thicket/this-week.json > thicket.md
@@ -120,7 +120,7 @@ tsgo/lib.*.d.ts    its standard library. tsgo will not start without these
 
 Keep them together. `thicket` looks for `tsgo/` next to its own executable, and it follows symlinks to get there. So you can install the folder anywhere and link `thicket` onto your `PATH`. Copying the binary out on its own does not work.
 
-To use a different tsgo build, set `THICKET_TSGO`. Its version is part of the report's config hash, so switching builds clears the cache instead of quietly changing the answer.
+To use a different tsgo build, set `THICKET_TSGO`. Its version is part of the report's config hash. Switching builds therefore invalidates every cached row, and thicket re-analyzes instead of quietly changing the answer.
 
 ## Usage
 
@@ -431,9 +431,11 @@ On a real 12-module tangle this found five edges: `lib → app` (72 of 81 import
 
 **No cut for a tangle with no file cycle under it.** A module SCC is a claim about directories. If no file in those modules imports its way back to itself across a boundary, then cutting an edge removes no cycle, because there is no cycle. A real 7-module tangle was exactly this, and the cut thicket used to propose removed nothing.
 
-**A type-only edge is never the suggested cut.** Those edges are erased at compile time, so cutting one changes nothing that runs. thicket used to *prefer* them, on the grounds that moving a types file is the cheapest fix. On a real 12-module tangle that produced exactly the wrong recommendation: a two-symbol `types → models` cut that an agent did in ten minutes and correctly reported as a no-op, because by the report's own definition that edge was never a runtime dependency. The tangle fixture reproduces it. A package attached to a clique by two `import type` edges is the best available cut by dissolution, and it is worth nothing.
+**A type-only edge is demoted, not banned.** Those edges are erased at compile time, so cutting one changes nothing that runs, and a runtime edge wins any tie. thicket once *preferred* them, on the grounds that moving a types file is the cheapest fix. On a real 12-module tangle that produced exactly the wrong recommendation: a two-symbol `types → models` cut that an agent did in ten minutes and correctly reported as a no-op. Banning them outright over-corrected. What made that cut worthless was that it shaved one module off the tangle and left the rest, and the rule below catches that on its own. A cycle in the type system is still real complexity, because a reader cannot understand either module without the other. So a type-only cut that breaks a cycle completely is proposed, and the report labels it `type-only`.
 
-**The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a type-only edge, then the fewest files to edit, then the fewest symbols.
+**The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a runtime edge over a type-only one, then the fewest files to edit, then the fewest symbols.
+
+**A cut has to earn its place.** It must leave at most two thirds of the tangle standing, or remove the cycle outright. Otherwise thicket suggests nothing and says what it rejected: "the best available leaves 8 of 9" and "nothing helps" are different answers, and an agent given only the second recomputed the first by hand before it would believe the tangle was irreducible.
 
 **Every tangle says whether any file is really circular.** A module SCC is a claim about directories, and the directories are a choice this tool made. On a real 7-module tangle across 417 files there were three file cycles. All three sat inside a single directory, and none crossed a boundary the finding drew. So nothing circular executes, there is no module-init hazard, and the fix removes no real cycle. An agent had to write its own Tarjan implementation to work that out, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict. That is why the line earns its space. It is the same algorithm one granularity down, on a graph thicket has already built.
 
