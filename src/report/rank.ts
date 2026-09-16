@@ -218,7 +218,7 @@ export function rankClusters(
  * 70-84% of all candidates.
  */
 function siblingWeight(cluster: Cluster): number {
-  const parents = new Set(cluster.occurrences.map((o) => `${o.filePath} ${o.parentId}`));
+  const parents = new Set(cluster.occurrences.map((o) => `${o.filePath}\u0000${o.parentId}`));
   const scattered = parents.size / cluster.occurrences.length;
   return SIBLING_FLOOR + (1 - SIBLING_FLOOR) * scattered;
 }
@@ -273,19 +273,32 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
   const sorted = [...clusters].sort(
     (a, b) => b.nodeCount - a.nodeCount || compareStrings(a.id, b.id),
   );
-  const kept: Cluster[] = [];
+  // What survives, each paired with its occurrences grouped by file so a
+  // containment test reads only the occurrences that could possibly match.
+  const kept: KeptEntry[] = [];
+  // file -> the kept clusters holding an occurrence in it, by index into
+  // `kept` and therefore ascending. This is what stops the scan below being
+  // quadratic; `containerOf` explains why it is also exhaustive.
+  const holders = new Map<string, number[]>();
   // Occurrences of a dropped child that lie outside every occurrence of the
   // parent that swallowed it. Collected rather than discarded: they are the
   // same shape in different surroundings, which is the one place the report
   // can cheaply point at code that may already be the extraction.
   const elsewhere = new Map<string, Occurrence[]>();
   for (const candidate of sorted) {
-    const parent = kept.find((k) => contains(k, candidate));
-    if (parent === undefined) {
-      kept.push(candidate);
+    const container = containerOf(candidate, kept, holders);
+    if (container === undefined) {
+      const byFile = groupByFile(candidate.occurrences);
+      const index = kept.push({ cluster: candidate, byFile }) - 1;
+      for (const file of byFile.keys()) {
+        const prior = holders.get(file);
+        if (prior) prior.push(index);
+        else holders.set(file, [index]);
+      }
       continue;
     }
-    // Only when the child matched at the SAME level. `contains` deliberately
+    const parent = container.cluster;
+    // Only when the child matched at the SAME level. Containment deliberately
     // lets an L0 parent swallow an L1 child -- the coarser match subsumes the
     // finer one, which is right for deduplication. It is wrong here, because
     // this field is printed under a heading a reader interprets at the
@@ -296,7 +309,7 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
     // it could trust the rest of the block.
     const outside =
       candidate.level === parent.level
-        ? candidate.occurrences.filter((c) => !insideAny(parent, c))
+        ? candidate.occurrences.filter((c) => !covers(container.byFile, c))
         : [];
     if (outside.length > 0) {
       const prior = elsewhere.get(parent.id);
@@ -304,7 +317,7 @@ export function subsume(clusters: readonly Cluster[]): Cluster[] {
       else elsewhere.set(parent.id, [...outside]);
     }
   }
-  return kept.map((c) => {
+  return kept.map(({ cluster: c }) => {
     const outside = elsewhere.get(c.id);
     if (outside === undefined) return c;
     // One entry per file: the reader opens files, and a shape nested
@@ -337,10 +350,81 @@ function depth(path: string): number {
   return n;
 }
 
-function insideAny(parent: Cluster, child: Occurrence): boolean {
-  return parent.occurrences.some(
-    (p) => p.filePath === child.filePath && p.start <= child.start && p.end >= child.end,
-  );
+/** A kept cluster and its occurrences grouped by file, built once when kept. */
+interface KeptEntry {
+  cluster: Cluster;
+  byFile: Map<string, Occurrence[]>;
+}
+
+function groupByFile(occurrences: readonly Occurrence[]): Map<string, Occurrence[]> {
+  const byFile = new Map<string, Occurrence[]>();
+  for (const o of occurrences) {
+    const prior = byFile.get(o.filePath);
+    if (prior) prior.push(o);
+    else byFile.set(o.filePath, [o]);
+  }
+  return byFile;
+}
+
+/** Whether any of `byFile`'s occurrences spans `child` in `child`'s own file. */
+function covers(byFile: ReadonlyMap<string, Occurrence[]>, child: Occurrence): boolean {
+  const here = byFile.get(child.filePath);
+  if (here === undefined) return false;
+  return here.some((p) => p.start <= child.start && p.end >= child.end);
+}
+
+/**
+ * The most occurrences a containing cluster may miss and still contain.
+ *
+ * Derived by applying the same comparison `containsChild` makes rather than by
+ * rearranging it: `1 - SUBSUME_OVERLAP` is not exact in binary, so
+ * `floor((1 - 0.8) * 10)` is 1 where the comparison it makes admits 2.
+ * A bound one short of the truth makes the index below miss real parents,
+ * which prints the same finding twice.
+ */
+function missableBy(copies: number): number {
+  let missable = 0;
+  while (missable < copies && (copies - (missable + 1)) / copies >= SUBSUME_OVERLAP) {
+    missable += 1;
+  }
+  return missable;
+}
+
+/**
+ * The first kept cluster -- in kept order, which is the ranked order the
+ * report reads -- that contains `child`, or undefined.
+ *
+ * Exhaustive despite looking at a handful of files: a container may miss at
+ * most `missableBy(n)` of the child's occurrences, so among any
+ * `missableBy(n) + 1` of them at least one sits INSIDE the container, and the
+ * container therefore holds an occurrence in that one's file. Probing the
+ * first few occurrences' files reaches every cluster that could match --
+ * including, crucially, when the child's leading occurrences are the ones
+ * outside, which is the case a probe of only the first file gets wrong.
+ */
+function containerOf(
+  child: Cluster,
+  kept: readonly KeptEntry[],
+  holders: ReadonlyMap<string, number[]>,
+): KeptEntry | undefined {
+  const probes = Math.min(missableBy(child.occurrences.length) + 1, child.occurrences.length);
+  let candidates = holders.get(child.occurrences[0]?.filePath ?? "");
+  if (probes > 1) {
+    // Ascending and deduplicated, because the first match in kept order is
+    // part of the answer: it decides which finding carries `alsoAt`.
+    const union = new Set<number>();
+    for (let i = 0; i < probes; i++) {
+      const file = child.occurrences[i]?.filePath;
+      if (file === undefined) continue;
+      for (const index of holders.get(file) ?? []) union.add(index);
+    }
+    candidates = [...union].sort((a, b) => a - b);
+  }
+  for (const index of candidates ?? []) {
+    const entry = kept[index];
+    if (entry !== undefined && containsChild(entry, child)) return entry;
+  }
+  return undefined;
 }
 
 /**
@@ -388,15 +472,18 @@ function levelsCollapse(outer: string, inner: string): boolean {
   return outer === "L0" && inner === "L1";
 }
 
-function contains(parent: Cluster, child: Cluster): boolean {
-  if (!levelsCollapse(parent.level, child.level)) return false;
+function containsChild(parent: KeptEntry, child: Cluster): boolean {
+  if (!levelsCollapse(parent.cluster.level, child.level)) return false;
+  const copies = child.occurrences.length;
+  const missable = missableBy(copies);
   // Directional: `child`'s occurrences must sit inside `parent`'s, so a small
   // fragment can never swallow the larger one it is nested in, whatever the
   // iteration order.
-  const inside = child.occurrences.filter((c) =>
-    parent.occurrences.some(
-      (p) => p.filePath === c.filePath && p.start <= c.start && p.end >= c.end,
-    ),
-  ).length;
-  return inside / child.occurrences.length >= SUBSUME_OVERLAP;
+  let inside = 0;
+  let missed = 0;
+  for (const c of child.occurrences) {
+    if (covers(parent.byFile, c)) inside += 1;
+    else if ((missed += 1) > missable) return false; // cannot reach the floor
+  }
+  return inside / copies >= SUBSUME_OVERLAP;
 }
