@@ -736,9 +736,8 @@ describe("subsume: scale", () => {
     // Sanity: the corpus has to be doing the expensive thing, which is keeping
     // most of what it is handed. A corpus that collapsed to a handful of
     // clusters would pass the budget below without exercising anything.
-    expect(kept.length).toBeGreaterThan(CLUSTERS / 2);
-    // ...and doing real subsumption, not only rejection: the nested twins go.
-    expect(kept.length).toBeLessThan(input.length);
+    expect(kept.length).toBeGreaterThan(input.length * 0.9);
+    expect(kept.some((c) => c.id.startsWith("n"))).toBe(false);
     expect(elapsed).toBeLessThan(3_000);
   }, 120_000);
 });
