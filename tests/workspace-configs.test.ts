@@ -470,4 +470,71 @@ describe("configsFor", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("adopts no sibling when only the CANDIDATE probe escapes the analyzed root", async () => {
+    // The other escape test returns at the primary probe, so it never reaches
+    // the second guard -- which could be deleted with the suite still green.
+    // Opening the candidates can only move the common root further up, so the
+    // second probe escapes on trees where the first did not, and this is that
+    // tree: the primary is an ordinary in-root config, and the SIBLING is what
+    // reaches outside.
+    //
+    // Delete the guard and this fixture does not crash, which is the reason to
+    // pin it on the answer rather than on a throw: the candidate here owns no
+    // files, so `own.some(...)` never calls `rebaseCandidate` and the undefined
+    // is never dereferenced. What comes back instead is `tsconfig.test.json`
+    // reported as DECLINED -- a config the coverage section then offers the
+    // reader as a `--config` worth trying, on the strength of a gap check that
+    // never ran. A candidate that owned files would hit the TypeError instead,
+    // so both failure modes live behind this one line.
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "thicket-escape2-")));
+    try {
+      const compilerOptions = {
+        target: "es2022",
+        module: "nodenext",
+        moduleResolution: "nodenext",
+        strict: true,
+        noEmit: true,
+      };
+      await mkdir(join(dir, "repo/pkg/src"), { recursive: true });
+      await mkdir(join(dir, "outside/src"), { recursive: true });
+      await writeFile(join(dir, "repo/package.json"), JSON.stringify({ name: "escape2-root" }));
+      // Covers `a.ts` and not `b.test.ts`, so `pkg` has a gap and its sibling
+      // becomes a candidate. Without a gap nothing is ever probed a second time.
+      await writeFile(
+        join(dir, "repo/pkg/tsconfig.json"),
+        JSON.stringify({
+          compilerOptions,
+          include: ["src/**/*.ts"],
+          exclude: ["src/**/*.test.ts"],
+        }),
+      );
+      // The candidate, and a solution config -- which is the only shape
+      // `expandReferences` follows out of the tree.
+      await writeFile(
+        join(dir, "repo/pkg/tsconfig.test.json"),
+        JSON.stringify({ files: [], references: [{ path: "../../outside" }] }),
+      );
+      await writeFile(join(dir, "repo/pkg/src/a.ts"), "export const a = 1;\n");
+      await writeFile(join(dir, "repo/pkg/src/b.test.ts"), "export const b = 2;\n");
+      await writeFile(
+        join(dir, "outside/tsconfig.json"),
+        JSON.stringify({ compilerOptions, include: ["src/**/*.ts"] }),
+      );
+      await writeFile(join(dir, "outside/src/x.ts"), "export const x = 1;\n");
+
+      const pkg = [{ dir: "pkg" }];
+      const { configs, rejected } = await configsFor(join(dir, "repo"), {
+        selected: pkg,
+        discovered: pkg,
+      });
+      // Both probes ran -- the first rebased, the second could not -- so the
+      // count is what separates this from the primary-escape case above.
+      expect(probeCalls()).toBe(2);
+      expect(configs).toEqual(["pkg/tsconfig.json"]);
+      expect(rejected).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
