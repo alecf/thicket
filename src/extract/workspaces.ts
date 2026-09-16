@@ -514,14 +514,26 @@ export interface ChosenConfigs {
  * shapes in the wild differ: one is disjoint from its main config, the other
  * a superset of it.
  *
- * TWO probes, never one per workspace. A probe is not the per-workspace
- * saving it looks like: `sourceFileNames` carries the measurements, and the
- * short version is that its cost is dominated by a fixed `tsgo` spawn that a
- * program load pays too, so at workspace size a probe is free rather than
- * cheap and N of them is N spawns bought for nothing. The primaries go in one
- * call and the candidate siblings in one more, and the second call is skipped
- * entirely when no workspace is missing anything -- the common case, where
- * every workspace has exactly one config.
+ * At most TWO probes, and never one per workspace. A probe is not the
+ * per-workspace saving it looks like: `sourceFileNames` carries the
+ * measurements, and the short version is that its cost is dominated by a
+ * fixed `tsgo` spawn that a program load pays too, so at workspace size a
+ * probe is free rather than cheap and N of them is N spawns bought for
+ * nothing. The primaries go in one call and the candidate siblings in one
+ * more.
+ *
+ * Both calls are conditional, on two DIFFERENT questions, and it is worth
+ * keeping them apart:
+ *
+ * - Zero probes when no scope owns a sibling at all. `candidates` is built
+ *   from `siblings` and from nothing else, so there is no config the gap
+ *   could promote and the answer is known before anything is loaded. This is
+ *   the common shape -- every workspace with exactly one `tsconfig.json`,
+ *   which on a sample monorepo was all eighteen of them.
+ * - One probe when a sibling exists but the gap turns out empty, so there is
+ *   nothing for the second call to ask about.
+ * - Two when some sibling might close a gap, which is the only case where
+ *   the answer needs a second program load.
  *
  * The gap is computed ONCE, globally, and each gapped file is attributed to
  * the deepest workspace that contains it. That is what keeps a directory from
@@ -571,11 +583,12 @@ export async function configsFor(
   opts: ScanOptions = {},
 ): Promise<ChosenConfigs> {
   // The order of what follows, before any of the reasons for it: take each
-  // directory's primary config; probe them all at once to learn what they
-  // cover; subtract that from the files on disk to get the gap; attribute
-  // each gapped file to the workspace that owns it; offer the siblings of
-  // the workspaces left with a gap; probe those; keep the ones that closed
-  // something.
+  // directory's primary config; stop here if no directory owns a second one,
+  // since nothing below can then change the answer; probe the primaries all
+  // at once to learn what they cover; subtract that from the files on disk to
+  // get the gap; attribute each gapped file to the workspace that owns it;
+  // offer the siblings of the workspaces left with a gap; probe those; keep
+  // the ones that closed something.
   const { selected, discovered } = workspaces;
   // Sorted and deduped: a caller may pass the root itself, or the same
   // workspace twice (two globs matching one directory), and neither may
