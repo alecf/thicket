@@ -481,7 +481,7 @@ export interface ChosenConfigs {
    *    this run already looked.
    *
    * The distinction is not carried, because nothing downstream words the two
-   * cases differently -- `ScopeOptions.triedConfigs` conflates this list with
+   * cases differently -- `ScanOptions.triedConfigs` conflates this list with
    * the configs the program was built from for exactly that reason.
    *
    * THE DECLINED CLAIM IS EXACTLY THAT, AND NO WIDER. The gap it was measured against
