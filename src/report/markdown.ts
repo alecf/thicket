@@ -628,9 +628,24 @@ const MAX_ALSO_AT_NAMED = 3;
  * one of them imported it.
  */
 function contextLines(r: Ranked): string[] {
-  const context = r.context;
-  if (context === undefined) return [];
   const lines: string[] = [];
+
+  if (r.fileRole !== undefined) {
+    // First, because it is the fact that decides whether to read the rest. A
+    // reader who sees a large copy count sitting oddly low has no way to tell a
+    // deliberate weight from a ranking bug, and the two call for opposite
+    // responses.
+    const files = new Set(r.cluster.occurrences.map((o) => o.filePath)).size;
+    lines.push(
+      `- **declared once in each of ${files} \`${r.fileRole}\` files:**` +
+        ` a convention of that file role, so it is ranked below duplication of the same size`,
+    );
+  }
+
+  // Everything below is drawn from the cluster's surroundings, which the
+  // caller resolves only for findings the report will print.
+  const context = r.context;
+  if (context === undefined) return lines.length === 0 ? [] : [...lines, ""];
 
 
   if (context.sharedImports.length > 0) {

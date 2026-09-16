@@ -61,6 +61,37 @@ const ranked = (id: string, over: Partial<Ranked["cluster"]> = {}, score = 100):
   },
 });
 
+describe("a finding that is one declaration per file of one role", () => {
+  it("says so, and says why it sank", () => {
+    // The weight usually keeps such a finding off the page entirely, which is
+    // the point of it. This is the case where it still surfaces -- a small
+    // repository where nothing outranks it -- and then the reader sees a large
+    // copy count sitting oddly low. Without the reason on the finding they
+    // cannot tell a deliberate weight from a ranking bug, and the two call for
+    // opposite responses.
+    const meta = ranked("THK-DUP-meta", {
+      occurrences: [
+        { filePath: "src/Badge.stories.tsx", start: 0, end: 200, line: 4, endLine: 12, parentId: 1 },
+        { filePath: "src/Card.stories.tsx", start: 0, end: 200, line: 4, endLine: 12, parentId: 2 },
+      ],
+    });
+    const markdown = renderMarkdown(
+      reportInput({ duplication: [{ ...meta, fileRole: ".stories.tsx" }] }),
+    );
+    expect(markdown).toContain(
+      "**declared once in each of 2 `.stories.tsx` files:**",
+    );
+    expect(markdown).toContain("ranked below duplication of the same size");
+  });
+
+  it("says nothing when the cluster is ordinary duplication", () => {
+    const markdown = renderMarkdown(
+      reportInput({ duplication: [ranked("THK-DUP-plain")] }),
+    );
+    expect(markdown).not.toContain("declared once in each of");
+  });
+});
+
 /** A dependents record with nothing hidden behind a barrel. */
 const deps = (direct: number, throughBarrels = 0, barrels: string[] = []) => ({
   direct,

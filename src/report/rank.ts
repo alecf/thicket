@@ -43,6 +43,12 @@ export interface Ranked {
    * `driftWeight` to `score`.
    */
   fieldDrift?: { varying: number; total: number };
+  /**
+   * The file role every copy shares, when this cluster is one declaration per
+   * file across files of one role -- `.stories.tsx`, `.config.ts`. Set by
+   * `rankClusters`, which has already applied `CONVENTION_FLOOR` to `score`.
+   */
+  fileRole?: string;
 }
 
 /**
@@ -134,12 +140,91 @@ const SIBLING_FLOOR = 0.2;
 const TEST_FLOOR = 0.4;
 
 /**
+ * The role a filename declares, as `.stories.tsx` for `Badge.stories.tsx`.
+ *
+ * A basename of three or more dotted parts, so a plain `.ts` is never a role:
+ * `src/a.ts` and `src/b.ts` share an extension and play no common part, and
+ * reading that as a role would down-weight most of the report. Lowercased with
+ * `toLowerCase`, which is locale-independent, and not with
+ * `toLocaleLowerCase`, which is not (AGENTS.md §1).
+ */
+export function fileRoleOf(path: string): string | undefined {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  const parts = base.split(".");
+  if (parts.length < 3) return undefined;
+  return `.${parts.slice(1).join(".")}`.toLowerCase();
+}
+
+/**
+ * The role shared by every file of a cluster that declares the shape once per
+ * file, or `undefined` when the cluster is not that.
+ *
+ * Some duplication cannot be removed because a framework requires it. Storybook
+ * CSF wants one `const meta` per story file; Next.js wants one default export
+ * per `page.tsx`. Twenty-two copies across twenty-two `.stories.tsx` files are
+ * that framework's API, and deleting a copy deletes a story. On a real
+ * application two such findings held production slots against work that could
+ * actually be done.
+ *
+ * Both halves are needed, and the occurrence count is the half that is easy to
+ * leave out. A finding on the same application put a Drizzle `updatedAt` column
+ * in 39 `.schema.ts` files -- one shared role suffix, 100% of them -- but 56
+ * times, with seven in a single file. That shape is per TABLE, not per file, a
+ * shared column helper absorbs every copy, and the role suffix alone calls it a
+ * convention.
+ *
+ * One occurrence of slack, because a real `.stories.tsx` finding was 45 copies
+ * across 44 files: one story file exports two metas. Demanding exactly one per
+ * file misses it, and it is the same convention. The slack stays at one however
+ * large the cluster grows, so it never becomes a loophole.
+ *
+ * No floor on file count. Two files sharing a role is weak evidence of a
+ * convention, and this is a weight rather than an exclusion for exactly that
+ * reason -- a cluster it is wrong about can still be reported when nothing
+ * better competes.
+ */
+export function fileRoleConvention(cluster: Cluster): string | undefined {
+  const perFile = new Set<string>();
+  for (const o of cluster.occurrences) perFile.add(o.filePath);
+  if (cluster.occurrences.length > perFile.size + 1) return undefined;
+
+  let role: string | undefined;
+  for (const path of perFile) {
+    const found = fileRoleOf(path);
+    if (found === undefined) return undefined;
+    if (role === undefined) role = found;
+    else if (found !== role) return undefined;
+  }
+  return role;
+}
+
+/**
+ * How much of the score a cluster keeps when it is one declaration per file
+ * across files of one role.
+ *
+ * Set beside `FIELD_DRIFT_FLOOR` and for the same reason: such a finding can
+ * still be reported when nothing else competes, and never outranks duplication
+ * that a reader could actually remove.
+ */
+const CONVENTION_FLOOR = 0.25;
+
+export interface RankOptions {
+  /**
+   * Rank a shape declared once per file across files of one role below
+   * duplication of the same size. On by default; `--no-file-conventions` turns
+   * this one opinion off and leaves every other in force (AGENTS.md §4b).
+   */
+  fileConventions?: boolean;
+}
+
+/**
  * Ranking is the product. We surface perhaps 40 of ~500 candidates, so the
  * ordering matters far more than detection breadth. See PRD §1.1 / §5.4.
  */
 export function rankClusters(
   clusters: readonly Cluster[],
   moduleOf?: Record<string, string>,
+  opts: RankOptions = {},
 ): Ranked[] {
   return clusters
     .map((cluster) => {
@@ -195,14 +280,34 @@ export function rankClusters(
         (copies - 1) * (linesPerCopy - 1) - EXTRACTION_OVERHEAD,
       );
 
+      // Never for a test-majority cluster. `.test.ts` is a role suffix like any
+      // other, and one `vi.mock` block per test file passes every condition --
+      // but that is not a framework mandate, it is scaffolding a setup file can
+      // absorb, and it was a real finding worth 383 lines. Test duplication is
+      // held out of production slots by a SECTION (AGENTS.md §4); stacking a
+      // weight on top of the section re-penalizes it for being a test, and
+      // reorders the test section itself on a rule that does not apply there.
+      const fileRole =
+        opts.fileConventions === false || isTestMajority(cluster)
+          ? undefined
+          : fileRoleConvention(cluster);
+
       const score =
         recoverableLines *
         spread *
         (LEVEL_WEIGHT[cluster.level] ?? 0.8) *
         testWeight *
-        siblingWeight(cluster);
+        siblingWeight(cluster) *
+        (fileRole === undefined ? 1 : CONVENTION_FLOOR);
 
-      return { cluster, score, tag, linesPerCopy, recoverableLines };
+      return {
+        cluster,
+        score,
+        tag,
+        linesPerCopy,
+        recoverableLines,
+        ...(fileRole === undefined ? {} : { fileRole }),
+      };
     })
     .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id));
 }

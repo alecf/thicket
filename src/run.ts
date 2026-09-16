@@ -107,6 +107,11 @@ export interface RunOptions {
    */
   includeCallSites?: boolean;
   /**
+   * Rank a shape declared once per file across files of one role below
+   * duplication of the same size. On by default. See `fileRoleConvention`.
+   */
+  fileConventions?: boolean;
+  /**
    * Which half of the codebase to analyze.
    *
    * `include` (default) reports both: a duplicated interface and a duplicated
@@ -523,6 +528,7 @@ export async function runReport(
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
   const includeCallSites = opts.includeCallSites ?? false;
+  const fileConventions = opts.fileConventions ?? true;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
@@ -544,6 +550,7 @@ export async function runReport(
       includeGenerated,
       bannerScan,
       includeCallSites,
+      fileConventions,
       exclude,
       types,
     }),
@@ -661,7 +668,7 @@ export async function runReport(
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
     // (PRD §9.1); the shape hash survives as `shapeHash` in the JSON.
-    const ranked = rankClusters(clusters, graph.moduleOf).map((r) => ({
+    const ranked = rankClusters(clusters, graph.moduleOf, { fileConventions }).map((r) => ({
       ...r,
       cluster: { ...r.cluster, id: findingId("DUP", r.cluster.id) },
       shapeHash: r.cluster.id,
