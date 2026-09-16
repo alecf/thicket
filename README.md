@@ -72,7 +72,7 @@ thicket does not score your codebase. Nothing in the report is a defect.
 
 That split is the point. thicket does the searching. It reads every file in the program, and finds every repeat above the size threshold, including copies where the names were changed. The agent does the thinking, on the few dozen candidates that come back.
 
-It is also the cheap way round. A model only sees the files it opens, and opening every file costs tokens for every file. On a repository of any size, that bill arrives every time you want to ask.
+It is also cheaper. A model only sees the files it opens, and opening every file costs tokens for every file. thicket reads them all outside the model, so the search itself costs you no tokens.
 
 ## Especially for code an LLM wrote
 
@@ -359,9 +359,9 @@ All three of these lines came from handing a report to agents that had never see
 
 Size is why both numbers are there. Three duplicated lines are not worth a refactor and thirty are, and you cannot tell which you are looking at from an AST node count. 17 nodes is four lines in one finding and eleven in the next.
 
-`findings 3 of 3 shown` carries weight. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is done.
+`findings 3 of 3 shown` matters. Truncation is never silent, and "38" and "38 of 495" mean very different things to a harness deciding whether it is done.
 
-When findings are held back, an **Omitted** section says what is in them: a count per category, and a histogram of the duplication candidates by recoverable lines. A bare count does not survive a real repository. One run reported `18768 further findings omitted`, which reads equally well as a codebase drowning in cycles, as one tangle restated thousands of times, or as thresholds that admit mostly noise. The breakdown settled it in two lines. Exactly **2** of the 18,808 were cycles, and **62%** of the duplication recovers fewer than ten lines. The histogram covers every candidate, not just the withheld ones, because the question is what kind of pile the printed findings came off.
+When findings are held back, an **Omitted** section says what is in them: a count per category, and a histogram of the duplication candidates by recoverable lines. A bare count does not survive a real repository. One run reported `18768 further findings omitted`. That reads equally well as a codebase full of cycles, as one tangle restated thousands of times, or as thresholds that admit mostly noise. The breakdown settled it in two lines. Exactly **2** of the 18,808 were cycles, and **62%** of the duplication recovers fewer than ten lines. The histogram covers every candidate, not just the withheld ones, because the question is what kind of pile the printed findings came off.
 
 ### Two duplication sections
 
@@ -435,7 +435,7 @@ On a real 12-module tangle this found five edges: `lib → app` (72 of 81 import
 
 **The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a runtime edge over a type-only one, then the fewest files to edit, then the fewest symbols.
 
-**A cut has to earn its place.** It must leave at most two thirds of the tangle standing, or remove the cycle outright. Otherwise thicket suggests nothing and says what it rejected: "the best available leaves 8 of 9" and "nothing helps" are different answers, and an agent given only the second recomputed the first by hand before it would believe the tangle was irreducible.
+**A cut has to remove enough to be worth doing.** It must leave at most two thirds of the tangle standing, or remove the cycle outright. Otherwise thicket suggests nothing and says what it rejected: "the best available leaves 8 of 9" and "nothing helps" are different answers, and an agent given only the second recomputed the first by hand before it would believe the tangle was irreducible.
 
 **Every tangle says whether any file is really circular.** A module SCC is a claim about directories, and the directories are a choice this tool made. On a real 7-module tangle across 417 files there were three file cycles. All three sat inside a single directory, and none crossed a boundary the finding drew. So nothing circular executes, there is no module-init hazard, and the fix removes no real cycle. An agent had to write its own Tarjan implementation to work that out, and it reversed its recommendation. The same line on a 12-module tangle in the same repository reads `6 cross these modules (largest 77 files, including …)`, which is the opposite verdict. That is why the line earns its space. It is the same algorithm one granularity down, on a graph thicket has already built.
 

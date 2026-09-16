@@ -129,8 +129,8 @@ thicket diff before.json after.json</code></pre>
     </li>
   </ul>
   <p>
-    thicket does the searching. The agent does the thinking. This is also the cheap way round.
-    A model only sees the files it opens, and opening every file costs tokens for every file.
+    thicket does the searching. The agent does the thinking. It is also cheaper that way. A
+    model only sees the files it opens, and opening every file costs tokens for every file.
   </p>
 
   <h2 id="ai-written-code">Written by agents?</h2>

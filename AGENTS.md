@@ -152,9 +152,8 @@ Anonymizing is not enough on its own. A figure from a private repository has to
 dropped 29 of the top 40 findings" is why a threshold is where it is, and it
 stays. A figure that only decorates an argument the reader already accepts does
 not: "one real application here is 5,798 files and 1.5M lines" was there to make
-"reading a repo costs tokens" feel weightier, and a reader who cannot check it
-is being asked to take a number on faith for no gain. Cut those. Reviewers read
-them as showing off with someone else's codebase, and they are right to.
+"reading a repo costs tokens" sound stronger, and a reader cannot check it. Cut
+those. A reviewer reads them as showing off with someone else's codebase.
 
 ### 6b. Write in Technical Standard English
 
@@ -179,6 +178,12 @@ The rules:
   not reach for a synonym to vary the prose.
 - **Put the point first.** State the fact, then the evidence for it. Do not
   build to it.
+- **No figures of speech, and no closing flourish.** A cost is a cost, not a
+  bill that arrives. A tangle is a tangle, not a knot the reader holds in their
+  head. This is the tic that survives every other rule, because it shows up in
+  the last sentence of a paragraph that was otherwise fine, where it reads as
+  style rather than as padding. Two of them got past a rewrite whose whole point
+  was to remove them, and the person reading the page caught both.
 
 What this does NOT license:
 

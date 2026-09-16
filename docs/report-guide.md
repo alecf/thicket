@@ -298,8 +298,8 @@ test, it says so and names the best it rejected.
 A type-only cut is **demoted, not banned**. A runtime edge wins any tie, because
 only a runtime cycle can fail at module-init time. But a type-only edge that
 breaks the cycle completely is still proposed, labelled `type-only`. Nothing
-changes at runtime when you take it. What you get back is a knot the reader no
-longer has to hold in their head.
+changes at runtime when you take it. What changes is that a reader no longer
+has to understand both modules to understand either one.
 
 ### `leaves:`
 
