@@ -538,7 +538,11 @@ describe("configsFor", () => {
       // count is what separates this from the primary-escape case above.
       expect(probeCalls()).toBe(2);
       expect(configs).toEqual(["pkg/tsconfig.json"]);
-      expect(rejected).toEqual([]);
+      // Opened, and so not `untried` whatever else is unknown about it. Left
+      // out of this list it goes back to the reader as coverage advice --
+      // `pkg — 1 files — untried: --config pkg/tsconfig.test.json` -- naming a
+      // solution config that owns no files in `pkg` and cannot close that gap.
+      expect(rejected).toEqual(["pkg/tsconfig.test.json"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

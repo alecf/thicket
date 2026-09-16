@@ -465,12 +465,26 @@ export interface ChosenConfigs {
   /** The tsconfigs to open, repo-relative POSIX, sorted. */
   configs: string[];
   /**
-   * The candidate siblings that were opened and declined, repo-relative POSIX,
-   * sorted. Declined means the probe found none of the files ITS OWN WORKSPACE
-   * was charged with in it, which is the one thing the coverage section cannot
-   * work out for itself -- it is synchronous and loads no program.
+   * The candidate siblings that were opened and not adopted, repo-relative
+   * POSIX, sorted. The claim this list makes is that the run has already put
+   * them to the question -- which is the one thing the coverage section cannot
+   * work out for itself, since it is synchronous and loads no program, and it
+   * is what stops a config being offered back as `untried`.
    *
-   * THE CLAIM IS EXACTLY THAT, AND NO WIDER. The gap this was measured against
+   * There are two ways in, and only the first is a judgement:
+   *
+   *  - DECLINED. The probe found none of the files its own workspace was
+   *    charged with in it.
+   *  - UNANSWERABLE. The candidate probe's root escaped the analyzed root, so
+   *    its names could not be rebased and nothing was learned from opening
+   *    them. The config may or may not close the gap; what is known is that
+   *    this run already looked.
+   *
+   * The distinction is not carried, because nothing downstream words the two
+   * cases differently -- `ScopeOptions.triedConfigs` conflates this list with
+   * the configs the program was built from for exactly that reason.
+   *
+   * THE DECLINED CLAIM IS EXACTLY THAT, AND NO WIDER. The gap it was measured against
    * is grouped by `deepestScope` (deepest containing WORKSPACE); the gap the
    * report prints is grouped by `owningDir` (nearest ancestor holding a
    * TSCONFIG). The two disagree when a nested workspace has no tsconfig of its
@@ -673,8 +687,20 @@ export async function configsFor(
   );
   // Opening the candidates can only move the common root further UP, so this
   // can escape where the primary probe did not. Same answer: adopt nothing.
+  //
+  // But they were OPENED, so they are reported as candidates that did not make
+  // it in. Dropping them leaves the coverage section free to offer them back:
+  // it suggests any config it has not been told was tried, and the reader gets
+  // `pkg — 1 files — untried: --config pkg/tsconfig.test.json` naming a config
+  // this run already loaded. Whether it would have closed the gap is the one
+  // thing unknown here; that it was tried is not.
   const rebaseCandidate = rebaseOnto(root, candidateProbe.root);
-  if (rebaseCandidate === undefined) return { configs: primaries, rejected: [] };
+  if (rebaseCandidate === undefined) {
+    return {
+      configs: primaries,
+      rejected: [...new Set(candidates.map((c) => c.config))].sort(compareStrings),
+    };
+  }
   const kept = candidates.filter(({ config, scope }) => {
     const gap = gapOf.get(scope);
     // `byConfig`, not the union: with two siblings beside one workspace the
