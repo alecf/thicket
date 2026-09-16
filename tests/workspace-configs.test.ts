@@ -515,11 +515,23 @@ describe("configsFor", () => {
           exclude: ["src/**/*.test.ts"],
         }),
       );
-      // The candidate, and a solution config -- which is the only shape
-      // `expandReferences` follows out of the tree.
+      // What makes the probe escape, and a solution config -- the only shape
+      // `expandReferences` follows out of the tree. It owns no files of its
+      // own, which is why it cannot be the only candidate here: `own` comes
+      // back empty for it, so `own.some(...)` never calls `rebaseCandidate`
+      // and deleting the guard would go unnoticed.
       await writeFile(
         join(dir, "repo/pkg/tsconfig.test.json"),
         JSON.stringify({ files: [], references: [{ path: "../../outside" }] }),
+      );
+      // A second candidate, and the one that puts the guard under test: it
+      // OWNS the gapped file, so the keep-check reaches `rebaseCandidate(name)`
+      // and calls it. Delete the guard and that is a TypeError on `undefined`.
+      // With only the solution config above, both paths answer identically and
+      // this test pins nothing -- which is what it did until Copilot said so.
+      await writeFile(
+        join(dir, "repo/pkg/tsconfig.gap.json"),
+        JSON.stringify({ compilerOptions, include: ["src/**/*.test.ts"] }),
       );
       await writeFile(join(dir, "repo/pkg/src/a.ts"), "export const a = 1;\n");
       await writeFile(join(dir, "repo/pkg/src/b.test.ts"), "export const b = 2;\n");
@@ -537,12 +549,14 @@ describe("configsFor", () => {
       // Both probes ran -- the first rebased, the second could not -- so the
       // count is what separates this from the primary-escape case above.
       expect(probeCalls()).toBe(2);
+      // `tsconfig.gap.json` covers the gap and is still not adopted: the probe
+      // that would have established it could not be read.
       expect(configs).toEqual(["pkg/tsconfig.json"]);
-      // Opened, and so not `untried` whatever else is unknown about it. Left
-      // out of this list it goes back to the reader as coverage advice --
+      // Opened, and so not `untried` whatever else is unknown about them. Left
+      // out of this list they go back to the reader as coverage advice --
       // `pkg — 1 files — untried: --config pkg/tsconfig.test.json` -- naming a
       // solution config that owns no files in `pkg` and cannot close that gap.
-      expect(rejected).toEqual(["pkg/tsconfig.test.json"]);
+      expect(rejected).toEqual(["pkg/tsconfig.gap.json", "pkg/tsconfig.test.json"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
