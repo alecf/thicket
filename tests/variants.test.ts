@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { findVariants, type VariantInput } from "../src/report/variants.js";
+import { findCoLocated, findVariants, type VariantInput } from "../src/report/variants.js";
+import { runReport } from "../src/run.js";
+import { coLocatedConfig } from "./helpers.js";
 
 /** A token stream of `n` distinct tokens, optionally with `extra` spliced in. */
 function tokens(n: number, extra: string[] = [], at = 10): string[] {
@@ -113,5 +115,122 @@ describe("findVariants", () => {
     const reverse = findVariants([subject, ...twins.reverse()]).get("THK-DUP-subject")!;
     expect(forward.map((v) => v.id)).toEqual(["THK-DUP-aaa", "THK-DUP-zzz"]);
     expect(forward).toEqual(reverse);
+  });
+});
+
+describe("findCoLocated", () => {
+  /**
+   * A finding over `files`, one copy in each.
+   *
+   * `at` is a distinct byte offset per finding, because two findings sharing a
+   * file sit at different places in it. Give two of them the same range and
+   * `overlaps` reads them as a fragment and its own ancestor and refuses to
+   * link them, so every assertion below passes vacuously.
+   */
+  let nextAt = 0;
+  const over = (id: string, files: string[], copies = files.length): VariantInput => {
+    const at = (nextAt += 1000);
+    return {
+      id,
+      tokens: tokens(60),
+      occurrences: files.map((filePath) => ({ filePath, start: at, end: at + 100 })),
+      copies,
+    };
+  };
+
+  it("links a finding whose files are all covered by another", () => {
+    // Ten of 59 findings on a real application described one structure: seven
+    // sibling files under `sections/` repeating eight different shapes between
+    // them. A reader saw ten problems and rebuilt the one by hand. Two of those
+    // findings covered the IDENTICAL seven files.
+    const small = over("THK-DUP-small", ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    const big = over("THK-DUP-big", ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
+    const links = findCoLocated([small, big]);
+    // The contained finding is told that everything it touches is also touched
+    // by the larger one.
+    expect(links.get("THK-DUP-small")).toEqual([
+      { id: "THK-DUP-big", files: 3, within: true, copies: 4 },
+    ]);
+    // ...and the larger one is told where the smaller sits inside it.
+    expect(links.get("THK-DUP-big")).toEqual([
+      { id: "THK-DUP-small", files: 3, within: false, copies: 3 },
+    ]);
+  });
+
+  it("links two findings over exactly the same files in both directions", () => {
+    const a = over("THK-DUP-a", ["src/a.ts", "src/b.ts"]);
+    const b = over("THK-DUP-b", ["src/a.ts", "src/b.ts"]);
+    // Equal sets contain each other, so each is told it is fully covered.
+    expect(links(a, b, "THK-DUP-a")?.within).toBe(true);
+    expect(links(a, b, "THK-DUP-b")?.within).toBe(true);
+  });
+  const links = (a: VariantInput, b: VariantInput, id: string) => findCoLocated([a, b]).get(id)?.[0];
+
+  it("says nothing when the file sets merely overlap", () => {
+    // Deliberately NOT a similarity threshold. Measured over the 59 findings of
+    // a real report, file-set Jaccard decayed smoothly from 1.0 with no empty
+    // band anywhere, so any cutoff would have been arbitrary. Containment is a
+    // fact instead: acting on the covering finding's files reaches every copy
+    // of the covered one, and acting on a partial overlap does not.
+    const a = over("THK-DUP-a", ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    const b = over("THK-DUP-b", ["src/b.ts", "src/c.ts", "src/d.ts"]);
+    expect(findCoLocated([a, b]).size).toBe(0);
+  });
+
+  it("never links a fragment to its own ancestor", () => {
+    // A finding and the node containing it trivially share every file, and they
+    // are the same code seen at two granularities. Same hazard `findVariants`
+    // guards, reached by a different route: on a real report the Storybook
+    // `meta` object and the `parameters` block inside it were two findings over
+    // the same 22 files.
+    const outer: VariantInput = {
+      id: "THK-DUP-outer",
+      tokens: tokens(60),
+      occurrences: [{ filePath: "same.ts", start: 0, end: 500 }],
+      copies: 3,
+    };
+    const inner: VariantInput = {
+      id: "THK-DUP-inner",
+      tokens: tokens(60),
+      occurrences: [{ filePath: "same.ts", start: 40, end: 460 }],
+      copies: 3,
+    };
+    expect(findCoLocated([outer, inner]).size).toBe(0);
+  });
+
+  it("names the largest relatives first, and caps the list", () => {
+    const base = over("THK-DUP-base", ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
+    const inside = ["one", "two", "three", "four"].map((n, i) =>
+      over(`THK-DUP-${n}`, ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"].slice(0, 4 - i)),
+    );
+    const found = findCoLocated([base, ...inside]).get("THK-DUP-base")!;
+    expect(found.map((c) => c.files)).toEqual([4, 3, 2]);
+  });
+});
+
+describe("a report over parallel sibling modules", () => {
+  it("says in both directions which findings share files", async () => {
+    // The unit tests above prove `findCoLocated` computes the links. This
+    // proves the report asks for them and prints them: delete either and the
+    // report renders without a word of it, and every assertion above stays
+    // green.
+    //
+    // `minNodes` is raised so a function and its own body do not both cluster.
+    // They are one piece of code at two granularities, `overlaps` already
+    // refuses to link them, and at the default they merely crowd the output
+    // this test reads.
+    const { markdown } = await runReport({
+      config: coLocatedConfig(),
+      cache: false,
+      minNodes: 30,
+    });
+    // The contained finding, told everything it touches is touched again.
+    expect(markdown).toMatch(
+      /\*\*all 2 of these files also carry `THK-DUP-[0-9a-f]{8}`:\*\* 4 copies there/,
+    );
+    // The containing finding, told where the smaller one sits inside it.
+    expect(markdown).toMatch(
+      /\*\*`THK-DUP-[0-9a-f]{8}` lives only in 2 of these files:\*\* 2 copies there/,
+    );
   });
 });

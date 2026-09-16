@@ -702,6 +702,19 @@ function contextLines(r: Ranked): string[] {
     );
   }
 
+  for (const near of r.coLocated ?? []) {
+    // Two sentences rather than one symmetric phrasing, because the direction
+    // is what the reader acts on. "Everything here is also there" sends you to
+    // the bigger picture; "that is confined to a few of these files" tells you
+    // one visit clears both.
+    const copies = `${near.copies} cop${near.copies === 1 ? "y" : "ies"}`;
+    lines.push(
+      near.within
+        ? `- **all ${near.files} of these files also carry \`${near.id}\`:** ${copies} there`
+        : `- **\`${near.id}\` lives only in ${near.files} of these files:** ${copies} there`,
+    );
+  }
+
   const dependents = dependentsLine(r, context.dependents);
   if (dependents !== undefined) lines.push(dependents);
   lines.push("");

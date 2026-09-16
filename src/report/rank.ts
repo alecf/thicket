@@ -1,7 +1,7 @@
 import type { Cluster, Occurrence } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
-import type { Variant } from "./variants.js";
+import type { CoLocated, Variant } from "./variants.js";
 import type { Variation } from "./variation.js";
 
 export type Tag = "source" | "test" | "mixed";
@@ -31,6 +31,12 @@ export interface Ranked {
    * excerpt, for emitted findings only.
    */
   variants?: Variant[];
+  /**
+   * Other emitted findings whose files nest with this one's, so that visiting
+   * one finding's files reaches every copy of the other. Attached alongside
+   * the excerpt, for emitted findings only. See `findCoLocated`.
+   */
+  coLocated?: CoLocated[];
   /**
    * What differs between the copies. Empty for an exact (L0) cluster, where
    * nothing does. Attached alongside the excerpt, for emitted findings only.

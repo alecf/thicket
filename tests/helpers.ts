@@ -287,6 +287,20 @@ export function callsiteConfig(): string {
 }
 
 /**
+ * Four sibling section modules that repeat one shape between all of them and a
+ * second shape between two of them.
+ *
+ * The structure ten of 59 findings on a real report described between them: a
+ * set of parallel implementations of one concept, reported as separate
+ * problems with nothing connecting them. The nesting is what matters here --
+ * the two-file shape sits entirely inside the four-file shape's files, so the
+ * report has to say so in both directions.
+ */
+export function coLocatedConfig(): string {
+  return resolve(here, "fixtures/colocated/tsconfig.json");
+}
+
+/**
  * Two duplication clusters of the same syntactic shape and opposite worth: ten
  * three-field projections whose every key differs, and four constant blocks
  * whose keys are identical and whose values differ.

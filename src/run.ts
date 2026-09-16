@@ -25,7 +25,7 @@ import { canonicalKind, isTypeKind } from "./report/kinds.js";
 import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
-import { findVariants } from "./report/variants.js";
+import { findCoLocated, findVariants } from "./report/variants.js";
 import { fieldNameDrift, variations } from "./report/variation.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import {
@@ -839,8 +839,8 @@ export async function runReport(
     }
 
     // Near-variants, across both sections, for the findings actually printed.
-    const variants = findVariants(
-      [...emitted, ...emittedTypes, ...emittedTests].flatMap((r) => {
+    const variantInputs = [...emitted, ...emittedTypes, ...emittedTests].flatMap(
+      (r) => {
         const first = r.cluster.occurrences[0]!;
         const fragment = fragmentAt(first);
         return fragment === undefined
@@ -853,12 +853,25 @@ export async function runReport(
                 copies: r.cluster.occurrences.length,
               },
             ];
-      }),
+      },
     );
+    const variants = findVariants(variantInputs);
+    // Findings whose FILE SETS nest, which `findVariants` cannot see: it
+    // compares shapes, and these are different shapes sitting side by side in
+    // the same files. Ten of 59 findings on a real report described one
+    // structure that way.
+    const coLocated = findCoLocated(variantInputs);
     const withVariants = <T extends { cluster: { id: string } }>(r: T): T => {
       const found = variants.get(r.cluster.id);
       const differs = varies.get(r.cluster.id);
-      const out = found === undefined ? r : { ...r, variants: found };
+      // Both links are printed where both hold. They state different facts --
+      // one that the shapes are alike, one that the files are shared -- and on
+      // a 59-finding report over a real application no pair had both, because
+      // near-variants of one template are separate findings precisely when
+      // they sit in different files.
+      const nested = coLocated.get(r.cluster.id);
+      let out: T = found === undefined ? r : { ...r, variants: found };
+      if (nested !== undefined) out = { ...out, coLocated: nested };
       return differs === undefined || differs.length === 0 ? out : { ...out, varies: differs };
     };
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
