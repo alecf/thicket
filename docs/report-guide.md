@@ -42,7 +42,7 @@ share of it to be fine as it is.
 
 ```
 # thicket report
-thicket 0.1.0 · config 97d8d00b · 5798 files / 1533990 LOC · granularity: dir:3 (52 modules)
+thicket 0.1.0 · config 97d8d00b · 4000 files / 900000 LOC · granularity: dir:3 (52 modules)
 
 ## Summary                  — six numbers about the whole codebase
 > ⚠ N files are outside …   — appears only when coverage is partial

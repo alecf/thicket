@@ -147,6 +147,15 @@ the warm path invents findings the cold path suppresses (114 of them on a
 
 Analysis and benchmarking happen against real private repositories. **Do not name them, path them, or quote their source in code, comments, docs, commit messages, or test fixtures.** Refer to "a sample project," "test repositories," or the anonymized "Sample A"/"Sample B" used in the PRD. Fixtures live in `tests/fixtures/` and are written by hand.
 
+Anonymizing is not enough on its own. A figure from a private repository has to
+**earn its place by justifying a decision**: "raising `--min-lines` from 4 to 10
+dropped 29 of the top 40 findings" is why a threshold is where it is, and it
+stays. A figure that only decorates an argument the reader already accepts does
+not: "one real application here is 5,798 files and 1.5M lines" was there to make
+"reading a repo costs tokens" feel weightier, and a reader who cannot check it
+is being asked to take a number on faith for no gain. Cut those. Reviewers read
+them as showing off with someone else's codebase, and they are right to.
+
 ### 6b. Write in Technical Standard English
 
 This applies to everything: the README, the site, `docs/`, code comments, commit

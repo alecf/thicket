@@ -72,7 +72,7 @@ thicket does not score your codebase. Nothing in the report is a defect.
 
 That split is the point. thicket does the searching. It reads every file in the program, and finds every repeat above the size threshold, including copies where the names were changed. The agent does the thinking, on the few dozen candidates that come back.
 
-It is also the cheap way round. A model only sees the files it opens, and opening every file costs tokens for every file. One real application here is 5,798 files and 1.5M lines.
+It is also the cheap way round. A model only sees the files it opens, and opening every file costs tokens for every file. On a repository of any size, that bill arrives every time you want to ask.
 
 ## Especially for code an LLM wrote
 
