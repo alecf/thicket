@@ -598,3 +598,147 @@ describe("subsume", () => {
     expect(input.map((c) => c.id)).toEqual(["aaa", "bbb"]);
   });
 });
+
+describe("subsume: candidate selection", () => {
+  /**
+   * The one property an occurrence index can silently break.
+   *
+   * Narrowing the parents worth testing to "kept clusters holding an
+   * occurrence in the same file" is only sound if the file probed can be one
+   * the parent actually covers. A child may have up to `1 - SUBSUME_OVERLAP`
+   * of its occurrences OUTSIDE the parent, and nothing orders those last --
+   * here the first two are elsewhere entirely. Probing only the first
+   * occurrence's file finds no parent, keeps the child, and prints the same
+   * finding twice.
+   */
+  it("finds the parent when the child's first occurrences are the ones outside it", () => {
+    const parent = cluster({
+      id: "parent",
+      nodeCount: 60,
+      occurrences: Array.from({ length: 8 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        // Two of ten outside the parent -- exactly what the overlap floor
+        // tolerates -- and both ahead of every occurrence that is inside.
+        occ("src/elsewhere.ts", 0, 250, 4, 9),
+        occ("src/other.ts", 0, 250, 6, 9),
+        ...Array.from({ length: 8 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+      ],
+    });
+    expect(subsume([parent, child]).map((c) => c.id)).toEqual(["parent"]);
+  });
+
+  /**
+   * Which parent swallows a child decides where `alsoAt` is printed, so the
+   * first match in KEPT order is part of the answer, not an implementation
+   * detail. An index that walks its buckets in file order rather than in kept
+   * order hangs the child's stray locations off the wrong finding.
+   */
+  it("attributes a child to the first containing cluster in kept order", () => {
+    // Covers every one of the child's occurrences, so it contributes no `alsoAt`.
+    const whole = cluster({
+      id: "whole",
+      nodeCount: 60,
+      occurrences: [
+        ...Array.from({ length: 8 }, (_, i) => occ(`src/f${i}.ts`, 0, 400, 1, 15)),
+        occ("src/stray.ts", 0, 400, 1, 15),
+        occ("src/second-stray.ts", 0, 400, 1, 15),
+      ],
+    });
+    // Ranked below `whole`, and covers only the eight -- so if this one were
+    // chosen the two strays would surface as `alsoAt`.
+    const partial = cluster({
+      id: "partial",
+      nodeCount: 50,
+      occurrences: Array.from({ length: 8 }, (_, i) => occ(`src/f${i}.ts`, 40, 410, 1, 16)),
+    });
+    const child = cluster({
+      id: "child",
+      nodeCount: 40,
+      occurrences: [
+        ...Array.from({ length: 8 }, (_, i) => occ(`src/f${i}.ts`, 50, 300, 3, 9)),
+        occ("src/stray.ts", 50, 300, 3, 9),
+        occ("src/second-stray.ts", 50, 300, 3, 9),
+      ],
+    });
+    const kept = subsume([whole, partial, child]);
+    expect(kept.map((c) => c.id)).toEqual(["whole", "partial"]);
+    // `whole` swallowed the child and covers every copy, so nothing is left
+    // over to report -- and `partial`, which does NOT cover the strays, must
+    // not be the one to claim them. Asserted on `partial` because that is the
+    // side that changes: picking the wrong parent leaves `whole` empty either
+    // way, so an assertion on `whole` alone passes in both directions.
+    expect(kept[0]?.alsoAt).toBeUndefined();
+    expect(kept[1]?.alsoAt).toBeUndefined();
+  });
+});
+
+describe("subsume: scale", () => {
+  /**
+   * Selection, not detection, is what a real report costs -- and on a real
+   * 4499-file application `subsume` was 14.7s of a 20.7s warm run, 71% of it,
+   * while the phase the cache actually covers had fallen to 0.4s. The shape
+   * below is that run's: ~30k clusters over ~100k occurrences spread across
+   * ~4.5k files, most of them keeping (nothing contains them), which is the
+   * case that makes a scan of every kept cluster quadratic.
+   *
+   * Deterministic by construction -- no `Math.random()` anywhere near a test
+   * whose failure has to mean something.
+   */
+  const CLUSTERS = 30_000;
+  const FILES = 4_500;
+
+  function corpus(): Cluster[] {
+    const out: Cluster[] = [];
+    // A cheap deterministic spread. Coprime strides so consecutive clusters
+    // land in unrelated files at unrelated offsets, rather than marching
+    // through either in order.
+    for (let i = 0; i < CLUSTERS; i++) {
+      const copies = 2 + (i % 5);
+      const start = (i * 131) % 20_000;
+      const occurrences = Array.from({ length: copies }, (_, c) => {
+        const file = (i * 37 + c * 911) % FILES;
+        return occ(`src/pkg${file % 40}/mod${file}.ts`, start, start + 90 + (i % 30), 1 + (i % 40), 6);
+      });
+      out.push(
+        cluster({
+          id: `c${String(i).padStart(6, "0")}`,
+          level: i % 3 === 0 ? "L1" : "L0",
+          nodeCount: 6 + (i % 90),
+          occurrences,
+        }),
+      );
+      // Every tenth cluster gets a smaller twin nested inside it, so the run
+      // does real subsumption work and not only rejection. Same files, same
+      // copy count, a strictly narrower span.
+      if (i % 10 === 0) {
+        out.push(
+          cluster({
+            id: `n${String(i).padStart(6, "0")}`,
+            level: i % 3 === 0 ? "L1" : "L0",
+            nodeCount: 5 + (i % 90),
+            occurrences: occurrences.map((o) => ({ ...o, start: o.start + 10, end: o.end - 10 })),
+          }),
+        );
+      }
+    }
+    return out;
+  }
+
+  it("selects over an application-sized cluster list in seconds, not tens of seconds", () => {
+    const input = corpus();
+    const started = performance.now();
+    const kept = subsume(input);
+    const elapsed = performance.now() - started;
+    // Sanity: the corpus has to be doing the expensive thing, which is keeping
+    // most of what it is handed. A corpus that collapsed to a handful of
+    // clusters would pass the budget below without exercising anything.
+    expect(kept.length).toBeGreaterThan(CLUSTERS / 2);
+    // ...and doing real subsumption, not only rejection: the nested twins go.
+    expect(kept.length).toBeLessThan(input.length);
+    expect(elapsed).toBeLessThan(3_000);
+  }, 120_000);
+});
