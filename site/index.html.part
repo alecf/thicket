@@ -3,8 +3,8 @@
   <h1>Find what is tangled.</h1>
   <p class="lede">
     <strong>thicket</strong> reads your TypeScript and writes a report. It lists repeated code
-    and circular imports, and says where each one is. You give the report to a coding agent.
-    thicket does not grade your code, and it does not edit it.
+    and modules that import each other, and says where each one is. You give the report to a
+    coding agent. thicket does not grade your code, and it does not edit it.
   </p>
   <div class="cta">
     <a class="primary" href="#install">Install and run</a>
@@ -20,9 +20,10 @@
 
 thicket &gt; thicket.md</code></pre>
   <p>
-    Run it from your project root. thicket finds the tsconfig files on its own. In a monorepo
-    it covers every workspace. Use <code>--filter</code> to pick some of them. Use
-    <code>--config</code> to name the tsconfig files yourself.
+    Run it from your project root. thicket finds the tsconfig files on its own, across every
+    workspace it can. A workspace with no config of its own shows up in the report's scope
+    warning. Use <code>--filter</code> to pick some of them. Use <code>--config</code> to name
+    the tsconfig files yourself.
   </p>
   <p>
     You can also download a tarball from
@@ -75,8 +76,9 @@ thicket &gt; thicket.md</code></pre>
 thicket --json after.json &gt; thicket.md
 thicket diff before.json after.json</code></pre>
   <p>
-    A finding gets its ID from the code itself, not from where the code sits. So the diff shows
-    you what the agent really fixed. Code that only moved keeps its ID.
+    A duplication finding gets its ID from the code itself, not from where the code sits. So
+    the diff shows you what the agent really fixed. Code that only moved keeps its ID. Cycle IDs
+    come from the module names instead, so renaming a module changes one.
   </p>
 
   <h2 id="what-it-reports">What it reports</h2>

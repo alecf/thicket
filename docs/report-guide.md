@@ -13,7 +13,8 @@ what to do is your job, and this guide exists so you can decide well.
 Nothing in this file is a defect. The list is not a queue to empty.
 
 thicket searched the whole program. It looked at every AST node above a size
-threshold, twice: once as written, and once with the identifiers erased. That
+threshold, twice: once as written, and once with the identifiers renumbered and
+the literal values dropped. That
 can easily turn up tens of thousands of matches, and it printed the top few
 dozen. The ranking is about how big a finding is and how contained it is. It
 says nothing about whether the change is a good idea.
@@ -140,8 +141,8 @@ small copies.
 ### `L0` / `L1` — the level
 
 - **`L0`** — the copies are identical once formatting is normalized.
-- **`L1`** — identifier names are also ignored, so copies may differ in what
-  things are called.
+- **`L1`** — identifier names and literal values are also ignored, so copies
+  may differ in what things are called and in the constants they hold.
 
 This decides cluster membership, so it decides whether the location list is
 complete. An `L0` finding lists the copies of one *exact* shape; near-variants
@@ -292,8 +293,10 @@ hooks, say), it probably is, and the real fix is nearby.
 
 thicket will **not** suggest a cut for a tangle with no file-level cycle under
 it, because there is nothing to break. It will not suggest one that leaves more
-than two thirds of the tangle standing either. When every option fails that
-test, it says so and names the best it rejected.
+than two thirds of the tangle standing either. When an edge shrinks the tangle
+but not by enough, the report names the best it rejected, so you can see how
+close it came. When no edge shrinks it at all, the report says that no single
+edge breaks the cycle, and there is no number to give.
 
 A type-only cut is **demoted, not banned**. A runtime edge wins any tie, because
 only a runtime cycle can fail at module-init time. But a type-only edge that

@@ -157,9 +157,9 @@ those. A reviewer reads them as showing off with someone else's codebase.
 
 ### 6b. Write in Technical Standard English
 
-This applies to everything: the README, the site, `docs/`, code comments, commit
-messages, PR descriptions, CLI output, and what you say to the person you are
-working with. One voice, everywhere.
+This applies to everything. The README, the site and `docs/`. Code comments,
+commit messages and PR descriptions. CLI output, and what you say to the person
+you are working with. One voice, everywhere.
 
 The rules:
 
