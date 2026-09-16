@@ -113,7 +113,27 @@ function labelFor(tokens: readonly string[], at: number, varies: ReadonlySet<num
 
 /**
  * Node kinds whose first identifier child NAMES A FIELD rather than binds a
- * value: an object key, a class property, a method, an enum member.
+ * value: an object key, a class property, a method, an enum member, a JSX
+ * attribute.
+ *
+ * `JsxAttribute` is here because leaving it out made the drift signal blind to
+ * every JSX finding, which is where it was needed most. An attribute name is
+ * an `Identifier` leaf like any other, so L1 α-renames it, and `<p role=…
+ * className=…>` then matches `<Badge variant=… className=…>`. On a real
+ * 5540-file application all sixteen JSX findings scored `total: 0` and kept
+ * full weight; ten of them took the top of the report, and a reader asked to
+ * act on them rejected them all by hand for exactly this reason. Adding it
+ * removes four and moves nothing else.
+ *
+ * The tag name is deliberately NOT here, though `JsxOpeningElement` holds one
+ * in the same position. Tried and measured: it frees six slots and surfaces
+ * work the noise was burying, and it also drops two findings that are real.
+ * `<AlertDialogHeader>`, `<DialogHeader>`, `<SheetHeader>` and `<CardHeader>`
+ * wrapping one Title-plus-Description shape are four parallel primitives, and
+ * `<div>` beside `<TabsList>` and `<SelectContent>` is a syntax template.
+ * Both are four or five distinct tag names, so `fieldNameDrift` cannot
+ * separate them, and three normalizations by distinct-value count and by
+ * off-modal share all failed to. An attribute name carries no such ambiguity.
  */
 const NAME_HOLDERS = new Set([
   "PropertyAssignment",
@@ -123,6 +143,7 @@ const NAME_HOLDERS = new Set([
   "MethodDeclaration",
   "MethodSignature",
   "EnumMember",
+  "JsxAttribute",
 ]);
 
 /** Tokens scanned after a name holder before giving up on finding its name. */

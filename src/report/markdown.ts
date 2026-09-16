@@ -111,6 +111,17 @@ export interface ReportInput {
    * reader comparing two reports has no other way to tell.
    */
   types?: "exclude" | "only";
+  /**
+   * Candidates dropped for being repeated calls to shared code rather than
+   * duplication, counted across all three sections. See `isBareCall`.
+   *
+   * Only candidates that could otherwise have been PRINTED are counted: the
+   * check needs token streams, and those are re-extracted for the re-ranking
+   * pool alone. So the number is exact for the question a reader is asking --
+   * how many findings this rule took off the page -- and is not an estimate of
+   * how many exist in the codebase.
+   */
+  bareCalls?: number;
   duplication: Ranked[];
   /**
    * Duplication in the type system -- interfaces, type aliases, the type
@@ -518,6 +529,20 @@ function omittedSection(
       "| recoverable lines | candidates |",
       "| --- | --- |",
       ...c.bands.map((b) => `| ${b.label} | ${b.count} |`),
+      "",
+    );
+  }
+
+  if ((input.bareCalls ?? 0) > 0) {
+    const n = input.bareCalls!;
+    // Stated rather than silently dropped, for the same reason truncation
+    // always is. The rule is an opinion about someone else's codebase, and a
+    // reader who disagrees needs to know it ran before they can turn it off.
+    lines.push(
+      `${n} further candidate${n === 1 ? " was" : "s were"} left out for being` +
+        ` repeated calls to shared code rather than duplication: the whole` +
+        ` fragment is one call, so nothing shorter can replace it. Re-run with` +
+        ` \`--include-call-sites\` to see ${n === 1 ? "it" : "them"}.`,
       "",
     );
   }

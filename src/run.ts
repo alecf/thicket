@@ -20,6 +20,7 @@ import { compareStrings } from "./order.js";
 import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
+import { isBareCall } from "./report/callsite.js";
 import { canonicalKind, isTypeKind } from "./report/kinds.js";
 import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
@@ -99,6 +100,12 @@ export interface RunOptions {
   includeGenerated?: boolean;
   /** Detect generated files by their banner comment. On by default. */
   bannerScan?: boolean;
+  /**
+   * Report clusters that are nothing but repeated calls to shared code.
+   * Off by default, because such a cluster is correct reuse rather than
+   * duplication -- see `isBareCall`.
+   */
+  includeCallSites?: boolean;
   /**
    * Which half of the codebase to analyze.
    *
@@ -515,6 +522,7 @@ export async function runReport(
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
+  const includeCallSites = opts.includeCallSites ?? false;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
@@ -535,6 +543,7 @@ export async function runReport(
       granularity: String(granularity),
       includeGenerated,
       bannerScan,
+      includeCallSites,
       exclude,
       types,
     }),
@@ -782,13 +791,24 @@ export async function runReport(
         }),
       };
     };
-    const emitted = reweight(production, maxFindings, streamsOf).map(decorate);
-    const emittedTypes = reweight(typeDuplication, typeFindings(maxFindings), streamsOf).map(
-      decorate,
+    const productionPass = reweight(production, maxFindings, streamsOf, includeCallSites);
+    const typesPass = reweight(
+      typeDuplication,
+      typeFindings(maxFindings),
+      streamsOf,
+      includeCallSites,
     );
-    const emittedTests = reweight(testDuplication, testFindings(maxFindings), streamsOf).map(
-      decorate,
+    const testsPass = reweight(
+      testDuplication,
+      testFindings(maxFindings),
+      streamsOf,
+      includeCallSites,
     );
+    const emitted = productionPass.emitted.map(decorate);
+    const emittedTypes = typesPass.emitted.map(decorate);
+    const emittedTests = testsPass.emitted.map(decorate);
+    const bareCalls =
+      productionPass.suppressed + typesPass.suppressed + testsPass.suppressed;
 
     // What varies between the copies -- the parameter list of the abstraction
     // the finding is asking for. Only emitted findings pay for it.
@@ -862,6 +882,7 @@ export async function runReport(
       testDuplication: emittedTests.map(withVariants),
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
+      bareCalls,
       census: census(ranked, cycles.length),
       ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
       ...(opts.maxLocations === undefined ? {} : { maxFilesPerFinding: opts.maxLocations }),
@@ -944,17 +965,33 @@ function reweight<T extends Ranked>(
   candidates: readonly T[],
   slots: number,
   streamsOf: (r: Ranked) => string[][] | undefined,
-): T[] {
-  return candidates
+  includeCallSites: boolean,
+): { emitted: T[]; suppressed: number } {
+  let suppressed = 0;
+  const kept = candidates
     .slice(0, slots * RERANK_POOL)
-    .map((r) => {
+    .flatMap((r) => {
       const streams = streamsOf(r);
-      if (streams === undefined) return r;
+      if (streams === undefined) return [r];
+      // Only at L0. L1 erases identifier text, so `getMatterForAuth({ ctx,
+      // matterId })` and `getUserForAuth({ c, uid })` are one shape there --
+      // two different helpers, and calling that "already reused" would be a
+      // worse error than the one this fixes.
+      if (
+        !includeCallSites &&
+        r.cluster.level === "L0" &&
+        streams[0] !== undefined &&
+        isBareCall(streams[0])
+      ) {
+        suppressed += 1;
+        return [];
+      }
       const drift = fieldNameDrift(streams);
-      return { ...r, fieldDrift: drift, score: r.score * driftWeight(drift) };
+      return [{ ...r, fieldDrift: drift, score: r.score * driftWeight(drift) }];
     })
     .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id))
     .slice(0, slots);
+  return { emitted: kept, suppressed };
 }
 
 /**

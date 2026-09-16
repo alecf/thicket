@@ -268,6 +268,25 @@ export function configTableConfig(): string {
  * by dissolution and is worthless: both its edges erase at compile time.
  */
 /**
+ * Four route modules that each open with the same five-line call to a shared
+ * helper, beside one genuinely duplicated function.
+ *
+ * The call is the shape a real report got wrong: it ranked "43 copies · ~208
+ * lines recoverable" over 43 call sites of one helper, which is what correct
+ * reuse looks like. Here it scores 13 recoverable lines against the real
+ * finding's 6, so it outranks real work unless it is suppressed -- which is
+ * the property under test, and why the fixture carries both.
+ *
+ * The four route bodies deliberately differ around the call. Make them alike
+ * and the enclosing `FunctionDeclaration` clusters too, `subsume` drops the
+ * call fragment as covered by its own parent, and the test passes with the
+ * suppression deleted.
+ */
+export function callsiteConfig(): string {
+  return resolve(here, "fixtures/callsite/tsconfig.json");
+}
+
+/**
  * Two duplication clusters of the same syntactic shape and opposite worth: ten
  * three-field projections whose every key differs, and four constant blocks
  * whose keys are identical and whose values differ.

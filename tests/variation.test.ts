@@ -158,6 +158,35 @@ describe("fieldNameDrift", () => {
     });
   });
 
+  it("counts a JSX attribute name as a field name", () => {
+    // Every JSX finding of a real 5540-file application scored zero drift, for
+    // the one reason nobody chose: `NAME_HOLDERS` listed seven node kinds and
+    // none of them were JSX, so an attribute name was just an identifier and
+    // L1 α-renamed it away. `<p role= className=>` and `<Badge variant=
+    // className=>` then matched, and ten such findings took the top of the
+    // report. Different attributes are different components, exactly as
+    // different keys are different objects.
+    const attr = (name: string, value: string) => [
+      "JsxAttribute", "(", `Id:${name}`, ")", "(", `StringLiteral:"${value}"`, ")",
+    ];
+    expect(
+      fieldNameDrift([attr("role", "alert"), attr("variant", "alert")]),
+    ).toEqual({ varying: 1, total: 1 });
+  });
+
+  it("counts a JSX attribute holding the same name as constant", () => {
+    // The other half, and the one that keeps this a signal rather than a
+    // blanket penalty on JSX: 68 of 71 copies of a real heading block were
+    // `<div className=…>`, differing only in the class string. Same attribute,
+    // different value, which is one component with a parameter.
+    const attr = (name: string, value: string) => [
+      "JsxAttribute", "(", `Id:${name}`, ")", "(", `StringLiteral:"${value}"`, ")",
+    ];
+    expect(
+      fieldNameDrift([attr("className", "p-6"), attr("className", "p-4")]),
+    ).toEqual({ varying: 0, total: 1 });
+  });
+
   it("counts a method name as a field name", () => {
     // `{ debug: vi.fn(), info: vi.fn() }` vs `{ setTag: …, setLevel: … }` are
     // different mocks, not copies.
