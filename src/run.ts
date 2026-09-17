@@ -966,6 +966,11 @@ export async function runReport(
  * the section's size and the penalty reorders within it. Since the penalty only
  * ever LOWERS a score, a candidate outside the pool would have to beat the
  * pool's last survivor from below, which three times the slots makes remote.
+ *
+ * Counted in SURVIVORS, so `reweight` reads past this many candidates when it
+ * suppresses one. Counting candidates instead lets a suppressed one take a
+ * slot with nothing in it, and on a fixture whose three highest candidates are
+ * all bare calls, one slot produced an empty report.
  */
 const RERANK_POOL = 3;
 
