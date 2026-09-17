@@ -118,6 +118,54 @@ describe("runReport over a workspace root", () => {
   });
 
   /**
+   * The same suppression, across a root the two halves disagree about.
+   *
+   * `configsFor` measures from the root DISCOVERY walked; the coverage section
+   * speaks `project.root`, which `openProject` derives from the configs it
+   * opened when no pin is given. With no root tsconfig here, that derivation
+   * collapses onto `pkg/a` -- so the declined config is `pkg/a/tsconfig.build.json`
+   * to one and `tsconfig.build.json` to the other, the suppression matches
+   * nothing, and the config the run just declined is advertised as `untried`.
+   *
+   * No `dir`, deliberately: passing one pins `project.root` to it and the two
+   * roots agree, which is every path the CLI can take. This is the shape that
+   * kept `configs` and `rejected` on opposite sides of the same rebase.
+   */
+  it("offers no declined config when the analyzed root collapses below the discovery root", async () => {
+    const root = scratchTree({
+      "package.json": JSON.stringify({ name: "root", private: true, workspaces: ["pkg/*"] }),
+      // No root tsconfig, so the derived root is the ancestor of what IS
+      // opened. Two workspaces, so it lands on `pkg` rather than collapsing
+      // into `pkg/a` -- the gap has to be blamed on a SUBDIRECTORY of the
+      // derived root, since `owningDir` never blames the root itself.
+      "pkg/a/package.json": JSON.stringify({ name: "@t/a" }),
+      "pkg/a/tsconfig.json": TSCONFIG,
+      "pkg/a/tsconfig.build.json": JSON.stringify({
+        extends: "./tsconfig.json",
+        include: ["src/a.ts"],
+      }),
+      "pkg/a/src/a.ts": "export const a = 1;\n",
+      "pkg/a/src/b.ts": "export const b = 2;\n",
+      // Outside `src/**`, so neither config reaches it and the gap is real.
+      "pkg/a/other/x.ts": "export const x = 1;\n",
+      "pkg/b/package.json": JSON.stringify({ name: "@t/b" }),
+      "pkg/b/tsconfig.json": TSCONFIG,
+      "pkg/b/src/z.ts": "export const z = 3;\n",
+    });
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      const { json } = await runReport({ cache: false });
+      // `a`, not `pkg/a`: the report speaks the derived root, which is `pkg`.
+      // That the name shortened IS the precondition -- it is the same root
+      // difference the declined config's path has to survive.
+      expect(json.scope.gaps).toEqual([{ dir: "a", fileCount: 1, configs: [] }]);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  /**
    * THE REGRESSION THE PIN EXISTS FOR. `project.root` is `commonRootDir` of the
    * configs actually opened, so narrowing to one workspace collapses it into
    * that workspace and `.thicket/cache.db` lands in a subpackage.

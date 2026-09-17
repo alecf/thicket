@@ -304,9 +304,16 @@ interface Discovery {
   /** Absolute tsconfig paths to open. */
   configs: string[];
   /**
-   * Candidate configs the workspace probe opened and declined, repo-relative
-   * POSIX. Read only by the coverage section, which must not offer a config
-   * already proven to cover none of the gap. Empty whenever no probe ran.
+   * Candidate configs the workspace probe opened and did not adopt. ABSOLUTE,
+   * exactly like `configs` beside it, and for the same reason: both are
+   * measured from the root DISCOVERY used, which is not always the root the
+   * report speaks. `openProject` derives its own from the configs it opened
+   * whenever the caller pins none, and a repo-relative string carried across
+   * that difference names a path the coverage section cannot match -- so the
+   * config it says was tried is offered back as `untried`.
+   *
+   * Read only by the coverage section, which must not offer a config this run
+   * has already put to the question. Empty whenever no probe ran.
    */
   rejected: readonly string[];
   /**
@@ -372,7 +379,7 @@ async function discoverConfigs(
       if (chosen.configs.length > 0) {
         return {
           configs: chosen.configs.map((c) => resolve(root, c)),
-          rejected: chosen.rejected,
+          rejected: chosen.rejected.map((c) => resolve(root, c)),
           workspaceDirs: discovered.map((ws) => resolve(root, ws.dir)),
           // Reported only once the program is loaded: whether a workspace with
           // no config of its own goes unanalyzed depends on what the OTHER
@@ -621,10 +628,9 @@ export async function runReport(
         // reaching above the directory named moves the root, and a path
         // measured from the other one matches no gap and quietly reinstates
         // the advice this removes.
-        triedConfigs: [
-          ...discovery.configs.map((c) => toPosix(relative(project.root, c))),
-          ...discovery.rejected,
-        ],
+        triedConfigs: [...discovery.configs, ...discovery.rejected].map((c) =>
+          toPosix(relative(project.root, c)),
+        ),
       },
     );
     // Here rather than in discovery: "this workspace has no tsconfig" is only

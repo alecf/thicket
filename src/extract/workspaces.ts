@@ -416,20 +416,24 @@ function deepestScope(scopes: readonly string[], file: string): string {
  * and nothing overlaps at all: the entire tree reads as a gap, every workspace
  * looks uncovered, and every sibling config in the repo becomes a candidate.
  *
- * A probe root ABOVE the repo root throws instead. It means a config
+ * A probe root ABOVE the repo root answers `undefined`. It means a config
  * `references` one outside the tree, and a repo-relative path cannot express
- * a file outside the repo -- there is no prefix to rebase by, so the honest
- * answer is to say so rather than to emit `../` paths that match nothing on
- * either side of the coverage figure.
+ * a file outside the repo -- there is no prefix to rebase by, and emitting
+ * `../` paths would match nothing on either side of the coverage figure, so
+ * every workspace would read as uncovered and every sibling in the repo would
+ * become a candidate.
+ *
+ * `undefined` rather than a throw: the gap is unanswerable, which is not the
+ * same as the run being impossible. `openProject` roots itself at the same
+ * common ancestor and `run.ts` says which root the paths are measured from,
+ * so the run produces a report -- as it already does when `--config` names
+ * such a config directly. Refusing here made the two entry points disagree
+ * about one tree. What the caller must NOT do is carry on and compute a gap
+ * from names it could not rebase.
  */
-function rebaseOnto(root: string, probeRoot: string): (name: string) => string {
+function rebaseOnto(root: string, probeRoot: string): ((name: string) => string) | undefined {
   const prefix = toPosix(relative(resolve(root), probeRoot));
-  if (prefix === ".." || prefix.startsWith("../") || isAbsolute(prefix)) {
-    throw new Error(
-      `the tsconfigs under ${root} resolved to files outside it (common root ${probeRoot}); ` +
-        `a project reference reaches above the analyzed root, which repo-relative paths cannot express`,
-    );
-  }
+  if (prefix === ".." || prefix.startsWith("../") || isAbsolute(prefix)) return undefined;
   return prefix === "" ? (name) => name : (name) => `${prefix}/${name}`;
 }
 
@@ -461,12 +465,26 @@ export interface ChosenConfigs {
   /** The tsconfigs to open, repo-relative POSIX, sorted. */
   configs: string[];
   /**
-   * The candidate siblings that were opened and declined, repo-relative POSIX,
-   * sorted. Declined means the probe found none of the files ITS OWN WORKSPACE
-   * was charged with in it, which is the one thing the coverage section cannot
-   * work out for itself -- it is synchronous and loads no program.
+   * The candidate siblings that were opened and not adopted, repo-relative
+   * POSIX, sorted. The claim this list makes is that the run has already put
+   * them to the question -- which is the one thing the coverage section cannot
+   * work out for itself, since it is synchronous and loads no program, and it
+   * is what stops a config being offered back as `untried`.
    *
-   * THE CLAIM IS EXACTLY THAT, AND NO WIDER. The gap this was measured against
+   * There are two ways in, and only the first is a judgement:
+   *
+   *  - DECLINED. The probe found none of the files its own workspace was
+   *    charged with in it.
+   *  - UNANSWERABLE. The candidate probe's root escaped the analyzed root, so
+   *    its names could not be rebased and nothing was learned from opening
+   *    them. The config may or may not close the gap; what is known is that
+   *    this run already looked.
+   *
+   * The distinction is not carried, because nothing downstream words the two
+   * cases differently -- `ScanOptions.triedConfigs` conflates this list with
+   * the configs the program was built from for exactly that reason.
+   *
+   * THE DECLINED CLAIM IS EXACTLY THAT, AND NO WIDER. The gap it was measured against
    * is grouped by `deepestScope` (deepest containing WORKSPACE); the gap the
    * report prints is grouped by `owningDir` (nearest ancestor holding a
    * TSCONFIG). The two disagree when a nested workspace has no tsconfig of its
@@ -510,14 +528,26 @@ export interface ChosenConfigs {
  * shapes in the wild differ: one is disjoint from its main config, the other
  * a superset of it.
  *
- * TWO probes, never one per workspace. A probe is not the per-workspace
- * saving it looks like: `sourceFileNames` carries the measurements, and the
- * short version is that its cost is dominated by a fixed `tsgo` spawn that a
- * program load pays too, so at workspace size a probe is free rather than
- * cheap and N of them is N spawns bought for nothing. The primaries go in one
- * call and the candidate siblings in one more, and the second call is skipped
- * entirely when no workspace is missing anything -- the common case, where
- * every workspace has exactly one config.
+ * At most TWO probes, and never one per workspace. A probe is not the
+ * per-workspace saving it looks like: `sourceFileNames` carries the
+ * measurements, and the short version is that its cost is dominated by a
+ * fixed `tsgo` spawn that a program load pays too, so at workspace size a
+ * probe is free rather than cheap and N of them is N spawns bought for
+ * nothing. The primaries go in one call and the candidate siblings in one
+ * more.
+ *
+ * Both calls are conditional, on two DIFFERENT questions, and it is worth
+ * keeping them apart:
+ *
+ * - Zero probes when no scope owns a sibling at all. `candidates` is built
+ *   from `siblings` and from nothing else, so there is no config the gap
+ *   could promote and the answer is known before anything is loaded. This is
+ *   the common shape -- every workspace with exactly one `tsconfig.json`,
+ *   which on a sample monorepo was all eighteen of them.
+ * - One probe when a sibling exists but the gap turns out empty, so there is
+ *   nothing for the second call to ask about.
+ * - Two when some sibling might close a gap, which is the only case where
+ *   the answer needs a second program load.
  *
  * The gap is computed ONCE, globally, and each gapped file is attributed to
  * the deepest workspace that contains it. That is what keeps a directory from
@@ -567,11 +597,12 @@ export async function configsFor(
   opts: ScanOptions = {},
 ): Promise<ChosenConfigs> {
   // The order of what follows, before any of the reasons for it: take each
-  // directory's primary config; probe them all at once to learn what they
-  // cover; subtract that from the files on disk to get the gap; attribute
-  // each gapped file to the workspace that owns it; offer the siblings of
-  // the workspaces left with a gap; probe those; keep the ones that closed
-  // something.
+  // directory's primary config; stop here if no directory owns a second one,
+  // since nothing below can then change the answer; probe the primaries all
+  // at once to learn what they cover; subtract that from the files on disk to
+  // get the gap; attribute each gapped file to the workspace that owns it;
+  // offer the siblings of the workspaces left with a gap; probe those; keep
+  // the ones that closed something.
   const { selected, discovered } = workspaces;
   // Sorted and deduped: a caller may pass the root itself, or the same
   // workspace twice (two globs matching one directory), and neither may
@@ -602,8 +633,27 @@ export async function configsFor(
   // problem to report, not an exception from config selection.
   if (primaries.length === 0) return { configs: [], rejected: [] };
 
+  // Nothing a probe could learn can change the answer when no scope has a
+  // sibling: `candidates` is built from `siblings` and from nothing else, so
+  // it is already known to be empty and the early return below is already
+  // known to be the one taken. Everything between here and there -- a `tsgo`
+  // spawn, a whole program load, and a walk of the tree on disk -- computes a
+  // gap that only siblings could close.
+  //
+  // This is the common shape and not a corner. On a sample monorepo every one
+  // of eighteen scopes held exactly one `tsconfig.json`, and the probe it did
+  // not need was 3.1s of a 13s run. `owned` is built from `scopes`, which is
+  // what the candidate loop walks, so its values are exactly the siblings
+  // that loop could ever reach.
+  if ([...owned.values()].every((c) => c.siblings.length === 0)) {
+    return { configs: primaries, rejected: [] };
+  }
+
   const primaryProbe = await sourceFileNames(primaries.map((c) => resolve(root, c)));
   const rebasePrimary = rebaseOnto(root, primaryProbe.root);
+  // Unrebasable: a reference reached outside the tree, so there is no gap to
+  // measure and the conservative answer is to adopt nothing. See `rebaseOnto`.
+  if (rebasePrimary === undefined) return { configs: primaries, rejected: [] };
   const covered = new Set(primaryProbe.names.map(rebasePrimary));
 
   const gapOf = new Map<string, Set<string>>();
@@ -635,7 +685,22 @@ export async function configsFor(
   const candidateProbe = await sourceFileNames(
     [...primaries, ...candidates.map((c) => c.config)].map((c) => resolve(root, c)),
   );
+  // Opening the candidates can only move the common root further UP, so this
+  // can escape where the primary probe did not. Same answer: adopt nothing.
+  //
+  // But they were OPENED, so they are reported as candidates that did not make
+  // it in. Dropping them leaves the coverage section free to offer them back:
+  // it suggests any config it has not been told was tried, and the reader gets
+  // `pkg — 1 files — untried: --config pkg/tsconfig.test.json` naming a config
+  // this run already loaded. Whether it would have closed the gap is the one
+  // thing unknown here; that it was tried is not.
   const rebaseCandidate = rebaseOnto(root, candidateProbe.root);
+  if (rebaseCandidate === undefined) {
+    return {
+      configs: primaries,
+      rejected: [...new Set(candidates.map((c) => c.config))].sort(compareStrings),
+    };
+  }
   const kept = candidates.filter(({ config, scope }) => {
     const gap = gapOf.get(scope);
     // `byConfig`, not the union: with two siblings beside one workspace the

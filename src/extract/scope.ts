@@ -19,16 +19,23 @@ export interface ScanOptions {
   exclude?: readonly string[];
   /**
    * Tsconfigs this run has already put to the question, repo-relative POSIX. A
-   * gap suggests none of them. Two provenances, one behaviour:
+   * gap suggests none of them. Three provenances, one behaviour:
    *
    *  - The configs the program was BUILT FROM. The run loaded one already, and
    *    it is that config's own `include`/`exclude` leaving the files out.
    *  - The candidate siblings `configsFor` OPENED AND DECLINED. The probe
    *    found none of that workspace's missing files in them.
+   *  - The candidate siblings it OPENED AND COULD NOT JUDGE, because the
+   *    probe's root escaped the analyzed root and its names would not rebase.
+   *    Nothing was learned about these; what is known is that the run looked.
    *
-   * One field rather than two, because nothing downstream reads the
+   * One field rather than three, because nothing downstream reads the
    * provenance: the difference would only be worth keeping if the report
-   * worded the two cases differently, and it prints neither.
+   * worded the cases differently, and it prints none of them. What the field
+   * means is therefore "do not offer this as `untried`", which all three
+   * satisfy -- and NOT "this config was proven useless", which only the second
+   * does. A caller reaching for the stronger reading wants
+   * `ChosenConfigs.rejected`, where the two are told apart in prose.
    */
   triedConfigs?: readonly string[];
 }
