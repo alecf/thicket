@@ -992,9 +992,9 @@ function reweight<T extends Ranked>(
   streamsOf: (r: Ranked) => string[][] | undefined,
   includeCallSites: boolean,
 ): { emitted: T[]; suppressed: number } {
-  let suppressed = 0;
   const pool = slots * RERANK_POOL;
   const kept: T[] = [];
+  const removed: T[] = [];
   // Filled to `pool` SURVIVORS rather than sliced to `pool` candidates.
   // Suppression used to run after the slice, so a removed candidate cost a
   // slot: on a fixture whose three highest-ranked candidates are all bare
@@ -1012,19 +1012,35 @@ function reweight<T extends Ranked>(
     // matterId })` and `getUserForAuth({ c, uid })` are one shape there --
     // two different helpers, and calling that "already reused" would be a
     // worse error than the one this fixes.
+    // Scored either way, because a suppressed candidate has to be ranked
+    // against the survivors to know whether it would have been printed at all.
+    const drift = fieldNameDrift(streams);
+    const scored = { ...r, fieldDrift: drift, score: r.score * driftWeight(drift) };
     if (
       !includeCallSites &&
       r.cluster.level === "L0" &&
       streams[0] !== undefined &&
       isBareCall(streams[0])
     ) {
-      suppressed += 1;
+      removed.push(scored);
       continue;
     }
-    const drift = fieldNameDrift(streams);
-    kept.push({ ...r, fieldDrift: drift, score: r.score * driftWeight(drift) });
+    kept.push(scored);
   }
-  kept.sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id));
+  const byScore = (a: Ranked, b: Ranked) =>
+    b.score - a.score || compareStrings(a.cluster.id, b.cluster.id);
+  kept.sort(byScore);
+
+  // How many findings the rule took OFF THE PAGE, which is not how many it
+  // suppressed. The pool is three times the slots, so most of what it removes
+  // would have lost the final truncation anyway and cost the reader nothing.
+  // Reporting the pool count instead tells a reader that `--include-call-sites`
+  // will show them that many more findings, and it will not.
+  const removedIds = new Set(removed.map((r) => r.cluster.id));
+  const suppressed = [...kept, ...removed]
+    .sort(byScore)
+    .slice(0, slots)
+    .filter((r) => removedIds.has(r.cluster.id)).length;
   return { emitted: kept.slice(0, slots), suppressed };
 }
 

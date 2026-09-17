@@ -124,11 +124,14 @@ describe("isBareCall", () => {
   });
 
   it("rejects an argument list that merely contains a call", () => {
-    // `{ where: eq(chatMessages.chatThreadId, threadId), columns: { id: true } }`
-    // passes every other condition: one call, no body, and no literal token at
-    // all, because `true` is a keyword rather than a literal. It is a four-
-    // level argument list a narrower helper could absorb, and the spine check
-    // is the only thing that tells the two apart.
+    // `{ where: eq(chatMessages.chatThreadId, threadId), columns: { id: flag } }`
+    // passes every other condition: one call, no body, and no literal token.
+    // It is a four-level argument list a narrower helper could absorb, and the
+    // spine check is the only thing that tells the two apart.
+    //
+    // Written with an identifier rather than `true`. The obvious version used
+    // `{ id: true }`, which now trips the keyword-value check instead, so the
+    // spine guard could be deleted and this stayed green.
     const tokens = node(
       "ObjectLiteralExpression",
       node(
@@ -139,7 +142,84 @@ describe("isBareCall", () => {
       node(
         "PropertyAssignment",
         id("columns"),
-        node("ObjectLiteralExpression", node("PropertyAssignment", id("id"), ["TrueKeyword"])),
+        node("ObjectLiteralExpression", node("PropertyAssignment", id("id"), id("flag"))),
+      ),
+    );
+    expect(isBareCall(tokens)).toBe(false);
+  });
+
+  it("rejects a call configured by keyword values", () => {
+    // `configure({ retries: true, cache: false, strict: true })`. `true`,
+    // `false` and `null` are values, but they are keyword TOKENS rather than
+    // colon-delimited literals, so the colon test alone reads this fragment as
+    // carrying no configuration at all. A shared constant absorbs a repeated
+    // flag block, which is exactly the work the literal check exists to
+    // protect.
+    const tokens = node(
+      "CallExpression",
+      id("configure"),
+      node(
+        "ObjectLiteralExpression",
+        node("PropertyAssignment", id("retries"), ["TrueKeyword"]),
+        node("PropertyAssignment", id("cache"), ["FalseKeyword"]),
+        node("PropertyAssignment", id("strict"), ["NullKeyword"]),
+      ),
+    );
+    expect(isBareCall(tokens)).toBe(false);
+  });
+
+  it("accepts a null-coalescing default inside an argument", () => {
+    // The finding this module exists for ends `userRole: user.role ?? null`.
+    // A flat "contains a keyword" test rejects it and un-suppresses all 43
+    // copies, which is the whole feature. `null` here is an operand of `??`,
+    // not a configured value.
+    const tokens = node(
+      "CallExpression",
+      id("getMatterForAuth"),
+      node(
+        "ObjectLiteralExpression",
+        node("ShorthandPropertyAssignment", id("ctx")),
+        node("ShorthandPropertyAssignment", id("matterId")),
+        node(
+          "PropertyAssignment",
+          id("userRole"),
+          node(
+            "BinaryExpression",
+            node("PropertyAccessExpression", id("user"), id("role")),
+            ["QuestionQuestionToken"],
+            ["NullKeyword"],
+          ),
+        ),
+      ),
+    );
+    expect(isBareCall(tokens)).toBe(true);
+  });
+
+  it("rejects a call passing JSX", () => {
+    // `render(<div>content</div>)`. JSX text is not a literal kind, so its
+    // content never enters the stream and an L0 match cannot see it -- the
+    // same hole as an interpolated template. Two calls rendering different
+    // markup are one L0 cluster with no literal token between them, and the
+    // children are extractable work besides.
+    const tokens = node(
+      "CallExpression",
+      id("render"),
+      node("JsxElement", node("JsxOpeningElement", id("div")), ["JsxText"], node("JsxClosingElement", id("div"))),
+    );
+    expect(isBareCall(tokens)).toBe(false);
+  });
+
+  it("rejects a declaration list that binds more than the call", () => {
+    // `const a = load(), b = fallback`. Only the first declarator holds the
+    // call, so descending on "the child that holds the call" walks past the
+    // second one. The whole fragment is then not one call, and the sentence
+    // the report prints about it would be false.
+    const tokens = node(
+      "FirstStatement",
+      node(
+        "VariableDeclarationList",
+        node("VariableDeclaration", id("a"), node("CallExpression", id("load"), id("key"))),
+        node("VariableDeclaration", id("b"), id("fallback")),
       ),
     );
     expect(isBareCall(tokens)).toBe(false);
@@ -237,9 +317,22 @@ describe("a report over repeated calls to one helper", () => {
     const { markdown, json } = await runReport({ config, cache: false, maxFindings: 1 });
     expect(json.duplication).toHaveLength(1);
     expect(markdown).toContain("src/report-one.ts");
-    // ...and the pool really is exhausted by suppression, or this passes for
-    // the wrong reason on a fixture that stopped exercising the case.
-    expect(markdown).toContain("A rule removed 3 of them");
+  });
+
+  it("counts findings the rule took off the page, not candidates it matched", async () => {
+    // The same three bare-call clusters, read at two budgets. At forty slots
+    // all three would have been printed, so all three are reported removed. At
+    // one slot the pool still suppresses three, but only the highest could ever
+    // have taken that slot -- the other two would have lost the truncation
+    // anyway and cost the reader nothing.
+    //
+    // Reporting the pool count at one slot says `--include-call-sites` will
+    // show three more findings. It shows one.
+    const wide = await runReport({ config, cache: false });
+    expect(wide.markdown).toContain("A rule removed 3 of them");
+    const narrow = await runReport({ config, cache: false, maxFindings: 1 });
+    expect(narrow.markdown).toContain("A rule removed 1 of them");
+    expect(narrow.markdown).toContain("The 1 rule-removed candidate is");
   });
 
   it("gives the two settings different config hashes", async () => {

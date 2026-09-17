@@ -115,11 +115,15 @@ export interface ReportInput {
    * Candidates dropped for being repeated calls to shared code rather than
    * duplication, counted across all three sections. See `isBareCall`.
    *
-   * Only candidates that could otherwise have been PRINTED are counted: the
-   * check needs token streams, and those are re-extracted for the re-ranking
-   * pool alone. So the number is exact for the question a reader is asking --
-   * how many findings this rule took off the page -- and is not an estimate of
-   * how many exist in the codebase.
+   * Findings the rule took off the page, not candidates it matched. The two
+   * differ: the re-ranking pool is three times the slots, so most of what the
+   * rule removes would have lost the final truncation anyway and cost the
+   * reader nothing. `reweight` ranks the removed candidates against the
+   * survivors and counts only those that reach a printed slot, so
+   * `--include-call-sites` really does show this many more findings.
+   *
+   * It is therefore not a count of how many such fragments exist in the
+   * codebase, and it must never be printed as one.
    */
   bareCalls?: number;
   duplication: Ranked[];

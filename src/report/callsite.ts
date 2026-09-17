@@ -61,6 +61,40 @@ const BODIES: ReadonlySet<string> = new Set([
 const CALLS: ReadonlySet<string> = new Set(["CallExpression", "NewExpression"]);
 
 /**
+ * Keyword tokens that ARE a value, though they carry no text of their own.
+ *
+ * `undefined` is deliberately absent. TypeScript parses it as an ordinary
+ * `Identifier`, so it is already covered.
+ */
+const KEYWORD_VALUES: ReadonlySet<string> = new Set([
+  "TrueKeyword",
+  "FalseKeyword",
+  "NullKeyword",
+]);
+
+/**
+ * Parents in which a keyword is DATA rather than part of an expression.
+ *
+ * Position is the whole rule, and testing for the keyword alone is wrong in
+ * both directions. `configure({ retries: true, cache: false })` is a constant
+ * argument a shared object absorbs, so it is not a bare call. But
+ * `getMatterForAuth({ userRole: user.role ?? null })` -- the 43-copy finding
+ * this module exists for -- is a null-coalescing default inside an expression,
+ * not configuration, and a flat "contains a keyword" test un-suppressed it.
+ *
+ * Keywords are no threat to soundness either way, which is why this is about
+ * discrimination and not about safety. `TrueKeyword` and `FalseKeyword` are
+ * different tokens, so unlike template and JSX text, L0 can already tell two
+ * copies apart by them.
+ */
+const DATA_POSITIONS: ReadonlySet<string> = new Set([
+  "PropertyAssignment",
+  "CallExpression",
+  "NewExpression",
+  "ArrayLiteralExpression",
+]);
+
+/**
  * True for a token that carries a literal's VALUE rather than a node's kind.
  *
  * Tested by the colon rather than against a list of literal kinds, for the
@@ -74,15 +108,20 @@ function isLiteralValue(token: string): boolean {
 }
 
 /**
- * True for a token belonging to a template literal with substitutions.
+ * True for a token whose own TEXT never reaches the stream.
  *
- * `TemplateHead` and its siblings are not in `LITERAL_KINDS`, so their text
- * never enters the stream at all and an L0 match cannot see it. Two calls
- * passing different template strings are therefore indistinguishable here, and
- * the "every copy is the same text" argument below would be false for them.
+ * `TemplateHead` and `JsxText` are not in `LITERAL_KINDS`, so their content is
+ * dropped entirely and an L0 match cannot see it. Two calls passing
+ * `` `user ${id} failed` `` and `` `order ${id} failed` ``, or `render(<div>a</div>)`
+ * and `render(<div>b</div>)`, are one L0 cluster with no literal token between
+ * them. The "every copy is the same text" argument below is false for both.
+ *
+ * Matched on the prefix rather than on a list of kinds, which is what keeps a
+ * kind nobody thought of from slipping through. JSX children are substantive
+ * work besides, exactly as an arrow function's body is.
  */
-function isTemplatePart(token: string): boolean {
-  return token.startsWith("Template");
+function isOpaqueText(token: string): boolean {
+  return token.startsWith("Template") || token.startsWith("Jsx");
 }
 
 interface Node {
@@ -132,7 +171,7 @@ export function isBareCall(tokens: readonly string[]): boolean {
   for (const token of tokens) {
     if (CALLS.has(token)) calls += 1;
     else if (BODIES.has(token)) return false;
-    else if (isTemplatePart(token)) return false;
+    else if (isOpaqueText(token)) return false;
     if (isLiteralValue(token)) return false;
   }
   // More than one call means the arguments do work of their own, which is work
@@ -152,8 +191,21 @@ export function isBareCall(tokens: readonly string[]): boolean {
   // codebase. Enumerating type node kinds instead would be a list to keep in
   // step with the language; there is exactly one call in this stream by now,
   // so asking which child contains it needs no list at all.
-  let node = parse(tokens, 0)[0];
+  const root = parse(tokens, 0)[0];
+  // `true`, `false` and `null` carry no text, so the colon test above cannot
+  // see them. Where one sits in a data position it is configuration, and a
+  // shared constant absorbs a repeated flag block.
+  if (hasKeywordConfig(root)) return false;
+
+  let node = root;
   while (WRAPPERS.has(node.kind)) {
+    // A declaration list is the one wrapper whose extra children are
+    // independent work rather than parts of one binding. `const a = load(), b
+    // = fallback` has a single call-bearing declarator, so the descent below
+    // walks straight past `b` and calls the whole statement one call. Every
+    // other wrapper's siblings are the binding's name, its type, or a
+    // modifier.
+    if (node.kind === "VariableDeclarationList" && node.children.length !== 1) return false;
     const inner = node.children.filter(holdsCall);
     if (inner.length !== 1) return false;
     node = inner[0]!;
@@ -163,4 +215,12 @@ export function isBareCall(tokens: readonly string[]): boolean {
 
 function holdsCall(node: Node): boolean {
   return CALLS.has(node.kind) || node.children.some(holdsCall);
+}
+
+/** True when a `true`, `false` or `null` sits where data sits. */
+function hasKeywordConfig(node: Node): boolean {
+  const here = DATA_POSITIONS.has(node.kind);
+  return node.children.some(
+    (child) => (here && KEYWORD_VALUES.has(child.kind)) || hasKeywordConfig(child),
+  );
 }
