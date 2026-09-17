@@ -119,8 +119,8 @@ export interface ReportInput {
    * differ: the re-ranking pool is three times the slots, so most of what the
    * rule removes would have lost the final truncation anyway and cost the
    * reader nothing. `reweight` ranks the removed candidates against the
-   * survivors and counts only those that reach a printed slot, so
-   * `--include-call-sites` really does show this many more findings.
+   * survivors and counts only those that reach a printed slot, which is the
+   * number of slots this section's output would differ by.
    *
    * It is therefore not a count of how many such fragments exist in the
    * codebase, and it must never be printed as one.

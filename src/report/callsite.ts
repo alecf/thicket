@@ -158,11 +158,17 @@ function parse(tokens: readonly string[], at: number): [Node, number] {
  * calling that "already reused" would be a worse error than the one this
  * fixes.
  *
- * Given L0, the four conditions together say the copies are the same text:
- * the fragment reduces to a single call, holds no body whose statements could
- * be extracted, and carries no literal or template text that could differ
- * between copies without the stream showing it. What remains is N identical
- * calls, and there is no shorter way to write a call.
+ * Given L0, the conditions together say the copies are the same text and carry
+ * nothing to parameterize. The fragment reduces to a single call. It binds
+ * nothing besides that call. It holds no body whose statements could be
+ * extracted. It carries no literal, and no template or JSX text, which differ
+ * between copies without the stream showing it. And it passes no `true`,
+ * `false` or `null` where data goes. What remains is N identical calls, and
+ * there is no shorter way to write a call.
+ *
+ * Deliberately not counted here, because the list has grown twice under
+ * review: each condition is named beside the code that enforces it, and a
+ * number in this sentence goes stale the next time one is added.
  */
 export function isBareCall(tokens: readonly string[]): boolean {
   if (tokens.length === 0) return false;
