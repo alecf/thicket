@@ -20,11 +20,12 @@ import { compareStrings } from "./order.js";
 import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
+import { isBareCall } from "./report/callsite.js";
 import { canonicalKind, isTypeKind } from "./report/kinds.js";
 import { extractFragments } from "./fingerprint/fragments.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
-import { findVariants } from "./report/variants.js";
+import { findCoLocated, findVariants } from "./report/variants.js";
 import { fieldNameDrift, variations } from "./report/variation.js";
 import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
 import {
@@ -99,6 +100,17 @@ export interface RunOptions {
   includeGenerated?: boolean;
   /** Detect generated files by their banner comment. On by default. */
   bannerScan?: boolean;
+  /**
+   * Report clusters that are nothing but repeated calls to shared code.
+   * Off by default, because such a cluster is correct reuse rather than
+   * duplication -- see `isBareCall`.
+   */
+  includeCallSites?: boolean;
+  /**
+   * Rank a shape declared once per file across files of one role below
+   * duplication of the same size. On by default. See `fileRoleConvention`.
+   */
+  fileConventions?: boolean;
   /**
    * Which half of the codebase to analyze.
    *
@@ -515,6 +527,8 @@ export async function runReport(
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
+  const includeCallSites = opts.includeCallSites ?? false;
+  const fileConventions = opts.fileConventions ?? true;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
@@ -535,6 +549,8 @@ export async function runReport(
       granularity: String(granularity),
       includeGenerated,
       bannerScan,
+      includeCallSites,
+      fileConventions,
       exclude,
       types,
     }),
@@ -652,7 +668,7 @@ export async function runReport(
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
     // (PRD §9.1); the shape hash survives as `shapeHash` in the JSON.
-    const ranked = rankClusters(clusters, graph.moduleOf).map((r) => ({
+    const ranked = rankClusters(clusters, graph.moduleOf, { fileConventions }).map((r) => ({
       ...r,
       cluster: { ...r.cluster, id: findingId("DUP", r.cluster.id) },
       shapeHash: r.cluster.id,
@@ -782,13 +798,24 @@ export async function runReport(
         }),
       };
     };
-    const emitted = reweight(production, maxFindings, streamsOf).map(decorate);
-    const emittedTypes = reweight(typeDuplication, typeFindings(maxFindings), streamsOf).map(
-      decorate,
+    const productionPass = reweight(production, maxFindings, streamsOf, includeCallSites);
+    const typesPass = reweight(
+      typeDuplication,
+      typeFindings(maxFindings),
+      streamsOf,
+      includeCallSites,
     );
-    const emittedTests = reweight(testDuplication, testFindings(maxFindings), streamsOf).map(
-      decorate,
+    const testsPass = reweight(
+      testDuplication,
+      testFindings(maxFindings),
+      streamsOf,
+      includeCallSites,
     );
+    const emitted = productionPass.emitted.map(decorate);
+    const emittedTypes = typesPass.emitted.map(decorate);
+    const emittedTests = testsPass.emitted.map(decorate);
+    const bareCalls =
+      productionPass.suppressed + typesPass.suppressed + testsPass.suppressed;
 
     // What varies between the copies -- the parameter list of the abstraction
     // the finding is asking for. Only emitted findings pay for it.
@@ -812,8 +839,8 @@ export async function runReport(
     }
 
     // Near-variants, across both sections, for the findings actually printed.
-    const variants = findVariants(
-      [...emitted, ...emittedTypes, ...emittedTests].flatMap((r) => {
+    const variantInputs = [...emitted, ...emittedTypes, ...emittedTests].flatMap(
+      (r) => {
         const first = r.cluster.occurrences[0]!;
         const fragment = fragmentAt(first);
         return fragment === undefined
@@ -826,12 +853,25 @@ export async function runReport(
                 copies: r.cluster.occurrences.length,
               },
             ];
-      }),
+      },
     );
+    const variants = findVariants(variantInputs);
+    // Findings whose FILE SETS nest, which `findVariants` cannot see: it
+    // compares shapes, and these are different shapes sitting side by side in
+    // the same files. Ten of 59 findings on a real report described one
+    // structure that way.
+    const coLocated = findCoLocated(variantInputs);
     const withVariants = <T extends { cluster: { id: string } }>(r: T): T => {
       const found = variants.get(r.cluster.id);
       const differs = varies.get(r.cluster.id);
-      const out = found === undefined ? r : { ...r, variants: found };
+      // Both links are printed where both hold. They state different facts --
+      // one that the shapes are alike, one that the files are shared -- and on
+      // a 59-finding report over a real application no pair had both, because
+      // near-variants of one template are separate findings precisely when
+      // they sit in different files.
+      const nested = coLocated.get(r.cluster.id);
+      let out: T = found === undefined ? r : { ...r, variants: found };
+      if (nested !== undefined) out = { ...out, coLocated: nested };
       return differs === undefined || differs.length === 0 ? out : { ...out, varies: differs };
     };
     const duplicatedMass = ranked.reduce((sum, r) => sum + r.cluster.mass, 0);
@@ -862,6 +902,7 @@ export async function runReport(
       testDuplication: emittedTests.map(withVariants),
       cycles: cycles.slice(0, maxFindings),
       totalFindings,
+      bareCalls,
       census: census(ranked, cycles.length),
       ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
       ...(opts.maxLocations === undefined ? {} : { maxFilesPerFinding: opts.maxLocations }),
@@ -925,6 +966,11 @@ export async function runReport(
  * the section's size and the penalty reorders within it. Since the penalty only
  * ever LOWERS a score, a candidate outside the pool would have to beat the
  * pool's last survivor from below, which three times the slots makes remote.
+ *
+ * Counted in SURVIVORS, so `reweight` reads past this many candidates when it
+ * suppresses one. Counting candidates instead lets a suppressed one take a
+ * slot with nothing in it, and on a fixture whose three highest candidates are
+ * all bare calls, one slot produced an empty report.
  */
 const RERANK_POOL = 3;
 
@@ -944,17 +990,58 @@ function reweight<T extends Ranked>(
   candidates: readonly T[],
   slots: number,
   streamsOf: (r: Ranked) => string[][] | undefined,
-): T[] {
-  return candidates
-    .slice(0, slots * RERANK_POOL)
-    .map((r) => {
-      const streams = streamsOf(r);
-      if (streams === undefined) return r;
-      const drift = fieldNameDrift(streams);
-      return { ...r, fieldDrift: drift, score: r.score * driftWeight(drift) };
-    })
-    .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id))
-    .slice(0, slots);
+  includeCallSites: boolean,
+): { emitted: T[]; suppressed: number } {
+  const pool = slots * RERANK_POOL;
+  const kept: T[] = [];
+  const removed: T[] = [];
+  // Filled to `pool` SURVIVORS rather than sliced to `pool` candidates.
+  // Suppression used to run after the slice, so a removed candidate cost a
+  // slot: on a fixture whose three highest-ranked candidates are all bare
+  // calls, one slot produced an empty report with real duplication sitting one
+  // place below the cut. Scanning on costs one file walk per suppressed
+  // candidate, and there were 2 of 165 on a real application.
+  for (const r of candidates) {
+    if (kept.length >= pool) break;
+    const streams = streamsOf(r);
+    if (streams === undefined) {
+      kept.push(r);
+      continue;
+    }
+    // Only at L0. L1 erases identifier text, so `getMatterForAuth({ ctx,
+    // matterId })` and `getUserForAuth({ c, uid })` are one shape there --
+    // two different helpers, and calling that "already reused" would be a
+    // worse error than the one this fixes.
+    // Scored either way, because a suppressed candidate has to be ranked
+    // against the survivors to know whether it would have been printed at all.
+    const drift = fieldNameDrift(streams);
+    const scored = { ...r, fieldDrift: drift, score: r.score * driftWeight(drift) };
+    if (
+      !includeCallSites &&
+      r.cluster.level === "L0" &&
+      streams[0] !== undefined &&
+      isBareCall(streams[0])
+    ) {
+      removed.push(scored);
+      continue;
+    }
+    kept.push(scored);
+  }
+  const byScore = (a: Ranked, b: Ranked) =>
+    b.score - a.score || compareStrings(a.cluster.id, b.cluster.id);
+  kept.sort(byScore);
+
+  // How many findings the rule took OFF THE PAGE, which is not how many it
+  // suppressed. The pool is three times the slots, so most of what it removes
+  // would have lost the final truncation anyway and cost the reader nothing.
+  // Reporting the pool count instead tells a reader that `--include-call-sites`
+  // will show them that many more findings, and it will not.
+  const removedIds = new Set(removed.map((r) => r.cluster.id));
+  const suppressed = [...kept, ...removed]
+    .sort(byScore)
+    .slice(0, slots)
+    .filter((r) => removedIds.has(r.cluster.id)).length;
+  return { emitted: kept.slice(0, slots), suppressed };
 }
 
 /**

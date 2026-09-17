@@ -80,7 +80,7 @@ export function findVariants(inputs: readonly VariantInput[]): Map<string, Varia
   return out;
 }
 
-function push(map: Map<string, Variant[]>, id: string, variant: Variant): void {
+function push<T>(map: Map<string, T[]>, id: string, variant: T): void {
   const list = map.get(id);
   if (list) list.push(variant);
   else map.set(id, [variant]);
@@ -109,4 +109,106 @@ function overlaps(a: VariantInput, b: VariantInput): boolean {
       (y) => x.filePath === y.filePath && x.start < y.end && y.start < x.end,
     ),
   );
+}
+
+/**
+ * Another finding that lives entirely inside this one's files, or one whose
+ * files entirely contain this one's.
+ *
+ * Ten of 59 findings on a real 5540-file application described a single
+ * structure: seven sibling files repeating eight different shapes between
+ * them, plus two more at a coarser granularity. Two of the ten covered the
+ * IDENTICAL seven files. A reader saw ten problems, correctly reconstructed the
+ * one, and did the grouping by hand -- which is the failure this exists to
+ * stop. Seventeen percent of the report's budget said the same thing.
+ *
+ * `subsume` cannot see it. That drops a fragment covered by a larger fragment
+ * at the same location; these are different shapes sitting side by side in the
+ * same files.
+ */
+export interface CoLocated {
+  /** The other finding's id. */
+  id: string;
+  /**
+   * Size of the CONTAINED file set, whichever of the two it is. Both findings
+   * report the same number, because both sentences need it: "all 3 of these
+   * files also carry X" and "X lives only in 3 of these files".
+   */
+  files: number;
+  /** True when THIS finding is the one fully covered. */
+  within: boolean;
+  /** How many copies the other finding carries. */
+  copies: number;
+}
+
+/** Co-located findings named per finding, largest first. */
+const MAX_CO_LOCATED = 3;
+
+/**
+ * Link findings whose file sets nest, in both directions.
+ *
+ * Containment rather than similarity, and that is the whole design. Measured
+ * over the 59 findings of a real report, file-set Jaccard decayed smoothly from
+ * 1.0 with no empty band anywhere -- 174 overlapping pairs spread across every
+ * bucket -- so a threshold would have been picked out of the air. AGENTS.md
+ * records what that costs: a knob swept smoothly to zero means every setting
+ * was arbitrary.
+ *
+ * Containment needs no number and states something a reader can act on.
+ * Visiting the covering finding's files reaches every copy of the covered one,
+ * so the two are one trip. A partial overlap promises nothing of the kind, and
+ * the same measurement found 23 nesting pairs among those 174.
+ */
+export function findCoLocated(inputs: readonly VariantInput[]): Map<string, CoLocated[]> {
+  const fileSets = inputs.map((input) => new Set(input.occurrences.map((o) => o.filePath)));
+  // `of` is the OTHER finding's file count, which orders the list. It is not
+  // `files`, and the difference only shows up in one direction: a finding
+  // contained by several larger ones reports its own size for every link, so
+  // sorting on `files` leaves the id as the only tie-break and can drop the
+  // broadest relative. Stripped before returning, because a reader is never
+  // shown it.
+  const out = new Map<string, (CoLocated & { of: number })[]>();
+
+  for (let i = 0; i < inputs.length; i++) {
+    for (let j = i + 1; j < inputs.length; j++) {
+      // Containment first. It costs one scan of the smaller file set, where
+      // `overlaps` costs |a.occurrences| × |b.occurrences| -- and on a real
+      // report only 23 of 174 overlapping pairs nest, so the expensive test
+      // was being paid for every pair that could never produce a link.
+      const [fa, fb] = [fileSets[i]!, fileSets[j]!];
+      const aInB = subsetOf(fa, fb);
+      const bInA = subsetOf(fb, fa);
+      if (!aInB && !bInA) continue;
+      const a = inputs[i]!;
+      const b = inputs[j]!;
+      // A finding and the node containing it share every file trivially, and
+      // they are one piece of code seen at two granularities. The same hazard
+      // `findVariants` guards, reached by a different route: on a real report
+      // a Storybook `meta` object and the `parameters` block inside it were
+      // two findings over the same 22 files.
+      if (overlaps(a, b)) continue;
+      // The contained set's size in BOTH directions, because that is the number
+      // each sentence needs: "all 3 of these files also carry X" and "X lives
+      // only in 3 of these files" are the same 3. Equal sets contain each
+      // other, so both are told they are covered.
+      const shared = aInB ? fa.size : fb.size;
+      push(out, a.id, { id: b.id, files: shared, within: aInB, copies: b.copies, of: fb.size });
+      push(out, b.id, { id: a.id, files: shared, within: bInA, copies: a.copies, of: fa.size });
+    }
+  }
+
+  const named = new Map<string, CoLocated[]>();
+  for (const [id, found] of out) {
+    found.sort((x, y) => y.of - x.of || compareStrings(x.id, y.id));
+    named.set(
+      id,
+      found.slice(0, MAX_CO_LOCATED).map(({ of: _of, ...rest }) => rest),
+    );
+  }
+  return named;
+}
+
+function subsetOf(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  for (const path of a) if (!b.has(path)) return false;
+  return true;
 }

@@ -741,3 +741,126 @@ describe("subsume: scale", () => {
     expect(elapsed).toBeLessThan(3_000);
   }, 120_000);
 });
+
+describe("rankClusters: shapes that are one per file of one role", () => {
+  /** `n` files named `<name>.<role>.tsx`, each holding one copy. */
+  const perFile = (id: string, role: string, n: number, over: Partial<Cluster> = {}) =>
+    cluster({
+      id,
+      level: "L1",
+      kind: "VariableStatement",
+      nodeCount: 60,
+      occurrences: Array.from({ length: n }, (_, i) => occ(`src/c${i}.${role}.tsx`, 0, 400, 1, 14)),
+      mass: 60 * (n - 1),
+      ...over,
+    });
+
+  it("ranks a per-file declaration below duplication of the same size", () => {
+    // Storybook's CSF requires one `const meta` per story file, so 22 copies
+    // of one across 22 `.stories.tsx` files are the framework's API. There is
+    // no extraction: deleting any copy deletes a story. On a real application
+    // two such findings took production slots that could not be acted on.
+    //
+    // The two clusters are identical in every input the ranker reads -- 22
+    // copies, one file each, same span, same directory, same level -- so the
+    // file role is the ONLY thing between them. Built any other way this test
+    // passes with `CONVENTION_FLOOR` deleted, because whatever else differs
+    // was already deciding the order.
+    const convention = perFile("meta", "stories", 22);
+    const real = perFile("real", "stories", 22, {
+      id: "real",
+      occurrences: Array.from({ length: 22 }, (_, i) => occ(`src/c${i}.tsx`, 0, 400, 1, 14)),
+    });
+    const [first, second] = rankClusters([convention, real]);
+    expect(first?.cluster.id).toBe("real");
+    expect(second?.cluster.id).toBe("meta");
+    // The floor itself, not just the order. Ordering alone would survive any
+    // penalty at all, including one small enough to change nothing in practice.
+    expect(second!.score / first!.score).toBeCloseTo(0.25, 10);
+    // Named, so the reader can see why it sank rather than guessing.
+    expect(second?.fileRole).toBe(".stories.tsx");
+    expect(first?.fileRole).toBeUndefined();
+  });
+
+  it("tolerates one file declaring the shape twice", () => {
+    // Measured: a real `.stories.tsx` finding was 45 copies across 44 files,
+    // because one file exports two stories. Demanding exactly one per file
+    // would have missed it, and it is the same convention.
+    const convention = perFile("meta", "stories", 44, {
+      occurrences: [
+        ...Array.from({ length: 44 }, (_, i) => occ(`src/c${i}.stories.tsx`, 0, 400, 1, 14)),
+        occ("src/c0.stories.tsx", 600, 1000, 30, 14),
+      ],
+    });
+    expect(rankClusters([convention])[0]?.fileRole).toBe(".stories.tsx");
+  });
+
+  it("does not call a shape a convention when one file repeats it freely", () => {
+    // The case that fixes the boundary. A real finding put a Drizzle
+    // `updatedAt` column in 39 `.schema.ts` files, 56 times, with seven in one
+    // file -- so the shape is per TABLE, not per file, and a shared column
+    // helper absorbs every copy. The role suffix alone cannot tell the two
+    // apart; the occurrence count is what does.
+    const columns = perFile("cols", "schema", 39, {
+      occurrences: [
+        ...Array.from({ length: 39 }, (_, i) => occ(`src/t${i}.schema.ts`, 0, 400, 1, 14)),
+        ...Array.from({ length: 17 }, (_, i) => occ("src/t0.schema.ts", 600 + i * 50, 1000 + i * 50, 30, 14)),
+      ],
+    });
+    expect(rankClusters([columns])[0]?.fileRole).toBeUndefined();
+  });
+
+  it("needs a role suffix, not merely a shared extension", () => {
+    // `src/a.ts` and `src/b.ts` share `.ts` and play no common role. Reading a
+    // plain extension as a role would down-weight most of the report.
+    const plain = perFile("plain", "stories", 10, {
+      occurrences: Array.from({ length: 10 }, (_, i) => occ(`src/m${i}.ts`, 0, 400, 1, 14)),
+    });
+    expect(rankClusters([plain])[0]?.fileRole).toBeUndefined();
+  });
+
+  it("needs every file to play the same role", () => {
+    const mixed = perFile("mixed", "stories", 10, {
+      occurrences: [
+        ...Array.from({ length: 5 }, (_, i) => occ(`src/m${i}.stories.tsx`, 0, 400, 1, 14)),
+        ...Array.from({ length: 5 }, (_, i) => occ(`src/n${i}.test.tsx`, 0, 400, 1, 14)),
+      ],
+    });
+    expect(rankClusters([mixed])[0]?.fileRole).toBeUndefined();
+  });
+
+  it("needs more than one file to call anything a file-role convention", () => {
+    // Two copies inside ONE `.stories.tsx` file pass the occurrence test, since
+    // `files + 1` is 2. There is no "across files of one role" here at all, so
+    // the sentence the report prints would be false. Intra-file repetition is
+    // already ranked down by `siblingWeight` and by `spread`.
+    const oneFile = perFile("solo", "stories", 1, {
+      occurrences: [
+        occ("src/only.stories.tsx", 0, 400, 1, 14),
+        occ("src/only.stories.tsx", 600, 1000, 30, 14),
+      ],
+    });
+    expect(rankClusters([oneFile])[0]?.fileRole).toBeUndefined();
+  });
+
+  it("never calls test scaffolding a convention", () => {
+    // `.test.ts` is a role suffix like any other, and one `vi.mock` block per
+    // test file meets every condition here. It is not a framework mandate: a
+    // real finding of exactly that shape was 56 copies worth 383 lines, and a
+    // shared setup file absorbs all of them. Test duplication is kept out of
+    // production slots by its own SECTION, and a weight stacked on top would
+    // both re-penalize it and reorder the test section on a rule that does not
+    // apply there.
+    const scaffolding = perFile("mock", "test", 22, {
+      occurrences: Array.from({ length: 22 }, (_, i) => occ(`src/c${i}.test.ts`, 0, 400, 1, 14)),
+    });
+    expect(rankClusters([scaffolding])[0]?.fileRole).toBeUndefined();
+  });
+
+  it("leaves the weight off when the caller asks it to", () => {
+    // AGENTS.md §4b: every opinion gets its own off switch.
+    const convention = perFile("meta", "stories", 22);
+    expect(rankClusters([convention], undefined, { fileConventions: false })[0]?.fileRole)
+      .toBeUndefined();
+  });
+});

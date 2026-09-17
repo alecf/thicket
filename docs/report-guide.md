@@ -176,6 +176,25 @@ of the abstraction the finding is asking for.
 **`see also THK-DUP-…:`** — another printed finding that is nearly this shape.
 Handle both together or you will make a second pass.
 
+**`all N of these files also carry THK-DUP-…:`** and **`THK-DUP-… lives only in
+N of these files:`** — another printed finding whose files nest with this one's.
+The two are different shapes in the same files, so one visit covers both. Read
+the linked findings before you design anything. Several of them over one set of
+sibling files usually means the files are parallel implementations of one
+concept, and the abstraction is the concept, not any single shape.
+
+**`declared once in each of N .role files:`** — the shape appears once per file,
+and every file plays the same role. Storybook wants one `const meta` per
+`*.stories.tsx`. This is usually a framework's API rather than duplication, and
+deleting a copy deletes a story. thicket ranks these below duplication of the
+same size. The line says `and twice in one of them` when a single file breaks
+the pattern, because one exception does not stop it being a convention.
+
+The role has to be a dotted suffix, so `page.tsx` and `route.ts` are not
+matched. Reading a whole basename as a role would make every `types.ts` in a
+repository one role. It is a weight, not a filter, so check before dismissing
+the finding. `--no-file-conventions` turns the weight off.
+
 **`directly imported by:`** — how many files outside the cluster reach into it.
 This is your blast radius. `nothing outside the cluster` means you can rewrite
 freely. Files reached through a re-export barrel are counted separately, because
@@ -213,6 +232,11 @@ indirection and gaining nothing.
 
 **Ask whether it is already solved.** Check `same shape in other surroundings`
 and `every copy imports` before designing anything.
+
+**Ask whether the call is the extraction.** A fragment that is only a call to a
+shared helper is correct reuse, not duplication. Nothing shorter can replace a
+call. thicket leaves these out of the report and says how many it removed;
+`--include-call-sites` shows them.
 
 **Then say so.** If the answer is "not worth it", report that back rather than
 producing a large mechanical diff. That is a useful result.
@@ -334,6 +358,10 @@ helper or a global setup file that makes the copies redundant.
 
 Plus a histogram of candidates by recoverable lines, and a line about candidates
 that repeat within a single file.
+
+A further line appears when thicket dropped candidates that were only repeated
+calls to shared code. Those would have been printed otherwise, so the count is
+exact rather than an estimate. `--include-call-sites` brings them back.
 
 Large omitted counts are normal and are not a backlog. Most of the tail is tiny
 or is intra-file repetition, which is ranked down rather than excluded. The

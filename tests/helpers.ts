@@ -268,6 +268,39 @@ export function configTableConfig(): string {
  * by dissolution and is worthless: both its edges erase at compile time.
  */
 /**
+ * Four route modules that each open with the same five-line call to a shared
+ * helper, beside one genuinely duplicated function.
+ *
+ * The call is the shape a real report got wrong: it ranked "43 copies · ~208
+ * lines recoverable" over 43 call sites of one helper, which is what correct
+ * reuse looks like. Here it scores 13 recoverable lines against the real
+ * finding's 6, so it outranks real work unless it is suppressed -- which is
+ * the property under test, and why the fixture carries both.
+ *
+ * The four route bodies deliberately differ around the call. Make them alike
+ * and the enclosing `FunctionDeclaration` clusters too, `subsume` drops the
+ * call fragment as covered by its own parent, and the test passes with the
+ * suppression deleted.
+ */
+export function callsiteConfig(): string {
+  return resolve(here, "fixtures/callsite/tsconfig.json");
+}
+
+/**
+ * Four sibling section modules that repeat one shape between all of them and a
+ * second shape between two of them.
+ *
+ * The structure ten of 59 findings on a real report described between them: a
+ * set of parallel implementations of one concept, reported as separate
+ * problems with nothing connecting them. The nesting is what matters here --
+ * the two-file shape sits entirely inside the four-file shape's files, so the
+ * report has to say so in both directions.
+ */
+export function coLocatedConfig(): string {
+  return resolve(here, "fixtures/colocated/tsconfig.json");
+}
+
+/**
  * Two duplication clusters of the same syntactic shape and opposite worth: ten
  * three-field projections whose every key differs, and four constant blocks
  * whose keys are identical and whose values differ.

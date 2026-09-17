@@ -111,6 +111,21 @@ export interface ReportInput {
    * reader comparing two reports has no other way to tell.
    */
   types?: "exclude" | "only";
+  /**
+   * Candidates dropped for being repeated calls to shared code rather than
+   * duplication, counted across all three sections. See `isBareCall`.
+   *
+   * Findings the rule took off the page, not candidates it matched. The two
+   * differ: the re-ranking pool is three times the slots, so most of what the
+   * rule removes would have lost the final truncation anyway and cost the
+   * reader nothing. `reweight` ranks the removed candidates against the
+   * survivors and counts only those that reach a printed slot, which is the
+   * number of slots this section's output would differ by.
+   *
+   * It is therefore not a count of how many such fragments exist in the
+   * codebase, and it must never be printed as one.
+   */
+  bareCalls?: number;
   duplication: Ranked[];
   /**
    * Duplication in the type system -- interfaces, type aliases, the type
@@ -490,6 +505,7 @@ function omittedSection(
   const omitted = input.totalFindings - printed;
   if (omitted <= 0) return [];
   const c = input.census;
+  const bareCalls = input.bareCalls ?? 0;
 
   const rows: [string, number, number][] = [
     ["duplication", c.duplication, shown.duplication],
@@ -502,7 +518,15 @@ function omittedSection(
     "## Omitted",
     "",
     `${omitted} of ${input.totalFindings} findings are not shown above.` +
-      ` They rank below the ones that are; this is what they consist of.`,
+      (bareCalls === 0
+        ? ` They rank below the ones that are.`
+        : // Truncation and suppression are different things, and saying only
+          // the first makes the report contradict itself. A bare call site is
+          // removed by a rule whatever it scored, and on a real fixture one
+          // outranked the genuine duplication beneath it.
+          ` Most rank below the ones that are. A rule removed ${bareCalls} of them` +
+          ` instead, whatever they scored.`) +
+      ` This is what they consist of.`,
     "",
     "| category | candidates | shown |",
     "| --- | --- | --- |",
@@ -518,6 +542,20 @@ function omittedSection(
       "| recoverable lines | candidates |",
       "| --- | --- |",
       ...c.bands.map((b) => `| ${b.label} | ${b.count} |`),
+      "",
+    );
+  }
+
+  if (bareCalls > 0) {
+    // Stated rather than silently dropped, for the same reason truncation
+    // always is. The rule is an opinion about someone else's codebase, and a
+    // reader who disagrees needs to know it ran before they can turn it off.
+    const n = bareCalls;
+    lines.push(
+      `The ${n} rule-removed candidate${n === 1 ? " is" : "s are"} repeated calls to` +
+        ` shared code rather than duplication. The whole fragment is one call, so` +
+        ` nothing shorter can replace it. Re-run with \`--include-call-sites\` to` +
+        ` see ${n === 1 ? "it" : "them"}.`,
       "",
     );
   }
@@ -603,9 +641,29 @@ const MAX_ALSO_AT_NAMED = 3;
  * one of them imported it.
  */
 function contextLines(r: Ranked): string[] {
-  const context = r.context;
-  if (context === undefined) return [];
   const lines: string[] = [];
+
+  if (r.fileRole !== undefined) {
+    // First, because it is the fact that decides whether to read the rest. A
+    // reader who sees a large copy count sitting oddly low has no way to tell a
+    // deliberate weight from a ranking bug, and the two call for opposite
+    // responses.
+    const files = new Set(r.cluster.occurrences.map((o) => o.filePath)).size;
+    // `fileRoleConvention` allows one file to declare the shape twice, so
+    // "once in each" is not always true and a reader cannot see which case
+    // they have. A field named for something it does not hold costs more than
+    // no field, because it is believed (AGENTS.md).
+    const twice = r.cluster.occurrences.length > files ? ", and twice in one of them" : "";
+    lines.push(
+      `- **declared once in each of ${files} \`${r.fileRole}\` files${twice}:**` +
+        ` a convention of that file role, so it is ranked below duplication of the same size`,
+    );
+  }
+
+  // Everything below is drawn from the cluster's surroundings, which the
+  // caller resolves only for findings the report will print.
+  const context = r.context;
+  if (context === undefined) return lines.length === 0 ? [] : [...lines, ""];
 
 
   if (context.sharedImports.length > 0) {
@@ -659,6 +717,19 @@ function contextLines(r: Ranked): string[] {
     lines.push(
       `- **see also \`${variant.id}\`:** ${Math.round(variant.similarity * 100)}% the same shape,` +
         ` ${variant.copies} more cop${variant.copies === 1 ? "y" : "ies"}`,
+    );
+  }
+
+  for (const near of r.coLocated ?? []) {
+    // Two sentences rather than one symmetric phrasing, because the direction
+    // is what the reader acts on. "Everything here is also there" sends you to
+    // the bigger picture; "that is confined to a few of these files" tells you
+    // one visit clears both.
+    const copies = `${near.copies} cop${near.copies === 1 ? "y" : "ies"}`;
+    lines.push(
+      near.within
+        ? `- **all ${near.files} of these files also carry \`${near.id}\`:** ${copies} there`
+        : `- **\`${near.id}\` lives only in ${near.files} of these files:** ${copies} there`,
     );
   }
 
