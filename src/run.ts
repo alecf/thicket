@@ -988,30 +988,39 @@ function reweight<T extends Ranked>(
   includeCallSites: boolean,
 ): { emitted: T[]; suppressed: number } {
   let suppressed = 0;
-  const kept = candidates
-    .slice(0, slots * RERANK_POOL)
-    .flatMap((r) => {
-      const streams = streamsOf(r);
-      if (streams === undefined) return [r];
-      // Only at L0. L1 erases identifier text, so `getMatterForAuth({ ctx,
-      // matterId })` and `getUserForAuth({ c, uid })` are one shape there --
-      // two different helpers, and calling that "already reused" would be a
-      // worse error than the one this fixes.
-      if (
-        !includeCallSites &&
-        r.cluster.level === "L0" &&
-        streams[0] !== undefined &&
-        isBareCall(streams[0])
-      ) {
-        suppressed += 1;
-        return [];
-      }
-      const drift = fieldNameDrift(streams);
-      return [{ ...r, fieldDrift: drift, score: r.score * driftWeight(drift) }];
-    })
-    .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id))
-    .slice(0, slots);
-  return { emitted: kept, suppressed };
+  const pool = slots * RERANK_POOL;
+  const kept: T[] = [];
+  // Filled to `pool` SURVIVORS rather than sliced to `pool` candidates.
+  // Suppression used to run after the slice, so a removed candidate cost a
+  // slot: on a fixture whose three highest-ranked candidates are all bare
+  // calls, one slot produced an empty report with real duplication sitting one
+  // place below the cut. Scanning on costs one file walk per suppressed
+  // candidate, and there were 2 of 165 on a real application.
+  for (const r of candidates) {
+    if (kept.length >= pool) break;
+    const streams = streamsOf(r);
+    if (streams === undefined) {
+      kept.push(r);
+      continue;
+    }
+    // Only at L0. L1 erases identifier text, so `getMatterForAuth({ ctx,
+    // matterId })` and `getUserForAuth({ c, uid })` are one shape there --
+    // two different helpers, and calling that "already reused" would be a
+    // worse error than the one this fixes.
+    if (
+      !includeCallSites &&
+      r.cluster.level === "L0" &&
+      streams[0] !== undefined &&
+      isBareCall(streams[0])
+    ) {
+      suppressed += 1;
+      continue;
+    }
+    const drift = fieldNameDrift(streams);
+    kept.push({ ...r, fieldDrift: drift, score: r.score * driftWeight(drift) });
+  }
+  kept.sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id));
+  return { emitted: kept.slice(0, slots), suppressed };
 }
 
 /**

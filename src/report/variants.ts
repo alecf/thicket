@@ -161,10 +161,24 @@ const MAX_CO_LOCATED = 3;
  */
 export function findCoLocated(inputs: readonly VariantInput[]): Map<string, CoLocated[]> {
   const fileSets = inputs.map((input) => new Set(input.occurrences.map((o) => o.filePath)));
-  const out = new Map<string, CoLocated[]>();
+  // `of` is the OTHER finding's file count, which orders the list. It is not
+  // `files`, and the difference only shows up in one direction: a finding
+  // contained by several larger ones reports its own size for every link, so
+  // sorting on `files` leaves the id as the only tie-break and can drop the
+  // broadest relative. Stripped before returning, because a reader is never
+  // shown it.
+  const out = new Map<string, (CoLocated & { of: number })[]>();
 
   for (let i = 0; i < inputs.length; i++) {
     for (let j = i + 1; j < inputs.length; j++) {
+      // Containment first. It costs one scan of the smaller file set, where
+      // `overlaps` costs |a.occurrences| × |b.occurrences| -- and on a real
+      // report only 23 of 174 overlapping pairs nest, so the expensive test
+      // was being paid for every pair that could never produce a link.
+      const [fa, fb] = [fileSets[i]!, fileSets[j]!];
+      const aInB = subsetOf(fa, fb);
+      const bInA = subsetOf(fb, fa);
+      if (!aInB && !bInA) continue;
       const a = inputs[i]!;
       const b = inputs[j]!;
       // A finding and the node containing it share every file trivially, and
@@ -173,25 +187,25 @@ export function findCoLocated(inputs: readonly VariantInput[]): Map<string, CoLo
       // a Storybook `meta` object and the `parameters` block inside it were
       // two findings over the same 22 files.
       if (overlaps(a, b)) continue;
-      const [fa, fb] = [fileSets[i]!, fileSets[j]!];
-      const aInB = subsetOf(fa, fb);
-      const bInA = subsetOf(fb, fa);
-      if (!aInB && !bInA) continue;
       // The contained set's size in BOTH directions, because that is the number
       // each sentence needs: "all 3 of these files also carry X" and "X lives
       // only in 3 of these files" are the same 3. Equal sets contain each
       // other, so both are told they are covered.
       const shared = aInB ? fa.size : fb.size;
-      push(out, a.id, { id: b.id, files: shared, within: aInB, copies: b.copies });
-      push(out, b.id, { id: a.id, files: shared, within: bInA, copies: a.copies });
+      push(out, a.id, { id: b.id, files: shared, within: aInB, copies: b.copies, of: fb.size });
+      push(out, b.id, { id: a.id, files: shared, within: bInA, copies: a.copies, of: fa.size });
     }
   }
 
+  const named = new Map<string, CoLocated[]>();
   for (const [id, found] of out) {
-    found.sort((x, y) => y.files - x.files || compareStrings(x.id, y.id));
-    out.set(id, found.slice(0, MAX_CO_LOCATED));
+    found.sort((x, y) => y.of - x.of || compareStrings(x.id, y.id));
+    named.set(
+      id,
+      found.slice(0, MAX_CO_LOCATED).map(({ of: _of, ...rest }) => rest),
+    );
   }
-  return out;
+  return named;
 }
 
 function subsetOf(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {

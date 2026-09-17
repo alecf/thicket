@@ -501,6 +501,7 @@ function omittedSection(
   const omitted = input.totalFindings - printed;
   if (omitted <= 0) return [];
   const c = input.census;
+  const bareCalls = input.bareCalls ?? 0;
 
   const rows: [string, number, number][] = [
     ["duplication", c.duplication, shown.duplication],
@@ -513,7 +514,15 @@ function omittedSection(
     "## Omitted",
     "",
     `${omitted} of ${input.totalFindings} findings are not shown above.` +
-      ` They rank below the ones that are; this is what they consist of.`,
+      (bareCalls === 0
+        ? ` They rank below the ones that are.`
+        : // Truncation and suppression are different things, and saying only
+          // the first makes the report contradict itself. A bare call site is
+          // removed by a rule whatever it scored, and on a real fixture one
+          // outranked the genuine duplication beneath it.
+          ` Most rank below the ones that are. A rule removed ${bareCalls} of them` +
+          ` instead, whatever they scored.`) +
+      ` This is what they consist of.`,
     "",
     "| category | candidates | shown |",
     "| --- | --- | --- |",
@@ -533,16 +542,16 @@ function omittedSection(
     );
   }
 
-  if ((input.bareCalls ?? 0) > 0) {
-    const n = input.bareCalls!;
+  if (bareCalls > 0) {
     // Stated rather than silently dropped, for the same reason truncation
     // always is. The rule is an opinion about someone else's codebase, and a
     // reader who disagrees needs to know it ran before they can turn it off.
+    const n = bareCalls;
     lines.push(
-      `${n} further candidate${n === 1 ? " was" : "s were"} left out for being` +
-        ` repeated calls to shared code rather than duplication: the whole` +
-        ` fragment is one call, so nothing shorter can replace it. Re-run with` +
-        ` \`--include-call-sites\` to see ${n === 1 ? "it" : "them"}.`,
+      `The ${n} rule-removed candidate${n === 1 ? " is" : "s are"} repeated calls to` +
+        ` shared code rather than duplication. The whole fragment is one call, so` +
+        ` nothing shorter can replace it. Re-run with \`--include-call-sites\` to` +
+        ` see ${n === 1 ? "it" : "them"}.`,
       "",
     );
   }
@@ -636,8 +645,13 @@ function contextLines(r: Ranked): string[] {
     // deliberate weight from a ranking bug, and the two call for opposite
     // responses.
     const files = new Set(r.cluster.occurrences.map((o) => o.filePath)).size;
+    // `fileRoleConvention` allows one file to declare the shape twice, so
+    // "once in each" is not always true and a reader cannot see which case
+    // they have. A field named for something it does not hold costs more than
+    // no field, because it is believed (AGENTS.md).
+    const twice = r.cluster.occurrences.length > files ? ", and twice in one of them" : "";
     lines.push(
-      `- **declared once in each of ${files} \`${r.fileRole}\` files:**` +
+      `- **declared once in each of ${files} \`${r.fileRole}\` files${twice}:**` +
         ` a convention of that file role, so it is ranked below duplication of the same size`,
     );
   }

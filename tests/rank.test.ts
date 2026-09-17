@@ -829,6 +829,20 @@ describe("rankClusters: shapes that are one per file of one role", () => {
     expect(rankClusters([mixed])[0]?.fileRole).toBeUndefined();
   });
 
+  it("needs more than one file to call anything a file-role convention", () => {
+    // Two copies inside ONE `.stories.tsx` file pass the occurrence test, since
+    // `files + 1` is 2. There is no "across files of one role" here at all, so
+    // the sentence the report prints would be false. Intra-file repetition is
+    // already ranked down by `siblingWeight` and by `spread`.
+    const oneFile = perFile("solo", "stories", 1, {
+      occurrences: [
+        occ("src/only.stories.tsx", 0, 400, 1, 14),
+        occ("src/only.stories.tsx", 600, 1000, 30, 14),
+      ],
+    });
+    expect(rankClusters([oneFile])[0]?.fileRole).toBeUndefined();
+  });
+
   it("never calls test scaffolding a convention", () => {
     // `.test.ts` is a role suffix like any other, and one `vi.mock` block per
     // test file meets every condition here. It is not a framework mandate: a

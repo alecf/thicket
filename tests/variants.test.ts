@@ -198,6 +198,27 @@ describe("findCoLocated", () => {
     expect(findCoLocated([outer, inner]).size).toBe(0);
   });
 
+  it("caps by the OTHER finding's size, not by the shared count", () => {
+    // A finding contained by several larger ones reports the same `files` for
+    // every link, because `files` is its own set size in that direction. Sort
+    // on that and the cap falls back to the id, which can drop the broadest
+    // relative -- the one most worth reading, since it holds the most context.
+    const small = over("THK-DUP-small", ["src/a.ts"]);
+    const wide = over("THK-DUP-zwide", ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
+    const mid = over("THK-DUP-ymid", ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    const near = over("THK-DUP-xnear", ["src/a.ts", "src/b.ts"]);
+    const tiny = over("THK-DUP-atiny", ["src/a.ts"]);
+    const found = findCoLocated([small, wide, mid, near, tiny]).get("THK-DUP-small")!;
+    // Every link reports `files: 1`, so the ids are the only tie-break left --
+    // and `THK-DUP-atiny` sorts first by id while being the least informative.
+    expect(found.map((c) => c.files)).toEqual([1, 1, 1]);
+    expect(found.map((c) => c.id)).toEqual([
+      "THK-DUP-zwide",
+      "THK-DUP-ymid",
+      "THK-DUP-xnear",
+    ]);
+  });
+
   it("names the largest relatives first, and caps the list", () => {
     const base = over("THK-DUP-base", ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
     const inside = ["one", "two", "three", "four"].map((n, i) =>

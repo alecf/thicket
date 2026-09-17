@@ -166,11 +166,18 @@ export function fileRoleOf(path: string): string | undefined {
  * file, or `undefined` when the cluster is not that.
  *
  * Some duplication cannot be removed because a framework requires it. Storybook
- * CSF wants one `const meta` per story file; Next.js wants one default export
- * per `page.tsx`. Twenty-two copies across twenty-two `.stories.tsx` files are
- * that framework's API, and deleting a copy deletes a story. On a real
- * application two such findings held production slots against work that could
- * actually be done.
+ * CSF wants one `const meta` per story file. Twenty-two copies across
+ * twenty-two `.stories.tsx` files are that framework's API, and deleting a copy
+ * deletes a story. On a real application two such findings held production
+ * slots against work that could actually be done.
+ *
+ * Deliberately blind to a role carried by a WHOLE basename rather than by a
+ * dotted suffix, so Next.js `page.tsx` and `route.ts` are not covered. Reading
+ * a bare basename as a role also makes every `types.ts` and `index.ts` in a
+ * repository one role, and a measured finding over seven sibling
+ * `resolver-types.ts` files -- genuine parallel implementations worth
+ * consolidating -- was down-weighted by exactly that rule. Under-firing is the
+ * safe direction for an opinion.
  *
  * Both halves are needed, and the occurrence count is the half that is easy to
  * leave out. A finding on the same application put a Drizzle `updatedAt` column
@@ -184,7 +191,13 @@ export function fileRoleOf(path: string): string | undefined {
  * file misses it, and it is the same convention. The slack stays at one however
  * large the cluster grows, so it never becomes a loophole.
  *
- * No floor on file count. Two files sharing a role is weak evidence of a
+ * Two files at least, because below that there is no "across files of one
+ * role" to report. Two copies inside ONE `.stories.tsx` file pass the
+ * occurrence test -- `files + 1` is 2 -- and the sentence the report prints
+ * about them would be false. Intra-file repetition is already ranked down by
+ * `siblingWeight` and by `spread`.
+ *
+ * No floor above two. Two files sharing a role is weak evidence of a
  * convention, and this is a weight rather than an exclusion for exactly that
  * reason -- a cluster it is wrong about can still be reported when nothing
  * better competes.
@@ -192,6 +205,7 @@ export function fileRoleOf(path: string): string | undefined {
 export function fileRoleConvention(cluster: Cluster): string | undefined {
   const perFile = new Set<string>();
   for (const o of cluster.occurrences) perFile.add(o.filePath);
+  if (perFile.size < 2) return undefined;
   if (cluster.occurrences.length > perFile.size + 1) return undefined;
 
   let role: string | undefined;

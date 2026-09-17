@@ -183,13 +183,17 @@ the linked findings before you design anything. Several of them over one set of
 sibling files usually means the files are parallel implementations of one
 concept, and the abstraction is the concept, not any single shape.
 
-**`declared once in each of N .role files:`** — the shape appears exactly once
-per file, and every file plays the same role. Storybook wants one `const meta`
-per `*.stories.tsx`; Next.js wants one default export per `page.tsx`. This is
-usually a framework's API rather than duplication, and deleting a copy deletes
-a story. thicket ranks these below duplication of the same size. It is a weight,
-not a filter, so check before dismissing it. `--no-file-conventions` turns the
-weight off.
+**`declared once in each of N .role files:`** — the shape appears once per file,
+and every file plays the same role. Storybook wants one `const meta` per
+`*.stories.tsx`. This is usually a framework's API rather than duplication, and
+deleting a copy deletes a story. thicket ranks these below duplication of the
+same size. The line says `and twice in one of them` when a single file breaks
+the pattern, because one exception does not stop it being a convention.
+
+The role has to be a dotted suffix, so `page.tsx` and `route.ts` are not
+matched. Reading a whole basename as a role would make every `types.ts` in a
+repository one role. It is a weight, not a filter, so check before dismissing
+the finding. `--no-file-conventions` turns the weight off.
 
 **`directly imported by:`** — how many files outside the cluster reach into it.
 This is your blast radius. `nothing outside the cluster` means you can rewrite

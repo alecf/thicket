@@ -143,14 +143,24 @@ export function isBareCall(tokens: readonly string[]): boolean {
   // columns: { id: true } }` is one call, no body and no literal — `true` is a
   // keyword, not a literal token — and it is an argument list four levels deep
   // that a narrower helper could absorb.
+  //
+  // Descent follows the child that HOLDS the call, rather than the child that
+  // is not an identifier. A wrapper's other children are the binding's own
+  // parts: the name, and the type annotation. Filtering on "not an identifier"
+  // counts `const matter: Matter = await f(…)` as two candidate children and
+  // rejects it, which is most of the annotated call sites in a TypeScript
+  // codebase. Enumerating type node kinds instead would be a list to keep in
+  // step with the language; there is exactly one call in this stream by now,
+  // so asking which child contains it needs no list at all.
   let node = parse(tokens, 0)[0];
   while (WRAPPERS.has(node.kind)) {
-    // An identifier child of a wrapper is the name it binds, not the
-    // expression it wraps: `VariableDeclaration` holds `Id:matter` beside the
-    // initializer.
-    const inner = node.children.filter((c) => !c.kind.startsWith("Id:"));
+    const inner = node.children.filter(holdsCall);
     if (inner.length !== 1) return false;
     node = inner[0]!;
   }
   return CALLS.has(node.kind);
+}
+
+function holdsCall(node: Node): boolean {
+  return CALLS.has(node.kind) || node.children.some(holdsCall);
 }

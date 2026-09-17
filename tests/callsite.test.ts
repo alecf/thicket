@@ -65,6 +65,30 @@ describe("isBareCall", () => {
     expect(isBareCall(tokens)).toBe(true);
   });
 
+  it("accepts a helper call bound to an ANNOTATED local", () => {
+    // `const matter: Matter = await getMatterForAuth({ ctx })`. The annotation
+    // is part of the binding, so the fragment is still one call and nothing
+    // else. Descending on "the single child that is not an identifier" rejects
+    // it, because the type node is a second non-identifier child -- and
+    // annotated call sites are the common case in TypeScript.
+    const tokens = node(
+      "FirstStatement",
+      node(
+        "VariableDeclarationList",
+        node(
+          "VariableDeclaration",
+          id("matter"),
+          node("TypeReference", id("Matter")),
+          node(
+            "AwaitExpression",
+            node("CallExpression", id("getMatterForAuth"), shorthandObject("ctx", "matterId")),
+          ),
+        ),
+      ),
+    );
+    expect(isBareCall(tokens)).toBe(true);
+  });
+
   it("rejects a call whose argument carries a body", () => {
     // `useEffect(() => { ref.current = value; }, [value])` is a call at its
     // root, holds no literal, and makes exactly ONE call — so every other
@@ -202,6 +226,20 @@ describe("a report over repeated calls to one helper", () => {
     expect(markdown.indexOf("src/route-alpha.ts")).toBeLessThan(
       markdown.indexOf("src/report-one.ts"),
     );
+  });
+
+  it("does not let a suppressed candidate cost a slot", async () => {
+    // The re-ranking pool is the top `slots * 3` candidates, and suppression
+    // used to run AFTER that slice was taken. Three bare-call clusters outrank
+    // the genuine duplication in this fixture, so at one slot the whole pool
+    // was suppressed and the report emitted nothing at all -- with a real
+    // finding sitting one place below the cut.
+    const { markdown, json } = await runReport({ config, cache: false, maxFindings: 1 });
+    expect(json.duplication).toHaveLength(1);
+    expect(markdown).toContain("src/report-one.ts");
+    // ...and the pool really is exhausted by suppression, or this passes for
+    // the wrong reason on a fixture that stopped exercising the case.
+    expect(markdown).toContain("A rule removed 3 of them");
   });
 
   it("gives the two settings different config hashes", async () => {

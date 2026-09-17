@@ -84,6 +84,25 @@ describe("a finding that is one declaration per file of one role", () => {
     expect(markdown).toContain("ranked below duplication of the same size");
   });
 
+  it("says so when one file declares the shape twice", () => {
+    // `fileRoleConvention` allows one file to break the pattern, so "once in
+    // each" is not always true. A field named for something it does not hold
+    // costs more than no field, because it is believed.
+    const meta = ranked("THK-DUP-meta", {
+      occurrences: [
+        { filePath: "src/Badge.stories.tsx", start: 0, end: 200, line: 4, endLine: 12, parentId: 1 },
+        { filePath: "src/Card.stories.tsx", start: 0, end: 200, line: 4, endLine: 12, parentId: 2 },
+        { filePath: "src/Card.stories.tsx", start: 400, end: 600, line: 30, endLine: 38, parentId: 3 },
+      ],
+    });
+    const markdown = renderMarkdown(
+      reportInput({ duplication: [{ ...meta, fileRole: ".stories.tsx" }] }),
+    );
+    expect(markdown).toContain(
+      "**declared once in each of 2 `.stories.tsx` files, and twice in one of them:**",
+    );
+  });
+
   it("says nothing when the cluster is ordinary duplication", () => {
     const markdown = renderMarkdown(
       reportInput({ duplication: [ranked("THK-DUP-plain")] }),
@@ -698,6 +717,34 @@ describe("renderMarkdown", () => {
     expect(out).toContain(
       "9382 of those candidates repeat each within one file rather than across files",
     );
+  });
+
+  it("does not claim a rule-removed candidate ranked below what is shown", () => {
+    // The two are different things and the preamble said only the first.
+    // Truncation drops what scored lowest; the bare-call rule drops what it
+    // drops, and on a real fixture a suppressed candidate outranked the
+    // genuine duplication printed beneath it. Saying "they rank below the ones
+    // that are" over both makes the report contradict itself.
+    const out = renderMarkdown(reportInput({
+      duplication: [ranked("THK-DUP-1")],
+      totalFindings: 50,
+      bareCalls: 3,
+      census: { duplication: 49, bands: [{ label: "10–29", count: 49 }] },
+    }));
+    expect(out).toContain("Most rank below the ones that are.");
+    expect(out).toContain("A rule removed 3 of them instead, whatever they scored.");
+    expect(out).not.toContain("They rank below the ones that are.");
+    expect(out).toContain("The 3 rule-removed candidates are repeated calls to shared code");
+  });
+
+  it("keeps the plain preamble when no rule removed anything", () => {
+    const out = renderMarkdown(reportInput({
+      duplication: [ranked("THK-DUP-1")],
+      totalFindings: 50,
+      census: { duplication: 49, bands: [{ label: "10–29", count: 49 }] },
+    }));
+    expect(out).toContain("They rank below the ones that are.");
+    expect(out).not.toContain("A rule removed");
   });
 
   it("counts shown cycles against the tangle row, not the duplication row", () => {
