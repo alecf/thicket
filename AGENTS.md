@@ -43,19 +43,36 @@ bundled JS fallback shipped in the npm package still runs under Node ≥24.
 
 ## Dependency updates
 
-Dependabot opens weekly PRs for two ecosystems. `.github/dependabot.yml`
-configures both.
+Dependabot updates workflow actions only. `.github/dependabot.yml` configures
+that one ecosystem. Minor and patch bumps arrive as one weekly PR. Majors arrive
+individually.
 
-Bun dependencies group minor and patch bumps into one PR. Majors arrive
-individually. A vitest or `@types/node` major deserves a read, not a merge.
-Workflow actions group the same way.
+### Bun dependencies are updated by hand
 
-`typescript` is on the ignore list. Three reasons make the bump deliberate
-rather than routine. The version is pinned exactly. Analysis talks to
-`typescript/unstable/async`, a dev-build API. The tsgo version joins the config
-hash that keys the cache, so a new compiler can change the report. Bump it by
-hand, then re-run the determinism job. Non-negotiable §2 covers the move to a
-stable 7.1.
+Dependabot cannot read this repo's lockfile. Its bun updater supports
+`lockfileVersion` up to 1. Bun >=1.4 writes version 2, and the updater fails the
+job:
+
+```
+Dependabot::DependencyFileNotSupported
+Unsupported bun.lock 'lockfileVersion' 2 in /bun.lock.
+The bun version Dependabot runs supports up to 1.
+```
+
+So bump `xxhash-wasm`, `@types/node` and `vitest` by hand. A vitest or
+`@types/node` major deserves a read, not a merge. `.github/dependabot.yml`
+carries the entry to restore once Dependabot reads version 2.
+
+The entry is removed rather than commented in place. A weekly job that always
+fails teaches readers to ignore a red mark.
+
+### Never let Dependabot bump `typescript`
+
+Three reasons make that bump deliberate rather than routine. The version is
+pinned exactly. Analysis talks to `typescript/unstable/async`, a dev-build API.
+The tsgo version joins the config hash that keys the cache, so a new compiler can
+change the report. Bump it by hand, then re-run the determinism job.
+Non-negotiable §2 covers the move to a stable 7.1.
 
 ## Non-negotiables
 
