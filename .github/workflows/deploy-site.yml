@@ -33,7 +33,7 @@ jobs:
       # it the action only *reads* the Pages config and fails with a bare
       # "Not Found" when nobody has clicked Settings -> Pages -> GitHub Actions,
       # which is how every run of this workflow failed for its first week.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         with:
           enablement: true
       - uses: oven-sh/setup-bun@v2
