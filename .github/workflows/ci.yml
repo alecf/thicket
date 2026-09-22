@@ -246,7 +246,7 @@ jobs:
 
       # Handed to the smoke matrix below, which runs each of these on a machine
       # that can actually execute it.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: artifacts
           path: |
@@ -359,7 +359,7 @@ jobs:
         run: |
           test -s report.md
           grep -q '^# thicket report' report.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: report-${{ strategy.job-index }}
           path: report.md
