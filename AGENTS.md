@@ -41,6 +41,22 @@ bunx vitest run tests/path/to/one.test.ts   # single file
 Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; the
 bundled JS fallback shipped in the npm package still runs under Node ≥24.
 
+## Dependency updates
+
+Dependabot opens weekly PRs for two ecosystems. `.github/dependabot.yml`
+configures both.
+
+Bun dependencies group minor and patch bumps into one PR. Majors arrive
+individually. A vitest or `@types/node` major deserves a read, not a merge.
+Workflow actions group the same way.
+
+`typescript` is on the ignore list. Three reasons make the bump deliberate
+rather than routine. The version is pinned exactly. Analysis talks to
+`typescript/unstable/async`, a dev-build API. The tsgo version joins the config
+hash that keys the cache, so a new compiler can change the report. Bump it by
+hand, then re-run the determinism job. Non-negotiable §2 covers the move to a
+stable 7.1.
+
 ## Non-negotiables
 
 ### 1. Determinism is a correctness property

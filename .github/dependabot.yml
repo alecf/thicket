@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # Runtime and test dependencies. Minor and patch bumps arrive as one grouped
+  # PR; majors come individually, because vitest 4 and @types/node 25 each
+  # need a look rather than a merge.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+    groups:
+      dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # `typescript` is pinned exactly on purpose, and analysis talks to
+      # `typescript/unstable/async` — a dev-build API on a path named
+      # `unstable`. A compiler bump changes how the tree parses and how
+      # imports resolve, and the tsgo version joins the config hash that keys
+      # the cache, so it can change the report. Moving to a stable 7.1 is the
+      # one-file migration AGENTS.md §2 describes, not a routine update. Bump
+      # it by hand and re-run the determinism job.
+      - dependency-name: typescript
+
+  # Workflow actions are pinned to release tags, so Dependabot rewrites the
+  # tag in place.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
