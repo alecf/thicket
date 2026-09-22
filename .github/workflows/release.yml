@@ -25,7 +25,7 @@ jobs:
       # own job, below.
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           # Pinned exactly, unlike ci.yml's floating "1.4". `bun build
@@ -105,7 +105,7 @@ jobs:
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: release-artifacts
@@ -143,7 +143,7 @@ jobs:
       HAS_TAP_TOKEN: ${{ secrets.TAP_TOKEN != '' }}
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
