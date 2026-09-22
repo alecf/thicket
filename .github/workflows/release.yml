@@ -71,7 +71,7 @@ jobs:
       - name: Render the reference report the smoke jobs compare against
         run: bun run thicket --config tests/fixtures/sample/tsconfig.json --no-cache > from-source.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-artifacts
           path: |
