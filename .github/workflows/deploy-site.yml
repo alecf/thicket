@@ -28,7 +28,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # `enablement: true` provisions Pages from the workflow itself. Without
       # it the action only *reads* the Pages config and fails with a bare
       # "Not Found" when nobody has clicked Settings -> Pages -> GitHub Actions,
