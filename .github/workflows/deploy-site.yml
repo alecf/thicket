@@ -47,7 +47,7 @@ jobs:
       - run: bun run site:build
       - run: bunx vitest run tests/site.test.ts
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site/dist
 
