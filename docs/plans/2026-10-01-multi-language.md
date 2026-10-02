@@ -20,7 +20,7 @@ Recorded 2026-10-02.
 |---|---|---|---|
 | D1 | How far does this go in the TypeScript codebase? | Phases 0 and 1 only. | thicket will be rewritten in Go once TypeScript 7.1 ships a Go API. Phase 0's profile and Phase 1's measurements carry over. Frontend code would be written twice. |
 | D2 | Which language comes first? | Python. | Python has real import cycles, so all three pillars apply. `if TYPE_CHECKING:` maps onto the existing type-only edge logic. It tests the shared core harder than Go does. |
-| D3 | What does a repo with several languages get? | One merged report. | One file for the agent to read. Cross-language cycles cannot exist, so tangle sections merge with no special case. Each finding names its language. |
+| D3 | What does a repo with several languages get? | One merged report. | One file for the agent to read. Each finding names its language. Each language gets its own module graph (§3). |
 | D4 | How is Go source parsed? | `go/parser` and `go/ast` from the Go standard library. | The rewrite gets an exact Go parser for free. No cgo and no grammar files. Python is the only tree-sitter language. |
 | D5 | Where do Go import edges come from? | Parse `go.mod` and map import paths to directories. No Go toolchain. | The report stays a pure function of the source. `go list` would make the installed Go version an input to the report. |
 | D6 | What replaces the empty cycle section for Go? | A coupling measure: propagation cost and the most depended-on packages. | Go forbids import cycles between packages. An empty section reads as "no problem found". `src/graph/metrics.ts` already computes propagation cost. |
@@ -118,6 +118,8 @@ interface LanguageProfile {
 Two rules for the interface:
 
 - **Kinds are namespaced strings**, as `go:CallExpr` or `py:call`. A kind from one language must never hash the same as a kind from another. Merged reports (D3) then cluster correctly with no special case.
+- **A frontend refines a kind with node context before the kind enters the stream.** Some rules cannot be decided from a grammar kind alone. A Python class is a type declaration only if it has `@dataclass` or a `TypedDict` base. A Go `FieldList` is ignored only in parameter position. So the Python frontend writes such a class as `py:type_class`, and the Go frontend writes a parameter list as `go:Params`. Profile predicates then stay kind-only. The token stream carries the distinction, so the hashes see it too.
+- **Graph nodes are namespaced by language.** Each language builds its own module graph, with module ids such as `py:src/a`. Merging the graphs under directory grouping would invent cycles. A TypeScript edge `a → b` and a Python edge `b → a` form an SCC that neither language has. The guard that refuses a cut with no file-level cycle beneath it would hide the cut, but the false SCC would still be reported.
 - **TypeScript keeps matching by enum value inside its profile.** The `SyntaxKind` alias hazard (AGENTS.md §3) stays sealed in the TypeScript profile. Nothing outside it sees a numeric kind.
 
 `Project` stays as it is. `ImportDetail` gains `deferred` for Python (D8). `erased` is always 0 for Go.
@@ -183,7 +185,7 @@ The vitest runner iterates the directories in `compareStrings` order. Delete eac
 
 **Steps:**
 1. Parse a sample Python repository with `web-tree-sitter` and the Python grammar.
-2. Emit L0 and L1 token streams with no profile rules at all. Named nodes become kinds. Identifiers and literals follow the current `Id:` and literal token forms.
+2. Emit L0 and L1 token streams with no profile rules at all. Named nodes become kinds, prefixed `py:`. Identifiers and literals follow the current `Id:` and literal token forms.
 3. Feed `clusterFragments` and the ranker. Record the top 40 findings.
 4. Classify each finding as actionable, idiom, or noise. Record the counts.
 
@@ -204,7 +206,7 @@ Write the D7 resolver as a prototype. Cover `pyproject.toml` roots, the `src/` l
 **Files:**
 - Create: `prototypes/go-baseline.ts`
 
-Same steps as Task 1.1, with the tree-sitter Go grammar. The rewrite uses `go/ast` (D4), but token streams from both parsers are close enough to answer these questions:
+Same steps as Task 1.1, with the tree-sitter Go grammar and the `go:` prefix. The rewrite uses `go/ast` (D4), but token streams from both parsers are close enough to answer these questions:
 
 - How many of the top 40 are `if err != nil { return …, err }`? The answer decides D9.
 - Do keyed struct literals need to be name holders? Count the findings whose copies differ only in field keys.
@@ -248,6 +250,7 @@ These phases are not built in TypeScript (D1). They record the design so the rew
 3. `--config <tsconfig>` keeps working and implies `--language typescript`.
 4. Sort discovered projects with the ordering rule from AGENTS.md §1. Test it with adversarial data.
 5. Emit one report (D3). Every finding names its language. Findings from all languages share the slot budget, ranked on the same arithmetic.
+6. Build one module graph per language, with namespaced module ids (§3). Run Tarjan on each. The tangle section lists the SCCs from all of them. Add a fixture where two directories each hold TypeScript and Python files with opposing edges. Assert it reports no cycle.
 
 ## Phase 3: Python
 
@@ -258,7 +261,7 @@ Fill every `LanguageProfile` method. Pass every golden-file case. Expected answe
 - **Test paths:** `test_*.py`, `*_test.py`, `tests/`, `conftest.py`.
 - **Name holders:** `keyword_argument`, `pair` keys in dict literals, class-body assignments.
 - **Literals:** `string` including f-string content, `integer`, `float`, `true`, `false`, `none`. Apply the keyword-position rule from `callsite.ts`: `None` as a keyword argument value is data. `None` inside an expression is not.
-- **Type declarations:** classes decorated `@dataclass`, and classes deriving `TypedDict`, `NamedTuple`, `Protocol` or `BaseModel`.
+- **Type declarations:** the frontend writes a class as `py:type_class` when it is decorated `@dataclass` or derives `TypedDict`, `NamedTuple`, `Protocol` or `BaseModel` (§3). The profile marks `py:type_class` as a type kind. Bases are matched by name, since tree-sitter cannot resolve them.
 - **Generated code:** `_pb2.py` banners. Confirm the existing sniff catches them.
 
 ### Task 3.2: Python import resolution
@@ -291,7 +294,7 @@ Fill every method against `go/ast` node types. Pass every golden-file case. Expe
 - **Test paths:** `_test.go`, `testdata/`.
 - **Name holders:** `KeyValueExpr` keys in composite literals, struct `Field` names, interface method names.
 - **Type declarations:** `TypeSpec` with a `StructType` or `InterfaceType`.
-- **Ignored kinds:** `ImportSpec`, the package clause, `FieldList` in parameter position.
+- **Ignored kinds:** `ImportSpec`, the package clause, and `go:Params`. The frontend writes a `FieldList` in parameter position as `go:Params` (§3).
 - **Generated code:** the existing banner sniff already matches `// Code generated … DO NOT EDIT.` Add a golden-file case to prove it.
 
 ### Task 4.2: The `if err != nil` idiom
