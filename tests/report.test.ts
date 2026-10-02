@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { findingId } from "../src/report/findings.js";
-import { canonicalKind } from "../src/report/kinds.js";
+import { canonicalKind } from "../src/lang/typescript/kinds.js";
 import {
   renderMarkdown,
   type ReportInput,

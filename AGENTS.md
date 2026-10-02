@@ -14,6 +14,7 @@ Work is tracked in [`docs/plans/2026-08-09-thicket-v1.md`](docs/plans/2026-08-09
 
 ```
 src/extract/     TS API adapter, fragment extraction, import resolution
+src/lang/        language profiles: the rules that name syntax kinds
 src/fingerprint/ normalization ladder (L0/L1), hashing, clustering
 src/graph/       module grouping, Tarjan SCC, propagation cost
 src/cache/       node:sqlite content-addressed store

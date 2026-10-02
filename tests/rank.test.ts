@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isTestPath, rankClusters, rationalPow, subsume } from "../src/report/rank.js";
+import { typescript } from "../src/lang/typescript/profile.js";
+import { rankClusters, rationalPow, subsume } from "../src/report/rank.js";
 import type { Cluster } from "../src/fingerprint/cluster.js";
 
 /**
@@ -278,12 +279,12 @@ describe("rankClusters: data tables versus missing abstractions", () => {
 
 describe("isTestPath", () => {
   it("recognizes common test conventions", () => {
-    expect(isTestPath("src/a.test.ts")).toBe(true);
-    expect(isTestPath("src/a.spec.tsx")).toBe(true);
-    expect(isTestPath("tests/a.ts")).toBe(true);
-    expect(isTestPath("src/__tests__/a.ts")).toBe(true);
-    expect(isTestPath("src/attest.ts")).toBe(false);
-    expect(isTestPath("src/latest/a.ts")).toBe(false); // must not match "test" inside a word
+    expect(typescript.isTestPath("src/a.test.ts")).toBe(true);
+    expect(typescript.isTestPath("src/a.spec.tsx")).toBe(true);
+    expect(typescript.isTestPath("tests/a.ts")).toBe(true);
+    expect(typescript.isTestPath("src/__tests__/a.ts")).toBe(true);
+    expect(typescript.isTestPath("src/attest.ts")).toBe(false);
+    expect(typescript.isTestPath("src/latest/a.ts")).toBe(false); // must not match "test" inside a word
   });
 });
 

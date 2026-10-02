@@ -1,4 +1,4 @@
-import { isTypeKind } from "./kinds.js";
+import { typescript } from "../lang/typescript/profile.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
 /**
@@ -60,7 +60,7 @@ export function census(ranked: readonly Ranked[], cycles: number): Census {
     // would actually hold rather than a fourth categorization of its own.
     if (isTestMajority(r.cluster)) {
       testDuplication += 1;
-    } else if (isTypeKind(r.cluster.kind)) {
+    } else if (typescript.isTypeKind(r.cluster.kind)) {
       typeDuplication += 1;
     } else {
       duplication += 1;

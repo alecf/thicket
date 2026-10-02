@@ -1,61 +1,6 @@
-import { SyntaxKind } from "typescript/unstable/ast";
 import type { FileHandle, Node } from "../extract/types.js";
 import { forEachChildSafe, safeText } from "../extract/traverse.js";
-
-/**
- * Kinds carrying no refactoring signal, matched by enum VALUE.
- *
- * Two groups:
- *
- *  - **Import/export boilerplate**, structurally identical in every file.
- *    Without this filter the entire top of the report is `ImportDeclaration`
- *    (PRD §2.4 / §5.1).
- *  - **Binding and parameter forms**, which are not extractable at all. A
- *    destructuring pattern is a shape, not code: there is no refactor that
- *    turns two matching `ObjectBindingPattern`s into one. On a real
- *    application these took two of the top five slots, and the top one was a
- *    destructured parameter list repeated across 136 files — which is what
- *    passing the same seven things around looks like, not a duplication a
- *    reader can act on.
- *
- * Matched by value because `SyntaxKind` is reverse-mapped and range-marker
- * aliases can win the reverse lookup, so name matching silently misses cases
- * (PRD §2.4). None of these are shadowed today; keying on the value means a
- * future one cannot quietly slip through.
- */
-const IGNORED_KINDS: ReadonlySet<number> = new Set<number>([
-  SyntaxKind.ImportDeclaration,
-  SyntaxKind.ImportClause,
-  SyntaxKind.NamedImports,
-  SyntaxKind.ImportSpecifier,
-  SyntaxKind.ExportDeclaration,
-  SyntaxKind.ExportSpecifier,
-  SyntaxKind.NamedExports,
-  SyntaxKind.ExportAssignment,
-  SyntaxKind.ObjectBindingPattern,
-  SyntaxKind.ArrayBindingPattern,
-  SyntaxKind.BindingElement,
-  SyntaxKind.Parameter,
-]);
-
-/**
- * Literal kinds, matched by enum VALUE rather than by reverse-mapped name.
- *
- * SyntaxKind is a reverse-mapped enum containing range-marker aliases, and the
- * alias can win the reverse map: `SyntaxKind[SyntaxKind.NumericLiteral]` is
- * `"FirstLiteralToken"` and `SyntaxKind[SyntaxKind.NoSubstitutionTemplateLiteral]`
- * is `"FirstTemplateToken"`. A `name.endsWith("Literal")` test therefore misses
- * both, which drops their values from the L0 token stream and leaves L0 -- the
- * level whose whole job is exactness -- unable to tell `scale(p, 2)` from
- * `scale(p, 3)`. That is a false-positive generator, not a cosmetic slip.
- */
-const LITERAL_KINDS: ReadonlySet<number> = new Set<number>([
-  SyntaxKind.NumericLiteral,
-  SyntaxKind.BigIntLiteral,
-  SyntaxKind.StringLiteral,
-  SyntaxKind.NoSubstitutionTemplateLiteral,
-  SyntaxKind.RegularExpressionLiteral,
-]);
+import { typescript } from "../lang/typescript/profile.js";
 
 export interface Fragment {
   filePath: string;
@@ -138,7 +83,7 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
 
   const visit = (node: Node, parentId: number): Result => {
     const id = counter++;
-    const kind = SyntaxKind[node.kind] ?? `Unknown${node.kind}`;
+    const kind = typescript.kindName(node.kind);
     const l0: string[] = [kind];
     const l1: string[] = [kind];
     let nodeCount = 1;
@@ -157,19 +102,19 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
     });
 
     if (childCount === 0) {
-      if (node.kind === SyntaxKind.Identifier) {
+      if (typescript.isIdentifier(node.kind)) {
         const text = safeText(node);
         l0[0] = `Id:${text}`;
         l1[0] = `Id:${text}`; // renumbered fragment-locally in normalize()
         identifiers = 1;
-      } else if (LITERAL_KINDS.has(node.kind)) {
+      } else if (typescript.isLiteral(node.kind)) {
         l0[0] = `${kind}:${safeText(node)}`;
         l1[0] = kind; // L1 keeps literal KIND, drops the value
         literals = 1;
       }
     }
 
-    if (nodeCount >= opts.minNodes && !IGNORED_KINDS.has(node.kind)) {
+    if (nodeCount >= opts.minNodes && !typescript.isIgnored(node.kind)) {
       const start = node.getStart();
       const end = node.getEnd();
       const named = identifiers + literals;

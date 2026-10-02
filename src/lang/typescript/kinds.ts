@@ -1,5 +1,5 @@
 import { SyntaxKind } from "typescript/unstable/ast";
-import { compareStrings } from "../order.js";
+import { compareStrings } from "../../order.js";
 
 /**
  * Alias -> canonical SyntaxKind name, derived from the enum itself at load.
