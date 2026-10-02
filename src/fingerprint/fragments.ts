@@ -83,7 +83,7 @@ export function extractFragments(file: FileHandle, opts: ExtractOptions): Fragme
 
   const visit = (node: Node, parentId: number): Result => {
     const id = counter++;
-    const kind = typescript.kindName(node.kind);
+    const kind = typescript.kindName(node);
     const l0: string[] = [kind];
     const l1: string[] = [kind];
     let nodeCount = 1;

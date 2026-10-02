@@ -1,3 +1,5 @@
+import type { Node } from "../extract/types.js";
+
 /**
  * Everything the language-neutral pipeline needs to ask about one language.
  *
@@ -14,13 +16,19 @@
  */
 export interface LanguageProfile {
   /**
-   * The name a node kind is written as in the token stream.
+   * The name a node is written as in the token stream.
+   *
+   * Takes the node, not just its kind, because some rules need context the
+   * kind lacks. A Python class is a type declaration only with `@dataclass`
+   * or a `TypedDict` base. A frontend encodes that here, as a refined name.
+   * The predicates below then stay kind-only, and the hashes see the
+   * distinction too.
    *
    * Feeds the hashes that make cluster ids, so it must be stable for a given
    * parser version. It need not be readable: `canonicalKind` fixes it for
    * display.
    */
-  kindName(kind: number): string;
+  kindName(node: Node): string;
   /** True for a leaf whose text is a name. L1 α-renames these. */
   isIdentifier(kind: number): boolean;
   /** True for a leaf whose text is a value. L0 keeps it and L1 drops it. */

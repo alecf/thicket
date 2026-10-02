@@ -200,7 +200,7 @@ const FENCE_LANGUAGE: ReadonlyMap<string, string> = new Map([
 ]);
 
 export const typescript: LanguageProfile = {
-  kindName: (kind) => SyntaxKind[kind] ?? `Unknown${kind}`,
+  kindName: (node) => SyntaxKind[node.kind] ?? `Unknown${node.kind}`,
   isIdentifier: (kind) => kind === SyntaxKind.Identifier,
   isLiteral: (kind) => LITERAL_KINDS.has(kind),
   isIgnored: (kind) => IGNORED_KINDS.has(kind),
