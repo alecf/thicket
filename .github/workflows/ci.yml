@@ -46,11 +46,14 @@ jobs:
       # AGENTS.md §2: the TypeScript API is reached only through the adapter
       # and the TypeScript language profile. A rule elsewhere that names a
       # SyntaxKind cannot be answered for a second language. Matching the
-      # import is enough, because SyntaxKind cannot be used without it.
+      # import is enough, because SyntaxKind cannot be used without it. The
+      # pattern covers both quote styles, `export … from`, a bare side-effect
+      # import, `import()` and `require()`. It skips a plain "typescript"
+      # string, such as a language id.
       - name: TypeScript API only in the adapter and profile
         run: |
           set -uo pipefail
-          hits=$(grep -rnE 'from "typescript(/|")' src/ | grep -vE '^src/(extract|lang/typescript)/' || true)
+          hits=$(grep -rnE "(from|import|require)[[:space:]]*\(?[[:space:]]*['\"]typescript(/|['\"])" src/ | grep -vE '^src/(extract|lang/typescript)/' || true)
           if [ -n "$hits" ]; then
             echo "$hits"
             echo "::error::TypeScript API imported outside src/extract/ and src/lang/typescript/ (AGENTS.md §2)"
