@@ -12,7 +12,10 @@ export interface Ranked {
   tag: Tag;
   /** Median span of one copy, in lines. */
   linesPerCopy: number;
-  /** Lines a successful extraction would remove; the score before weighting. */
+  /**
+   * Lines a successful extraction would remove. Printed for the reader, who
+   * can calibrate lines. The score measures size in nodes. See `sizeTerm`.
+   */
   recoverableLines: number;
   /**
    * A few lines of the first occurrence's source. Attached after ranking, by
@@ -97,6 +100,35 @@ function tagOf(cluster: Cluster): Tag {
 }
 
 const LEVEL_WEIGHT: Record<string, number> = { L0: 1.0, L1: 0.9 };
+
+/**
+ * How fast the score grows with the size of one copy, in AST nodes.
+ *
+ * Above 1, so one long clone outranks many short shapes. A linear score
+ * ranked 50 copies of a 4-line shape above two copies of a 100-line function.
+ * A short shape saves little per copy, and each copy still pays for an import
+ * and a call. A long clone also drifts in more ways.
+ *
+ * Fitted against blind judgements of 243 candidates from two large codebases.
+ * Each judge rated whether consolidating one finding was worth it, 0 to 3.
+ * The linear score's top 40 had nDCG 0.48 against those ratings, and this curve
+ * scores 0.73. Exponents from 1.5 to 2 and count ratios from 0.4 to 0.6 all
+ * landed between 0.68 and 0.74, so the exact values are not load-bearing.
+ */
+const SIZE_EXPONENT = 1.5;
+
+/**
+ * How fast the score grows with the number of copies, by match level.
+ *
+ * Below 1, so repetition counts with diminishing returns. Lower at L1,
+ * because a renamed copy needs parameters and an exact copy needs none. The
+ * judges rated small L1 shapes 0.75 of 3, and half of them "leave it". They
+ * rated small L0 shapes 1.27, and one in fifteen "leave it". A flat level
+ * weight of 0.9 could not separate the two. A shared count exponent pushed
+ * every small L0 shape out of the top 40, and the report is meant to keep
+ * surfacing copy-paste.
+ */
+const COUNT_EXPONENT: Record<string, number> = { L0: 0.9, L1: 0.6 };
 
 /**
  * Repetitions of one shape within a single file that still count toward score.
@@ -288,13 +320,8 @@ export function rankClusters(
 
       // Lines that actually disappear. Each copy collapses to a one-line call,
       // so a copy is worth `linesPerCopy - 1`, and the surviving definition
-      // costs its own body plus a signature.
-      //
-      // Size and count enter exactly once each. The previous formula had size
-      // linear and count effectively superlinear -- `(copies - 1)` multiplied
-      // again by `log2(1 + copies)` -- which inverted the judgement the report
-      // exists to support: 25 copies of a 4-line block outscored a 22-line
-      // function duplicated across two packages by 8.5x.
+      // costs its own body plus a signature. The report prints this. It does
+      // not rank by it: see `sizeTerm`.
       const recoverableLines = Math.max(
         0,
         (copies - 1) * (linesPerCopy - 1) - EXTRACTION_OVERHEAD,
@@ -313,7 +340,7 @@ export function rankClusters(
           : fileRoleConvention(cluster);
 
       const score =
-        recoverableLines *
+        sizeTerm(cluster, copies, linesPerCopy) *
         spread *
         (LEVEL_WEIGHT[cluster.level] ?? 0.8) *
         testWeight *
@@ -330,6 +357,30 @@ export function rankClusters(
       };
     })
     .sort((a, b) => b.score - a.score || compareStrings(a.cluster.id, b.cluster.id));
+}
+
+/**
+ * The part of the score that depends on how big the duplication is.
+ *
+ * Size is in AST nodes, the cluster's smallest copy. Lines depend on
+ * formatting, and a dense 4-line block can hold 40 nodes. Ranking on nodes
+ * alone scored no better than lines: dense small shapes rose with it. The
+ * gain came from the exponents. Lines still decide one thing. A one-line
+ * shape scores zero however often it repeats, because the call that replaces
+ * each copy is itself a line.
+ *
+ * Size and count no longer trade one for one. The previous score was
+ * `(copies - 1) x (lines - 1)`, which counted lines removed and ignored what
+ * the shared version adds back. Before that, count entered twice, and 25
+ * copies of a 4-line block outscored a 22-line function duplicated across two
+ * packages by 8.5x.
+ */
+function sizeTerm(cluster: Cluster, copies: number, linesPerCopy: number): number {
+  if (linesPerCopy <= 1) return 0;
+  return (
+    (copies - 1) ** (COUNT_EXPONENT[cluster.level] ?? COUNT_EXPONENT.L1!) *
+    cluster.nodeCount ** SIZE_EXPONENT
+  );
 }
 
 /**

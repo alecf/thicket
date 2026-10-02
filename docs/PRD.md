@@ -240,12 +240,16 @@ Report slots are scarce by two orders of magnitude (§1.1), so ranking *is* the 
 
 ```
 copies = min(occurrences, 10 × distinct_files)   # cap intra-file repetition
-score  = fragment_size × (copies − 1)            # nodes deletable by extracting
-       × log2(1 + copies)                        # widespread > paired
+score  = nodes^1.5 × (copies − 1)^k              # k = 0.9 at L0, 0.6 at L1; 0 for a one-line shape
        × spread                                  # 2.5 cross-module · 1.4 cross-file · 0.8 intra-file
-       × level_weight                            # L0 > L1 > L3
-       × test_weight                             # [test] down-weighted, [mixed] not
+       × level_weight                            # L0 1.0 · L1 0.9
+       × test_weight                             # by source share of the copies
+       × sibling, convention, drift weights      # data tables, file-role conventions, key drift
 ```
+
+**Size and count do not trade one for one.** A linear score ranked 50 copies of a 4-line shape above two copies of a 100-line function. That counts the lines an extraction removes and ignores what it adds back: an import and a call at every copy, and parameters on the shared version. So size grows faster than linearly and count grows slower. Count grows slowest at L1, because a renamed copy needs parameters and an exact copy needs none.
+
+The exponents come from blind judgements. Sonnet agents rated 243 candidates from two large codebases, 0 to 3, on whether consolidating each was worth it. Double-rated candidates agreed exactly 38 times in 43. Against those ratings the linear score's top 40 had nDCG 0.48. This curve has 0.73. The judges rated small L1 shapes 0.75 and small L0 shapes 1.27. A shared count exponent pushed every small L0 shape out of the top 40, which is why the exponent depends on the level. Size exponents from 1.5 to 2 and count ratios from 0.4 to 0.6 all scored between 0.68 and 0.74. The exact values are not load-bearing. Size is in AST nodes, because line counts depend on formatting. Nodes alone scored no better than lines did. The gain came from the exponents.
 
 **The copy cap is the one non-obvious term**, and it was added only after measuring against real repositories. A shape repeated 99 times inside a single file is a data table, not a missing abstraction — but raw mass endorses it: on one repo a 99-copy, 21-node `PropertyAssignment` from one config literal outscored an 8-copy, 109-node function duplicated across eight route files by **12306 to 2612** (2058 deletable nodes against 763). No spread multiplier small enough to be honest overcomes a 12× count difference, so the count itself is capped. The cap binds on **under 3% of candidates** on every repository measured — it removes the pathology without reordering everything else.
 

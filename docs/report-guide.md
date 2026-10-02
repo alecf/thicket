@@ -130,12 +130,17 @@ export class BMIObservation extends VitalObservation {
 
 `recoverable` is `(copies − 1) × (linesPerCopy − 1) − 2`: what a successful
 extraction deletes, assuming each copy collapses to a one-line call and the
-surviving definition costs a signature and a brace. It is the number findings
-are ranked on.
+surviving definition costs a signature and a brace.
 
-Note what this implies: **a 6-line shape repeated 231 times outranks a 30-line
-clone repeated twice, and that is correct.** Do not dismiss a finding for having
-small copies.
+Findings are not ranked on it. The rank grows faster than linearly with the size
+of one copy, and slower than linearly with the number of copies. A short shape
+saves little per copy, and every copy still pays for an import and a call. So
+two copies of a 100-line function outrank 50 copies of a 4-line shape.
+
+Exact copies (`L0`) keep more weight per copy than renamed ones (`L1`). An exact
+copy needs no parameters. So **a 6-line shape copied verbatim 231 times still
+outranks a 30-line clone repeated twice, and that is correct.** Do not dismiss
+an `L0` finding for having small copies.
 
 ### `L0` / `L1` — the level
 

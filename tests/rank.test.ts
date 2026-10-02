@@ -91,26 +91,52 @@ describe("rankClusters: intra-file repetition", () => {
 });
 
 describe("rankClusters: size is what makes a duplication worth fixing", () => {
-  it("weighs one more copy the same as one more line", () => {
-    // Size and count each enter the score exactly once. The previous formula
-    // had count in twice -- `(copies - 1)` multiplied again by
-    // `log2(1 + copies)` -- and size once, which inverted the judgement the
-    // report exists to support: on a real repository 25 copies of a 4-line
-    // block outscored a 22-line function duplicated across two packages by
-    // 8.5x, and the finding most obviously worth acting on ranked 28th.
-    //
-    // Held at equal spread and equal parentage, so only the trade this
-    // asserts is in play.
-    const at = (copies: number, lines: number) =>
-      rankClusters([
-        cluster({
-          id: "c",
-          occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, lines)),
-        }),
-      ])[0]!.score;
-    // (copies - 1) x (lines - 1): 4 copies of 7 lines and 7 copies of 4 lines
-    // both recover 18 lines, so neither dimension may dominate the other.
-    expect(at(4, 7)).toBe(at(7, 4));
+  /** One copy per file, so spread and parentage are equal and only size and count are in play. */
+  const spread = (id: string, level: "L0" | "L1", copies: number, lines: number, nodeCount: number) =>
+    cluster({
+      id,
+      level,
+      nodeCount,
+      occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, lines)),
+    });
+  const score = (c: Cluster) => rankClusters([c])[0]!.score;
+
+  it("ranks a large clone above many copies of a small renamed shape", () => {
+    // Two copies of a 100-line function against fifty copies of a 4-line
+    // shape that matched only after renaming. The linear formula ranked the
+    // small shape first, by 145 recoverable lines to 97. Blind judges rated
+    // small L1 shapes 0.75 of 3 on two large codebases, and half of them
+    // "leave it": each copy needs an import and parameters, which costs about
+    // what it saves.
+    const clone = spread("clone", "L0", 2, 100, 500);
+    const idiom = spread("idiom", "L1", 50, 4, 20);
+    expect(rankClusters([idiom, clone])[0]!.cluster.id).toBe("clone");
+  });
+
+  it("gives exact copy-paste more weight per copy than a renamed shape", () => {
+    // The judges rated small L0 shapes 1.27 and small L1 shapes 0.75. An L0
+    // copy needs no parameters, so every extra copy is a cleaner win. The flat
+    // level weight alone separated the two by 1.11x.
+    const exact = score(spread("c", "L0", 50, 4, 20));
+    const renamed = score(spread("c", "L1", 50, 4, 20));
+    expect(exact / renamed).toBeGreaterThan(3);
+  });
+
+  it("still ranks heavily repeated copy-paste above a small two-copy clone", () => {
+    // AGENTS.md section 4: a 6-line shape repeated 231 times outranks a 30-line
+    // clone repeated twice, and it is right to. The count exponent may damp
+    // repetition, but not enough to bury copy-paste at that scale.
+    const slop = spread("slop", "L0", 231, 6, 30);
+    const clone = spread("clone", "L0", 2, 30, 150);
+    expect(rankClusters([clone, slop])[0]!.cluster.id).toBe("slop");
+  });
+
+  it("measures size in AST nodes, not lines", () => {
+    // Line count depends on formatting. Of two shapes with the same span, the
+    // denser one holds more logic.
+    const sparse = score(spread("c", "L0", 3, 6, 20));
+    const dense = score(spread("c", "L0", 3, 6, 60));
+    expect(dense).toBeGreaterThan(sparse);
   });
 
   it("scores a one-line shape at zero however often it repeats", () => {
@@ -119,21 +145,24 @@ describe("rankClusters: size is what makes a duplication worth fixing", () => {
     // above zero here is the report spending a slot to lose the reader lines.
     const oneLiner = cluster({
       id: "one",
+      nodeCount: 40,
       occurrences: Array.from({ length: 40 }, (_, i) => occ(`src/f${i}.ts`, 0, 60, 3, 1)),
     });
     expect(rankClusters([oneLiner])[0]!.score).toBe(0);
   });
 
-  it("grows with the size of the duplicated fragment", () => {
-    const at = (lines: number) =>
-      rankClusters([
-        cluster({
-          id: "c",
-          occurrences: [occ("src/a.ts", 0, 500, 1, lines), occ("src/b.ts", 0, 500, 1, lines)],
-        }),
-      ])[0]!.score;
-    expect(at(20)).toBeGreaterThan(at(10));
-    expect(at(10)).toBeGreaterThan(at(5));
+  it("grows faster than linearly with the size of the fragment", () => {
+    // A long clone drifts in more ways than a short one, so doubling the size
+    // must more than double the score.
+    const at = (nodes: number) => score(spread("c", "L0", 2, 20, nodes));
+    expect(at(200) / at(100)).toBeGreaterThan(2);
+    expect(at(100)).toBeGreaterThan(at(50));
+  });
+
+  it("grows more slowly than linearly with the number of copies", () => {
+    const at = (copies: number) => score(spread("c", "L1", copies, 8, 40));
+    expect(at(21)).toBeGreaterThan(at(11));
+    expect(at(21) / at(11)).toBeLessThan(2);
   });
 });
 
@@ -209,12 +238,13 @@ describe("isTestPath", () => {
 });
 
 describe("rankClusters", () => {
-  it("ranks higher mass first", () => {
+  it("ranks the larger fragment first", () => {
+    // "lo" sorts after "hi" by id, so only the node count can put it first.
     const ranked = rankClusters([
-      cluster({ id: "lo", mass: 10 }),
-      cluster({ id: "hi", mass: 100 }),
+      cluster({ id: "hi", nodeCount: 10 }),
+      cluster({ id: "lo", nodeCount: 100 }),
     ]);
-    expect(ranked[0]!.cluster.id).toBe("hi");
+    expect(ranked[0]!.cluster.id).toBe("lo");
   });
 
   it("ranks cross-directory duplication above intra-file", () => {

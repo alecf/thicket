@@ -299,9 +299,9 @@ describe("a report over repeated calls to one helper", () => {
   });
 
   it("would otherwise rank the call sites ABOVE the real duplication", async () => {
-    // What the suppression is worth. The call sites recover 13 lines on paper
-    // and the genuine clone recovers 6, so this is not a finding that would
-    // have sat harmlessly at the bottom -- it takes the top slot.
+    // What the suppression is worth. Eight call sites outscore the genuine
+    // clone, so this is not a finding that would have sat harmlessly at the
+    // bottom. It takes the top slot.
     const { markdown } = await runReport({ config, cache: false, includeCallSites: true });
     expect(markdown.indexOf("src/route-alpha.ts")).toBeLessThan(
       markdown.indexOf("src/report-one.ts"),
