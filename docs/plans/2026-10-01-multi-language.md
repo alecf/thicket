@@ -136,7 +136,7 @@ Two rules for the interface:
 
 **Steps:**
 1. Move `IGNORED_KINDS`, `LITERAL_KINDS`, `NAME_HOLDERS`, the type-declaration kinds, `TEST_PATTERN` and the fence map into the profile. Move the comments that justify them too.
-2. Thread the profile through to each caller. Pass it as an argument. Do not import it as a module singleton.
+2. Callers import the TypeScript profile directly. Passing it as an argument would serve a second language, and D1 keeps that out of this codebase. The `LanguageProfile` interface is the deliverable the rewrite ports.
 3. After the move, `grep -rn "SyntaxKind\|typescript/unstable" src` must match only `src/extract/` and `src/lang/typescript/`.
 4. Add that grep to CI next to the `localeCompare` check.
 
