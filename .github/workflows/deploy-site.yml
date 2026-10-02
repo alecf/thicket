@@ -39,6 +39,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4"
+      # vitest's bin has a `node` shebang, so Bun runs it on the runner's
+      # Node. vitest 5 needs Node 22.12 or later. Pin it, so the image's
+      # default cannot break the tests.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
 
       # The build itself needs nothing installed -- it is dependency-free.
       # The install is here so the site tests can run, which is what stops a
