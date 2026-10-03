@@ -102,8 +102,16 @@ interface LanguageFrontend {
   profile: LanguageProfile;
 }
 
+/** What fragment extraction walks. Replaces the TypeScript `SourceFileNode`. */
+interface SyntaxTree {
+  root: Node;                       // structural Node from src/extract/types.ts
+  text: string;
+  lineOf(pos: number): number;      // replaces getLineAndCharacterOfPosition
+}
+
 /** The rules downstream code asks about. Keyed on namespaced kind strings. */
 interface LanguageProfile {
+  kindName(node: Node): Kind;              // the only place a kind is named
   isIgnoredKind(kind: Kind): boolean;      // fragments.ts IGNORED_KINDS
   isLiteralKind(kind: Kind): boolean;      // fragments.ts LITERAL_KINDS
   isIdentifierKind(kind: Kind): boolean;
@@ -115,14 +123,26 @@ interface LanguageProfile {
 }
 ```
 
-Two rules for the interface:
+Rules for the interface:
 
-- **Kinds are namespaced strings**, as `go:CallExpr` or `py:call`. A kind from one language must never hash the same as a kind from another. Merged reports (D3) then cluster correctly with no special case.
-- **A frontend refines a kind with node context before the kind enters the stream.** Some rules cannot be decided from a grammar kind alone. A Python class is a type declaration only if it has `@dataclass` or a `TypedDict` base. A Go `FieldList` is ignored only in parameter position. So the Python frontend writes such a class as `py:type_class`, and the Go frontend writes a parameter list as `go:Params`. Profile predicates then stay kind-only. The token stream carries the distinction, so the hashes see it too.
-- **Graph nodes are namespaced by language.** Each language builds its own module graph, with module ids such as `py:src/a`. Merging the graphs under directory grouping would invent cycles. A TypeScript edge `a → b` and a Python edge `b → a` form an SCC that neither language has. The guard that refuses a cut with no file-level cycle beneath it would hide the cut, but the false SCC would still be reported.
+- **Kinds are namespaced, except TypeScript's.** A kind from one language must never hash the same as a kind from another. Python and Go kinds carry a prefix, as `py.call` or `go.CallExpr`. TypeScript kinds stay bare.
+  - **Bare TypeScript kinds keep every finding ID.** Kind names enter the L0 and L1 hashes. Those hashes are the cluster IDs behind every printed `THK-DUP` ID, and they break score ties. A `ts` prefix would change every ID and reorder ties, and no display-time stripping can undo that.
+  - **The separator is a dot, not a colon.** A colon marks a value token, as `Id:name` or `StringLiteral:"x"`. `isLiteralValue` in `src/report/callsite.ts` relies on that. A `py:call` kind would read as a literal value.
+  - **No prefixed kind can collide with a bare one.** Every TypeScript kind name is letters and digits only. Task 0.2 pins that with a test.
+  - Merged reports (D3) then cluster correctly with no special case.
+- **A frontend refines a kind with node context before the kind enters the stream.** Some rules cannot be decided from a grammar kind alone. A Python class is a type declaration only if it has `@dataclass` or a `TypedDict` base. A Go `FieldList` is ignored only in parameter position. So the Python frontend writes such a class as `py.type_class`, and the Go frontend writes a parameter list as `go.Params`. This happens in `kindName(node)`, which receives the whole node. Profile predicates then stay kind-only. The token stream carries the distinction, so the hashes see it too.
+- **Graph nodes are namespaced by language.** Each language builds its own module graph. Python and Go module ids carry a prefix, as `py:src/a`. TypeScript module ids stay bare, because cycle finding IDs hash the module names. Merging the graphs under directory grouping would invent cycles. A TypeScript edge `a → b` and a Python edge `b → a` form an SCC that neither language has. The guard that refuses a cut with no file-level cycle beneath it would hide the cut, but the false SCC would still be reported.
 - **TypeScript keeps matching by enum value inside its profile.** The `SyntaxKind` alias hazard (AGENTS.md §3) stays sealed in the TypeScript profile. Nothing outside it sees a numeric kind.
 
-`Project` stays as it is. `ImportDetail` gains `deferred` for Python (D8). `erased` is always 0 for Go.
+`Project` keeps its graph methods. `ImportDetail` gains `deferred` for Python (D8). `erased` is always 0 for Go.
+
+`FileHandle.sourceFile` cannot stay. It is a TypeScript `SourceFileNode`, so a Python frontend has nothing to put there. It becomes a `SyntaxTree`:
+
+- `Node` in `src/extract/types.ts` is already structural: a numeric kind, children, start, end and text. A tree-sitter node fits it, with its grammar symbol id as the kind. A `go/ast` node fits it in the rewrite.
+- `lineOf(pos)` replaces `getLineAndCharacterOfPosition`, which is the one other TypeScript call fragment extraction makes.
+- Extraction names every node through `profile.kindName(node)`. #21 already routes it there, so extraction never reads a kind name off the node itself.
+
+The `forEachChild` abort hazard (AGENTS.md §3) belongs to the TypeScript tree. Each frontend's `Node` must visit every child, and the golden-file contract checks it.
 
 ---
 
@@ -144,17 +164,19 @@ Two rules for the interface:
 
 **Verify:** `bun run typecheck`, `bun run test`, and the determinism job. Diff a reference report against `main`. It must be empty.
 
-### Task 0.2: Namespace kind strings
+### Task 0.2: Pin the TypeScript kind alphabet
 
 **Files:**
-- Modify: `src/fingerprint/fragments.ts`, `src/cache/db.ts`, `src/version.ts`
+- Create: `tests/lang/kind-alphabet.test.ts`
+
+TypeScript kinds stay bare (§3), so this task changes no hash, no finding ID and no cache row. It pins the property that makes bare kinds safe beside prefixed ones.
 
 **Steps:**
-1. Prefix every kind with `ts:` when it enters the token stream and the `ShapedFragment`.
-2. Strip the prefix wherever a kind is printed, so the report stays byte-identical.
-3. Bump the cache schema version, because cached rows hold unprefixed kinds.
+1. Write a test that calls `typescript.kindName` for every `SyntaxKind` value, plus one value outside the enum.
+2. Assert every name matches `/^[A-Za-z][A-Za-z0-9]*$/`. That rules out `.` and `:`, so no TypeScript kind can collide with `py.call` or read as a value token.
+3. Assert the out-of-enum value names as `Unknown<n>`, the fallback in the profile.
 
-**Verify:** `tests/cache-pipeline.test.ts` passes with cold and warm cluster lists deeply equal. The reference report diff is empty.
+**Verify:** Change the fallback to `Unknown:<n>` once and watch the test fail. The reference report diff is empty by construction.
 
 ### Task 0.3: Write the profile contract as golden files
 
@@ -185,7 +207,7 @@ The vitest runner iterates the directories in `compareStrings` order. Delete eac
 
 **Steps:**
 1. Parse a sample Python repository with `web-tree-sitter` and the Python grammar.
-2. Emit L0 and L1 token streams with no profile rules at all. Named nodes become kinds, prefixed `py:`. Identifiers and literals follow the current `Id:` and literal token forms.
+2. Emit L0 and L1 token streams with no profile rules at all. Named nodes become kinds, prefixed `py.`. Identifiers and literals follow the current `Id:` and literal token forms.
 3. Feed `clusterFragments` and the ranker. Record the top 40 findings.
 4. Classify each finding as actionable, idiom, or noise. Record the counts.
 
@@ -206,7 +228,7 @@ Write the D7 resolver as a prototype. Cover `pyproject.toml` roots, the `src/` l
 **Files:**
 - Create: `prototypes/go-baseline.ts`
 
-Same steps as Task 1.1, with the tree-sitter Go grammar and the `go:` prefix. The rewrite uses `go/ast` (D4), but token streams from both parsers are close enough to answer these questions:
+Same steps as Task 1.1, with the tree-sitter Go grammar and the `go.` prefix. The rewrite uses `go/ast` (D4), but token streams from both parsers are close enough to answer these questions:
 
 - How many of the top 40 are `if err != nil { return …, err }`? The answer decides D9.
 - Do keyed struct literals need to be name holders? Count the findings whose copies differ only in field keys.
@@ -261,7 +283,7 @@ Fill every `LanguageProfile` method. Pass every golden-file case. Expected answe
 - **Test paths:** `test_*.py`, `*_test.py`, `tests/`, `conftest.py`.
 - **Name holders:** `keyword_argument`, `pair` keys in dict literals, class-body assignments.
 - **Literals:** `string` including f-string content, `integer`, `float`, `true`, `false`, `none`. Apply the keyword-position rule from `callsite.ts`: `None` as a keyword argument value is data. `None` inside an expression is not.
-- **Type declarations:** the frontend writes a class as `py:type_class` when it is decorated `@dataclass` or derives `TypedDict`, `NamedTuple`, `Protocol` or `BaseModel` (§3). The profile marks `py:type_class` as a type kind. Bases are matched by name, since tree-sitter cannot resolve them.
+- **Type declarations:** the frontend writes a class as `py.type_class` when it is decorated `@dataclass` or derives `TypedDict`, `NamedTuple`, `Protocol` or `BaseModel` (§3). The profile marks `py.type_class` as a type kind. Bases are matched by name, since tree-sitter cannot resolve them.
 - **Generated code:** `_pb2.py` banners. Confirm the existing sniff catches them.
 
 ### Task 3.2: Python import resolution
@@ -294,7 +316,7 @@ Fill every method against `go/ast` node types. Pass every golden-file case. Expe
 - **Test paths:** `_test.go`, `testdata/`.
 - **Name holders:** `KeyValueExpr` keys in composite literals, struct `Field` names, interface method names.
 - **Type declarations:** `TypeSpec` with a `StructType` or `InterfaceType`.
-- **Ignored kinds:** `ImportSpec`, the package clause, and `go:Params`. The frontend writes a `FieldList` in parameter position as `go:Params` (§3).
+- **Ignored kinds:** `ImportSpec`, the package clause, and `go.Params`. The frontend writes a `FieldList` in parameter position as `go.Params` (§3).
 - **Generated code:** the existing banner sniff already matches `// Code generated … DO NOT EDIT.` Add a golden-file case to prove it.
 
 ### Task 4.2: The `if err != nil` idiom
