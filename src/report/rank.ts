@@ -1,4 +1,4 @@
-import type { Cluster, Occurrence } from "../fingerprint/cluster.js";
+import type { Cluster, Level, Occurrence } from "../fingerprint/cluster.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
 import type { CoLocated, Variant } from "./variants.js";
@@ -60,6 +60,191 @@ export interface Ranked {
   fileRole?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Ranking knobs
+//
+// Every constant that moves a duplication score lives in this block. The
+// score of one cluster is
+//
+//   score = (copies - 1)^COUNT_EXPONENT[level] * nodes^SIZE_EXPONENT
+//         * SPREAD_WEIGHT[reach]
+//         * LEVEL_WEIGHT[level]
+//         * test weight      TEST_FLOOR .. 1, by source share of the copies
+//         * sibling weight   SIBLING_FLOOR .. 1, by distinct parent nodes
+//         * CONVENTION_FLOOR when the copies are one per file of one role
+//         * drift weight     FIELD_DRIFT_FLOOR .. 1, by field names that differ
+//
+// where `copies` is capped at MAX_COPIES_PER_FILE per file, `nodes` is the
+// smallest copy's AST node count, and a shape of at most MAX_UNSCORED_LINES
+// lines scores zero. The drift weight is applied later, by `reweight` in
+// run.ts, to the top candidates of each section.
+//
+// Only ratios matter. Every term multiplies. Doubling all three SPREAD_WEIGHT
+// values changes no order, and neither does doubling both LEVEL_WEIGHT values.
+// Scaling both exponents by one factor changes only how hard the other
+// weights bite. The trade between size and count is the ratio
+// COUNT_EXPONENT / SIZE_EXPONENT.
+//
+// Each constant's comment records how it was set and what it was measured
+// against. Before moving one, re-rank real repositories and check the new
+// order against judged findings. AGENTS.md section 4 describes that check.
+//
+// Knobs that decide what is printed rather than how it scores live in run.ts:
+// RERANK_POOL, TEST_FINDINGS_SHARE, TYPE_FINDINGS_SHARE, and
+// MAX_COPIES_COMPARED. Deduplication between findings is SUBSUME_OVERLAP,
+// below `subsume`.
+// ---------------------------------------------------------------------------
+
+/**
+ * How fast the score grows with the size of one copy, in AST nodes.
+ *
+ * Above 1, so one long clone outranks many short shapes. A linear score
+ * ranked 50 copies of a 4-line shape above two copies of a 100-line function.
+ * A short shape saves little per copy, and each copy still pays for an import
+ * and a call. A long clone also drifts in more ways.
+ *
+ * Fitted against blind judgements of 243 candidates from two large codebases.
+ * Each judge rated whether consolidating one finding was worth it, 0 to 3.
+ * The linear score's top 40 had nDCG 0.48 against those ratings, and this curve
+ * scores 0.73. Exponents from 1.5 to 2 and count ratios from 0.4 to 0.6 all
+ * landed between 0.68 and 0.74, so the exact values are not load-bearing.
+ */
+const SIZE_EXPONENT = 1.5;
+
+/**
+ * How fast the score grows with the number of copies, by match level.
+ *
+ * Below 1, so repetition counts with diminishing returns. Lower at L1,
+ * because a renamed copy needs parameters and an exact copy needs none. The
+ * judges rated small L1 shapes 0.75 of 3, and half of them "leave it". They
+ * rated small L0 shapes 1.27, and one in fifteen "leave it". A flat level
+ * weight of 0.9 could not separate the two. A shared count exponent pushed
+ * every small L0 shape out of the top 40, and the report is meant to keep
+ * surfacing copy-paste.
+ */
+const COUNT_EXPONENT: Record<Level, number> = { L0: 0.9, L1: 0.6 };
+
+/**
+ * Copies at or below this many lines score zero, however often they repeat.
+ *
+ * Extracting a one-line shape replaces each copy with a call of the same
+ * length and adds a definition, so the refactor is a strict loss. Do not
+ * raise it to filter noise. AGENTS.md section 4 records why: raising
+ * `--min-lines` from 4 to 10 deleted 29 of the top 40 findings and barely
+ * touched the noise.
+ */
+const MAX_UNSCORED_LINES = 1;
+
+/**
+ * Repetitions of one shape within a single file that still count toward score.
+ *
+ * A shape repeated 99 times inside one file is a data table, not a missing
+ * abstraction: on a real codebase a 99-copy, 21-node `PropertyAssignment` from
+ * one config literal outscored an 8-copy, 109-node duplicated function spread
+ * across eight route files by 12306 to 2612. Raw mass endorses the table
+ * (2058 deletable nodes against 763), and no spread multiplier small enough to
+ * be honest can overcome a 12x count difference -- so the count itself is
+ * capped rather than the category being penalized.
+ *
+ * The cap binds on under 3% of candidates on every repository measured, which
+ * is the point: it removes the pathology without reordering everything else.
+ */
+const MAX_COPIES_PER_FILE = 10;
+
+/**
+ * Multiplier by how far the copies reach. Cross-module beats cross-file beats
+ * intra-file, because extracting duplication across modules also removes a
+ * dependency between them.
+ *
+ * - `crossModule`: copies in two or more modules of the module graph, or two
+ *   or more directories when no graph is given.
+ * - `crossFile`: two or more files in one module.
+ * - `intraFile`: every copy in one file.
+ *
+ * Intra-file repetition is down-weighted rather than excluded. It is 70-84%
+ * of all candidates on every repository measured, so suppressing it would
+ * empty the report of repeated handlers and repeated markup. These values
+ * replaced 1.5 / 1.2 / 1.0, chosen from six weightings on three repositories.
+ * A stronger variant scored better on a hand rubric only by deleting the
+ * intra-file category: it moved an extractable repeated handler from rank 4
+ * to rank 53.
+ */
+const SPREAD_WEIGHT = { crossModule: 2.5, crossFile: 1.4, intraFile: 0.8 } as const;
+
+/**
+ * Flat multiplier by match level. L0 copies are identical once formatting is
+ * normalized; L1 copies match only after identifiers and literals are renamed.
+ *
+ * Nearly redundant since `COUNT_EXPONENT` became level-specific, and it now
+ * moves L0 against L1 by at most 1.11x. Kept because the judged evaluation
+ * that fitted the exponents ran with it in place. Removing it is a retune:
+ * re-run that evaluation.
+ */
+const LEVEL_WEIGHT: Record<Level, number> = { L0: 1.0, L1: 0.9 };
+
+/**
+ * Weight of a cluster with no source occurrences at all. Duplication between
+ * tests is frequently deliberate — parallel arrange/act/assert blocks read
+ * better than a helper — so it is down-weighted rather than dropped.
+ *
+ * The weight runs linearly from this floor to 1 with the share of copies in
+ * source files. It reorders findings within the test section. It does not
+ * decide the section: `TEST_MAJORITY_SHARE` does.
+ */
+const TEST_FLOOR = 0.4;
+
+/**
+ * Source share at or below which a cluster belongs in the test section.
+ *
+ * A tie goes to the test section. A cluster half of whose copies are test
+ * files is as much scaffolding as production duplication, and the point of
+ * the split is that scaffolding cannot displace production work. This picks a
+ * SECTION, not a weight, so it decides which list a finding competes in.
+ */
+const TEST_MAJORITY_SHARE = 0.5;
+
+/**
+ * How much of the score a cluster keeps when every copy is a sibling of every
+ * other under one AST node.
+ *
+ * Such a cluster is a data literal — a config table, a code map, a list of
+ * reference ranges — where the repetition IS the content and there is nothing
+ * to extract. PRD §5.4 records this as the ranker's known blind spot, and
+ * names exactly this signal as the fix. On the repository that motivated it,
+ * ten of the top forty findings were entries of one biomarker config table.
+ *
+ * A weight rather than a filter, for the same reason intra-file repetition is
+ * down-weighted rather than excluded: a run of sibling statements is sometimes
+ * real logic that wants a loop.
+ *
+ * The weight runs linearly from this floor to 1 with the share of copies that
+ * have a parent node of their own.
+ */
+const SIBLING_FLOOR = 0.2;
+
+/**
+ * How much of the score a cluster keeps when it is one declaration per file
+ * across files of one role.
+ *
+ * Set beside `FIELD_DRIFT_FLOOR` and for the same reason: such a finding can
+ * still be reported when nothing else competes, and never outranks duplication
+ * that a reader could actually remove.
+ */
+const CONVENTION_FLOOR = 0.25;
+
+/**
+ * Weight of a cluster whose every field name differs between copies. Set so
+ * such a cluster can still be reported when nothing else competes, but never
+ * outranks duplication that actually consolidates.
+ *
+ * The weight runs linearly from 1 down to this floor with the share of field
+ * names that drift. `driftWeight` computes it, and `reweight` in run.ts applies
+ * it, after `rankClusters` and only to each section's top candidates.
+ */
+const FIELD_DRIFT_FLOOR = 0.25;
+
+// ---------------------------------------------------------------------------
+
 /**
  * Anchored on a path separator and on a dot so that `latest/` and `attest.ts`
  * -- ordinary source names containing the substring "test" -- are not
@@ -89,7 +274,7 @@ export function sourceShare(cluster: Cluster): number {
  * 429 copies of `vi.mock` scaffolding took the top four slots of a real report.
  */
 export function isTestMajority(cluster: Cluster): boolean {
-  return sourceShare(cluster) <= 0.5;
+  return sourceShare(cluster) <= TEST_MAJORITY_SHARE;
 }
 
 function tagOf(cluster: Cluster): Tag {
@@ -99,83 +284,14 @@ function tagOf(cluster: Cluster): Tag {
   return "mixed";
 }
 
-const LEVEL_WEIGHT: Record<string, number> = { L0: 1.0, L1: 0.9 };
-
-/**
- * How fast the score grows with the size of one copy, in AST nodes.
- *
- * Above 1, so one long clone outranks many short shapes. A linear score
- * ranked 50 copies of a 4-line shape above two copies of a 100-line function.
- * A short shape saves little per copy, and each copy still pays for an import
- * and a call. A long clone also drifts in more ways.
- *
- * Fitted against blind judgements of 243 candidates from two large codebases.
- * Each judge rated whether consolidating one finding was worth it, 0 to 3.
- * The linear score's top 40 had nDCG 0.48 against those ratings, and this curve
- * scores 0.73. Exponents from 1.5 to 2 and count ratios from 0.4 to 0.6 all
- * landed between 0.68 and 0.74, so the exact values are not load-bearing.
- */
-const SIZE_EXPONENT = 1.5;
-
-/**
- * How fast the score grows with the number of copies, by match level.
- *
- * Below 1, so repetition counts with diminishing returns. Lower at L1,
- * because a renamed copy needs parameters and an exact copy needs none. The
- * judges rated small L1 shapes 0.75 of 3, and half of them "leave it". They
- * rated small L0 shapes 1.27, and one in fifteen "leave it". A flat level
- * weight of 0.9 could not separate the two. A shared count exponent pushed
- * every small L0 shape out of the top 40, and the report is meant to keep
- * surfacing copy-paste.
- */
-const COUNT_EXPONENT: Record<string, number> = { L0: 0.9, L1: 0.6 };
-
-/**
- * Repetitions of one shape within a single file that still count toward score.
- *
- * A shape repeated 99 times inside one file is a data table, not a missing
- * abstraction: on a real codebase a 99-copy, 21-node `PropertyAssignment` from
- * one config literal outscored an 8-copy, 109-node duplicated function spread
- * across eight route files by 12306 to 2612. Raw mass endorses the table
- * (2058 deletable nodes against 763), and no spread multiplier small enough to
- * be honest can overcome a 12x count difference -- so the count itself is
- * capped rather than the category being penalized.
- *
- * The cap binds on under 3% of candidates on every repository measured, which
- * is the point: it removes the pathology without reordering everything else.
- */
-const MAX_COPIES_PER_FILE = 10;
-
 /**
  * Lines the extracted definition costs that the copies did not: a signature
- * and a closing brace. Small, but it is what makes a one-line shape score
- * zero however often it repeats, which is the correct answer -- the call that
- * replaces each copy is itself a line, so the refactor is a strict loss.
+ * and a closing brace.
+ *
+ * Not a ranking knob. It only adjusts the `~N lines recoverable` the report
+ * prints. The score ignores it.
  */
 const EXTRACTION_OVERHEAD = 2;
-
-/**
- * How much of the score a cluster keeps when every copy is a sibling of every
- * other under one AST node.
- *
- * Such a cluster is a data literal — a config table, a code map, a list of
- * reference ranges — where the repetition IS the content and there is nothing
- * to extract. PRD §5.4 records this as the ranker's known blind spot, and
- * names exactly this signal as the fix. On the repository that motivated it,
- * ten of the top forty findings were entries of one biomarker config table.
- *
- * A weight rather than a filter, for the same reason intra-file repetition is
- * down-weighted rather than excluded: a run of sibling statements is sometimes
- * real logic that wants a loop.
- */
-const SIBLING_FLOOR = 0.2;
-
-/**
- * Weight of a cluster with no source occurrences at all. Duplication between
- * tests is frequently deliberate — parallel arrange/act/assert blocks read
- * better than a helper — so it is down-weighted rather than dropped.
- */
-const TEST_FLOOR = 0.4;
 
 /**
  * The role a filename declares, as `.stories.tsx` for `Badge.stories.tsx`.
@@ -250,16 +366,6 @@ export function fileRoleConvention(cluster: Cluster): string | undefined {
   return role;
 }
 
-/**
- * How much of the score a cluster keeps when it is one declaration per file
- * across files of one role.
- *
- * Set beside `FIELD_DRIFT_FLOOR` and for the same reason: such a finding can
- * still be reported when nothing else competes, and never outranks duplication
- * that a reader could actually remove.
- */
-const CONVENTION_FLOOR = 0.25;
-
 export interface RankOptions {
   /**
    * Rank a shape declared once per file across files of one role below
@@ -291,11 +397,12 @@ export function rankClusters(
         ),
       );
 
-      // Intra-file repetition is down-weighted rather than excluded: it is
-      // 70-84% of all candidates on every repository measured, so blanket
-      // suppression would empty the report of a whole legitimate category
-      // (repeated handlers, repeated markup). PRD §5.4 ranks it lowest, not out.
-      const spread = groups.size > 1 ? 2.5 : files.size > 1 ? 1.4 : 0.8;
+      const spread =
+        groups.size > 1
+          ? SPREAD_WEIGHT.crossModule
+          : files.size > 1
+            ? SPREAD_WEIGHT.crossFile
+            : SPREAD_WEIGHT.intraFile;
       // All-test duplication is often legitimate, and duplication that reaches
       // into production code is the case PRD §2.7 wants surfaced. Weight moves
       // continuously with the source share rather than switching on the tag:
@@ -342,7 +449,7 @@ export function rankClusters(
       const score =
         sizeTerm(cluster, copies, linesPerCopy) *
         spread *
-        (LEVEL_WEIGHT[cluster.level] ?? 0.8) *
+        LEVEL_WEIGHT[cluster.level] *
         testWeight *
         siblingWeight(cluster) *
         (fileRole === undefined ? 1 : CONVENTION_FLOOR);
@@ -376,9 +483,9 @@ export function rankClusters(
  * packages by 8.5x.
  */
 function sizeTerm(cluster: Cluster, copies: number, linesPerCopy: number): number {
-  if (linesPerCopy <= 1) return 0;
+  if (linesPerCopy <= MAX_UNSCORED_LINES) return 0;
   return (
-    (copies - 1) ** (COUNT_EXPONENT[cluster.level] ?? COUNT_EXPONENT.L1!) *
+    (copies - 1) ** COUNT_EXPONENT[cluster.level] *
     cluster.nodeCount ** SIZE_EXPONENT
   );
 }
@@ -432,13 +539,6 @@ export function driftWeight(drift: { varying: number; total: number }): number {
   const share = drift.varying / drift.total;
   return 1 - (1 - FIELD_DRIFT_FLOOR) * share;
 }
-
-/**
- * Weight of a cluster whose every field name differs between copies. Set so
- * such a cluster can still be reported when nothing else competes, but never
- * outranks duplication that actually consolidates.
- */
-const FIELD_DRIFT_FLOOR = 0.25;
 
 /**
  * Drop a cluster when a larger one covers the same occurrences -- a fragment
