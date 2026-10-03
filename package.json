@@ -14,6 +14,7 @@
     "build:npm": "bun scripts/build-npm.ts",
     "build:formula": "bun scripts/homebrew-formula.ts",
     "typecheck": "tsc -p tsconfig.test.json",
+    "check:boundary": "bun scripts/check-ts-boundary.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "site:build": "bun site/build.mjs"

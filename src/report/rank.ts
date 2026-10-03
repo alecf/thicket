@@ -1,4 +1,5 @@
 import type { Cluster, Level, Occurrence } from "../fingerprint/cluster.js";
+import { typescript } from "../lang/typescript/profile.js";
 import { compareStrings } from "../order.js";
 import type { FindingContext } from "./context.js";
 import type { CoLocated, Variant } from "./variants.js";
@@ -260,20 +261,9 @@ const FIELD_DRIFT_FLOOR = 0.25;
 
 // ---------------------------------------------------------------------------
 
-/**
- * Anchored on a path separator and on a dot so that `latest/` and `attest.ts`
- * -- ordinary source names containing the substring "test" -- are not
- * mistaken for tests and silently down-weighted out of the report.
- */
-const TEST_PATTERN = /(\.(test|spec)\.[cm]?[jt]sx?$)|((^|\/)(__tests__|tests?)\/)/;
-
-export function isTestPath(path: string): boolean {
-  return TEST_PATTERN.test(path);
-}
-
 /** Share of a cluster's occurrences that are not test files, in [0, 1]. */
 export function sourceShare(cluster: Cluster): number {
-  const source = cluster.occurrences.filter((o) => !isTestPath(o.filePath)).length;
+  const source = cluster.occurrences.filter((o) => !typescript.isTestPath(o.filePath)).length;
   return source / cluster.occurrences.length;
 }
 
@@ -293,7 +283,7 @@ export function isTestMajority(cluster: Cluster): boolean {
 }
 
 function tagOf(cluster: Cluster): Tag {
-  const tests = cluster.occurrences.filter((o) => isTestPath(o.filePath)).length;
+  const tests = cluster.occurrences.filter((o) => typescript.isTestPath(o.filePath)).length;
   if (tests === 0) return "source";
   if (tests === cluster.occurrences.length) return "test";
   return "mixed";

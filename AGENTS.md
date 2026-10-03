@@ -14,6 +14,7 @@ Work is tracked in [`docs/plans/2026-08-09-thicket-v1.md`](docs/plans/2026-08-09
 
 ```
 src/extract/     TS API adapter, fragment extraction, import resolution
+src/lang/        language profiles: the rules that name syntax kinds
 src/fingerprint/ normalization ladder (L0/L1), hashing, clustering
 src/graph/       module grouping, Tarjan SCC, propagation cost
 src/cache/       node:sqlite content-addressed store
@@ -92,6 +93,8 @@ The report must be a pure function of `(source content, config, thicket version)
 ### 2. All TypeScript API contact goes through the adapter
 
 `typescript/unstable/*` is a dev-build API on a path literally named `unstable`. Everything downstream consumes the `SourceModel` interface (PRD §4.1) so that when 7.1 stabilizes, one file changes. The `typescript` dependency is **pinned exactly**, not caret-ranged.
+
+**One exception: the TypeScript language profile.** `src/lang/typescript/` imports `SyntaxKind` from `typescript/unstable/ast`. It needs the enum values, because rules must match kinds by value (§3). It makes no client calls. Before it existed, `fingerprint/` and `report/` imported `SyntaxKind` in two files and spelled kind names in two more. Now the profile holds every rule that names a kind. A 7.1 migration changes the adapter and the profile, and nothing else. `bun run check:boundary` enforces this in CI. It fails on any import of `typescript` outside `src/extract/` and `src/lang/typescript/`, type-only imports included.
 
 The seal earned its keep when the runtime moved to Bun. `typescript/unstable/sync` cannot run there at all: it spawns the `tsgo` server and does blocking RPC over `child.stdout._handle.fd`, a Node internal Bun does not expose, and its client refuses the alternative (`"Socket connections are not yet supported in the sync client"`). The fix was `typescript/unstable/async`, which talks over the child's *streams* — six awaits in `ts-adapter.ts` and nothing else in the repository changed. The sync API is auto-generated from the async one, so the two are the same surface with `Promise` wrappers, and AST materialization makes no client calls at all: a source file arrives as one payload and the tree materializes locally, which is why `walk`, `forEachChildSafe` and fragment extraction stayed synchronous.
 

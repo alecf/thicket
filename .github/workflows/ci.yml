@@ -43,6 +43,12 @@ jobs:
             echo "::error::localeCompare in src/ -- sort with compareStrings from src/order.ts (AGENTS.md §1)"
             exit 1
           fi
+      # AGENTS.md §2: the TypeScript API is reached only through the adapter
+      # and the TypeScript language profile. The script asks the compiler and
+      # Bun's transpiler for every import, so comments, line breaks and
+      # type-only imports cannot hide one. See its header for why it needs both.
+      - name: TypeScript API only in the adapter and profile
+        run: bun run check:boundary
       - run: bun run test
 
   # Mirrors the build half of deploy-site.yml, so a page that will not build is

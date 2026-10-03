@@ -21,8 +21,8 @@ import { redundantByteFraction } from "./report/coverage.js";
 import { excerptOf } from "./report/excerpt.js";
 import { findingId } from "./report/findings.js";
 import { isBareCall } from "./report/callsite.js";
-import { canonicalKind, isTypeKind } from "./report/kinds.js";
 import { extractFragments } from "./fingerprint/fragments.js";
+import { typescript } from "./lang/typescript/profile.js";
 import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
 import { findCoLocated, findVariants } from "./report/variants.js";
@@ -773,9 +773,9 @@ export async function runReport(
     const testDuplication = ranked.filter((r) => isTestMajority(r.cluster));
     const rest = ranked.filter((r) => !isTestMajority(r.cluster));
     const typeDuplication =
-      types === "exclude" ? [] : rest.filter((r) => isTypeKind(r.cluster.kind));
+      types === "exclude" ? [] : rest.filter((r) => typescript.isTypeKind(r.cluster.kind));
     const production =
-      types === "only" ? [] : rest.filter((r) => !isTypeKind(r.cluster.kind));
+      types === "only" ? [] : rest.filter((r) => !typescript.isTypeKind(r.cluster.kind));
 
     // Excerpts and surroundings are resolved only for what the report will
     // print: both need whole-project lookups, and a cluster can span a hundred
@@ -922,7 +922,7 @@ export async function runReport(
       score: r.score,
       tag: r.tag,
       level: r.cluster.level,
-      kind: canonicalKind(r.cluster.kind),
+      kind: typescript.canonicalKind(r.cluster.kind),
       nodeCount: r.cluster.nodeCount,
       occurrences: r.cluster.occurrences.map((o) => ({
         filePath: o.filePath,

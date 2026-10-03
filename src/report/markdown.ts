@@ -5,7 +5,7 @@ import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
 import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
-import { canonicalKind } from "./kinds.js";
+import { typescript } from "../lang/typescript/profile.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
 /**
@@ -606,7 +606,7 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
     `### ${c.id} · ${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
       `~${r.recoverableLines} lines recoverable`,
     "",
-    `${c.level} · \`${canonicalKind(c.kind)}\`${tag}`,
+    `${c.level} · \`${typescript.canonicalKind(c.kind)}\`${tag}`,
     "",
     ...contextLines(r),
     // An AST kind alone does not say whether a finding is worth acting on;
@@ -765,18 +765,6 @@ function dependentsLine(r: Ranked, d: Dependents): string | undefined {
   return `- **directly imported by:** ${files(d.direct)} outside the cluster${hidden}`;
 }
 
-/** Language tags by extension, for the excerpt's fence. */
-const FENCE_LANGUAGE: Record<string, string> = {
-  ts: "ts",
-  mts: "ts",
-  cts: "ts",
-  tsx: "tsx",
-  js: "js",
-  mjs: "js",
-  cjs: "js",
-  jsx: "jsx",
-};
-
 /**
  * The excerpt as a fenced block, tagged with the language of the file it came
  * from.
@@ -788,9 +776,9 @@ const FENCE_LANGUAGE: Record<string, string> = {
 function excerptBlock(r: Ranked): string[] {
   const excerpt = r.excerpt ?? [];
   if (excerpt.length === 0) return [];
-  const extension = r.cluster.occurrences[0]?.filePath.split(".").pop() ?? "";
+  const language = typescript.fenceLanguage(r.cluster.occurrences[0]?.filePath ?? "");
   const fence = fenceFor(excerpt);
-  return [`${fence}${FENCE_LANGUAGE[extension] ?? ""}`, ...excerpt, fence, ""];
+  return [`${fence}${language}`, ...excerpt, fence, ""];
 }
 
 /**
