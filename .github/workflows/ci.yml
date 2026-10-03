@@ -44,26 +44,11 @@ jobs:
             exit 1
           fi
       # AGENTS.md §2: the TypeScript API is reached only through the adapter
-      # and the TypeScript language profile. A rule elsewhere that names a
-      # SyntaxKind cannot be answered for a second language. Matching the
-      # import is enough, because SyntaxKind cannot be used without it.
-      #
-      # Perl reads each file whole (-0777), so an import split across lines
-      # still matches. The pattern covers both quote styles, `export … from`,
-      # a bare side-effect import, `import()` and `require()`. It skips a
-      # plain "typescript" string, such as a language id.
+      # and the TypeScript language profile. The script asks the compiler and
+      # Bun's transpiler for every import, so comments, line breaks and
+      # type-only imports cannot hide one. See its header for why it needs both.
       - name: TypeScript API only in the adapter and profile
-        run: |
-          set -uo pipefail
-          hits=$(find src -name '*.ts' -not -path 'src/extract/*' -not -path 'src/lang/typescript/*' -print0 \
-            | sort -z \
-            | xargs -0 perl -0777 -ne 'while (/\b(?:from|import|require)\s*\(?\s*["\x27]typescript(?:\/|["\x27])/g) { my $l = 1 + (substr($_, 0, $-[0]) =~ tr/\n//); print "$ARGV:$l\n" }' \
-            || true)
-          if [ -n "$hits" ]; then
-            echo "$hits"
-            echo "::error::TypeScript API imported outside src/extract/ and src/lang/typescript/ (AGENTS.md §2)"
-            exit 1
-          fi
+        run: bun run check:boundary
       - run: bun run test
 
   # Mirrors the build half of deploy-site.yml, so a page that will not build is
