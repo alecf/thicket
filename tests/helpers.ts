@@ -212,7 +212,7 @@ export function monorepoConfigs(): string[] {
 
 /**
  * A fixture where the highest-scoring cluster in the codebase is test
- * scaffolding: identical mock-logger setup in four `__tests__` files, against
+ * scaffolding: a ten-method mock logger repeated in four `__tests__` files, against
  * one production clone shared by two source files. On score alone the
  * scaffolding wins, which is what made 10 of the top 40 findings on a real
  * application test setup. The report must still lead with the production
@@ -268,16 +268,17 @@ export function configTableConfig(): string {
  * by dissolution and is worthless: both its edges erase at compile time.
  */
 /**
- * Four route modules that each open with the same five-line call to a shared
+ * Eight route modules that each open with the same five-line call to a shared
  * helper, beside one genuinely duplicated function.
  *
  * The call is the shape a real report got wrong: it ranked "43 copies · ~208
  * lines recoverable" over 43 call sites of one helper, which is what correct
- * reuse looks like. Here it scores 13 recoverable lines against the real
- * finding's 6, so it outranks real work unless it is suppressed -- which is
- * the property under test, and why the fixture carries both.
+ * reuse looks like. Here eight copies outrank the 9-line clone, so the call
+ * takes real work's slot unless it is suppressed. That is the property under
+ * test, and it is why the fixture carries both. Four routes stopped being
+ * enough when the ranker began to damp copy count.
  *
- * The four route bodies deliberately differ around the call. Make them alike
+ * The route bodies deliberately differ around the call. Make them alike
  * and the enclosing `FunctionDeclaration` clusters too, `subsume` drops the
  * call fragment as covered by its own parent, and the test passes with the
  * suppression deleted.

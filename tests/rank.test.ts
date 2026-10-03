@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTestPath, rankClusters, subsume } from "../src/report/rank.js";
+import { isTestPath, rankClusters, rationalPow, subsume } from "../src/report/rank.js";
 import type { Cluster } from "../src/fingerprint/cluster.js";
 
 /**
@@ -91,26 +91,52 @@ describe("rankClusters: intra-file repetition", () => {
 });
 
 describe("rankClusters: size is what makes a duplication worth fixing", () => {
-  it("weighs one more copy the same as one more line", () => {
-    // Size and count each enter the score exactly once. The previous formula
-    // had count in twice -- `(copies - 1)` multiplied again by
-    // `log2(1 + copies)` -- and size once, which inverted the judgement the
-    // report exists to support: on a real repository 25 copies of a 4-line
-    // block outscored a 22-line function duplicated across two packages by
-    // 8.5x, and the finding most obviously worth acting on ranked 28th.
-    //
-    // Held at equal spread and equal parentage, so only the trade this
-    // asserts is in play.
-    const at = (copies: number, lines: number) =>
-      rankClusters([
-        cluster({
-          id: "c",
-          occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, lines)),
-        }),
-      ])[0]!.score;
-    // (copies - 1) x (lines - 1): 4 copies of 7 lines and 7 copies of 4 lines
-    // both recover 18 lines, so neither dimension may dominate the other.
-    expect(at(4, 7)).toBe(at(7, 4));
+  /** One copy per file, so spread and parentage are equal and only size and count are in play. */
+  const spread = (id: string, level: "L0" | "L1", copies: number, lines: number, nodeCount: number) =>
+    cluster({
+      id,
+      level,
+      nodeCount,
+      occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, lines)),
+    });
+  const score = (c: Cluster) => rankClusters([c])[0]!.score;
+
+  it("ranks a large clone above many copies of a small renamed shape", () => {
+    // Two copies of a 100-line function against fifty copies of a 4-line
+    // shape that matched only after renaming. The linear formula ranked the
+    // small shape first, by 145 recoverable lines to 97. Blind judges rated
+    // small L1 shapes 0.75 of 3 on two large codebases, and half of them
+    // "leave it": each copy needs an import and parameters, which costs about
+    // what it saves.
+    const clone = spread("clone", "L0", 2, 100, 500);
+    const idiom = spread("idiom", "L1", 50, 4, 20);
+    expect(rankClusters([idiom, clone])[0]!.cluster.id).toBe("clone");
+  });
+
+  it("gives exact copy-paste more weight per copy than a renamed shape", () => {
+    // The judges rated small L0 shapes 1.27 and small L1 shapes 0.75. An L0
+    // copy needs no parameters, so every extra copy is a cleaner win. The flat
+    // level weight alone separated the two by 1.11x.
+    const exact = score(spread("c", "L0", 50, 4, 20));
+    const renamed = score(spread("c", "L1", 50, 4, 20));
+    expect(exact / renamed).toBeGreaterThan(3);
+  });
+
+  it("still ranks heavily repeated copy-paste above a small two-copy clone", () => {
+    // AGENTS.md section 4: a 6-line shape repeated 231 times outranks a 30-line
+    // clone repeated twice, and it is right to. The count exponent may damp
+    // repetition, but not enough to bury copy-paste at that scale.
+    const slop = spread("slop", "L0", 231, 6, 30);
+    const clone = spread("clone", "L0", 2, 30, 150);
+    expect(rankClusters([clone, slop])[0]!.cluster.id).toBe("slop");
+  });
+
+  it("measures size in AST nodes, not lines", () => {
+    // Line count depends on formatting. Of two shapes with the same span, the
+    // denser one holds more logic.
+    const sparse = score(spread("c", "L0", 3, 6, 20));
+    const dense = score(spread("c", "L0", 3, 6, 60));
+    expect(dense).toBeGreaterThan(sparse);
   });
 
   it("scores a one-line shape at zero however often it repeats", () => {
@@ -119,21 +145,74 @@ describe("rankClusters: size is what makes a duplication worth fixing", () => {
     // above zero here is the report spending a slot to lose the reader lines.
     const oneLiner = cluster({
       id: "one",
+      nodeCount: 40,
       occurrences: Array.from({ length: 40 }, (_, i) => occ(`src/f${i}.ts`, 0, 60, 3, 1)),
     });
     expect(rankClusters([oneLiner])[0]!.score).toBe(0);
   });
 
-  it("grows with the size of the duplicated fragment", () => {
-    const at = (lines: number) =>
-      rankClusters([
-        cluster({
-          id: "c",
-          occurrences: [occ("src/a.ts", 0, 500, 1, lines), occ("src/b.ts", 0, 500, 1, lines)],
-        }),
-      ])[0]!.score;
-    expect(at(20)).toBeGreaterThan(at(10));
-    expect(at(10)).toBeGreaterThan(at(5));
+  it("grows faster than linearly with the size of the fragment", () => {
+    // A long clone drifts in more ways than a short one, so doubling the size
+    // must more than double the score.
+    const at = (nodes: number) => score(spread("c", "L0", 2, 20, nodes));
+    expect(at(200) / at(100)).toBeGreaterThan(2);
+    expect(at(100)).toBeGreaterThan(at(50));
+  });
+
+  it("grows more slowly than linearly with the number of copies", () => {
+    const at = (copies: number) => score(spread("c", "L1", copies, 8, 40));
+    expect(at(21)).toBeGreaterThan(at(11));
+    expect(at(21) / at(11)).toBeLessThan(2);
+  });
+});
+
+describe("rankClusters: the evaluated exponents", () => {
+  // The exponents were fitted against judged findings (PRD section 5.4), and
+  // AGENTS.md section 4 says to re-run that evaluation before moving them. The
+  // inequalities above hold for many other curves, so these pin the values.
+  // Each case is chosen so every power is an exact integer.
+  const wide = (level: "L0" | "L1", copies: number, nodeCount: number) =>
+    cluster({
+      id: "c",
+      level,
+      nodeCount,
+      occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, 8)),
+    });
+  // One directory, many files: SPREAD_WEIGHT.crossFile. Every other weight is 1.
+  const CROSS_FILE = 1.4;
+
+  it("scores L0 as (copies - 1)^(9/10) x nodes^(3/2)", () => {
+    // 1024^(9/10) = 512, and 100^(3/2) = 1000.
+    expect(rankClusters([wide("L0", 1025, 100)])[0]!.score).toBe(512 * 1000 * CROSS_FILE);
+  });
+
+  it("scores L1 as (copies - 1)^(3/5) x nodes^(3/2), times the L1 level weight", () => {
+    // 32^(3/5) = 8, and 100^(3/2) = 1000.
+    expect(rankClusters([wide("L1", 33, 100)])[0]!.score).toBe(8 * 1000 * CROSS_FILE * 0.9);
+  });
+});
+
+describe("rationalPow", () => {
+  it("is exact where the true power is an integer", () => {
+    expect(rationalPow(100, 3, 2)).toBe(1000);
+    expect(rationalPow(1024, 9, 10)).toBe(512);
+    expect(rationalPow(32, 3, 5)).toBe(8);
+    expect(rationalPow(0, 3, 5)).toBe(0);
+    expect(rationalPow(1, 9, 10)).toBe(1);
+  });
+
+  it("truncates to a fixed 2^-32 grid rather than calling Math.pow", () => {
+    // `**` with a fractional exponent is implementation-approximated, so Bun
+    // and Node may disagree in the last bit of a score that is sorted and
+    // serialized (AGENTS.md section 1). This value is floor(sqrt(2) * 2^32) /
+    // 2^32. It differs from Math.SQRT2, so swapping in `**` fails here.
+    expect(rationalPow(2, 1, 2)).toBe(6074000999 / 2 ** 32);
+    expect(rationalPow(2, 1, 2)).not.toBe(Math.SQRT2);
+  });
+
+  it("stays monotone across neighbouring inputs", () => {
+    const xs = Array.from({ length: 200 }, (_, i) => rationalPow(i + 1, 3, 5));
+    for (let i = 1; i < xs.length; i++) expect(xs[i]!).toBeGreaterThan(xs[i - 1]!);
   });
 });
 
@@ -209,12 +288,13 @@ describe("isTestPath", () => {
 });
 
 describe("rankClusters", () => {
-  it("ranks higher mass first", () => {
+  it("ranks the larger fragment first", () => {
+    // "lo" sorts after "hi" by id, so only the node count can put it first.
     const ranked = rankClusters([
-      cluster({ id: "lo", mass: 10 }),
-      cluster({ id: "hi", mass: 100 }),
+      cluster({ id: "hi", nodeCount: 10 }),
+      cluster({ id: "lo", nodeCount: 100 }),
     ]);
-    expect(ranked[0]!.cluster.id).toBe("hi");
+    expect(ranked[0]!.cluster.id).toBe("lo");
   });
 
   it("ranks cross-directory duplication above intra-file", () => {

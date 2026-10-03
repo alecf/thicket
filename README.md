@@ -369,7 +369,7 @@ When findings are held back, an **Omitted** section says what is in them: a coun
 
 Duplication whose copies are mostly test files goes in its own **`## Duplication in tests`** section. It sits below the production findings and below the module tangle, and it gets a much smaller cap.
 
-This is a split rather than a weight because no weight worked. On a real application, test scaffolding took **10 of the top 40** slots: 231 copies of `{ info: vi.fn(), warn: vi.fn() }`, and 124 copies of `afterEach(() => vi.restoreAllMocks())`. The ranker was right that they were large. `recoverableLines` is `(copies − 1) × (linesPerCopy − 1)`, so a 6-line shape repeated 231 times really does beat a 30-line clone repeated twice.
+This is a split rather than a weight because no weight worked. On a real application, test scaffolding took **10 of the top 40** slots: 231 copies of `{ info: vi.fn(), warn: vi.fn() }`, and 124 copies of `afterEach(() => vi.restoreAllMocks())`. The ranker was right that they were large. Exact copy-paste repeated 231 times really does beat a 30-line clone repeated twice.
 
 Sweeping the test down-weight from 0.4 to 0 moved that count from 10 to 0 smoothly, with no natural break anywhere on the curve. Every threshold was an arbitrary point on a smooth tradeoff, and the ones low enough to clear the top 40 also buried real duplication between tests.
 
