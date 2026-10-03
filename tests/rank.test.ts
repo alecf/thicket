@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTestPath, rankClusters, subsume } from "../src/report/rank.js";
+import { isTestPath, rankClusters, rationalPow, subsume } from "../src/report/rank.js";
 import type { Cluster } from "../src/fingerprint/cluster.js";
 
 /**
@@ -163,6 +163,56 @@ describe("rankClusters: size is what makes a duplication worth fixing", () => {
     const at = (copies: number) => score(spread("c", "L1", copies, 8, 40));
     expect(at(21)).toBeGreaterThan(at(11));
     expect(at(21) / at(11)).toBeLessThan(2);
+  });
+});
+
+describe("rankClusters: the evaluated exponents", () => {
+  // The exponents were fitted against judged findings (PRD section 5.4), and
+  // AGENTS.md section 4 says to re-run that evaluation before moving them. The
+  // inequalities above hold for many other curves, so these pin the values.
+  // Each case is chosen so every power is an exact integer.
+  const wide = (level: "L0" | "L1", copies: number, nodeCount: number) =>
+    cluster({
+      id: "c",
+      level,
+      nodeCount,
+      occurrences: Array.from({ length: copies }, (_, i) => occ(`src/f${i}.ts`, 0, 500, 1, 8)),
+    });
+  // One directory, many files: SPREAD_WEIGHT.crossFile. Every other weight is 1.
+  const CROSS_FILE = 1.4;
+
+  it("scores L0 as (copies - 1)^(9/10) x nodes^(3/2)", () => {
+    // 1024^(9/10) = 512, and 100^(3/2) = 1000.
+    expect(rankClusters([wide("L0", 1025, 100)])[0]!.score).toBe(512 * 1000 * CROSS_FILE);
+  });
+
+  it("scores L1 as (copies - 1)^(3/5) x nodes^(3/2), times the L1 level weight", () => {
+    // 32^(3/5) = 8, and 100^(3/2) = 1000.
+    expect(rankClusters([wide("L1", 33, 100)])[0]!.score).toBe(8 * 1000 * CROSS_FILE * 0.9);
+  });
+});
+
+describe("rationalPow", () => {
+  it("is exact where the true power is an integer", () => {
+    expect(rationalPow(100, 3, 2)).toBe(1000);
+    expect(rationalPow(1024, 9, 10)).toBe(512);
+    expect(rationalPow(32, 3, 5)).toBe(8);
+    expect(rationalPow(0, 3, 5)).toBe(0);
+    expect(rationalPow(1, 9, 10)).toBe(1);
+  });
+
+  it("truncates to a fixed 2^-32 grid rather than calling Math.pow", () => {
+    // `**` with a fractional exponent is implementation-approximated, so Bun
+    // and Node may disagree in the last bit of a score that is sorted and
+    // serialized (AGENTS.md section 1). This value is floor(sqrt(2) * 2^32) /
+    // 2^32. It differs from Math.SQRT2, so swapping in `**` fails here.
+    expect(rationalPow(2, 1, 2)).toBe(6074000999 / 2 ** 32);
+    expect(rationalPow(2, 1, 2)).not.toBe(Math.SQRT2);
+  });
+
+  it("stays monotone across neighbouring inputs", () => {
+    const xs = Array.from({ length: 200 }, (_, i) => rationalPow(i + 1, 3, 5));
+    for (let i = 1; i < xs.length; i++) expect(xs[i]!).toBeGreaterThan(xs[i - 1]!);
   });
 });
 

@@ -60,6 +60,12 @@ export interface Ranked {
   fileRole?: string;
 }
 
+/** A rational exponent, `num / den`. See `rationalPow`. */
+interface Exponent {
+  num: number;
+  den: number;
+}
+
 // ---------------------------------------------------------------------------
 // Ranking knobs
 //
@@ -78,6 +84,12 @@ export interface Ranked {
 // smallest copy's AST node count, and a shape of at most MAX_UNSCORED_LINES
 // lines scores zero. The drift weight is applied later, by `reweight` in
 // run.ts, to the top candidates of each section.
+//
+// The exponents are fractions, `{ num, den }`, because `**` with a fractional
+// exponent is implementation-approximated: Bun and Node may disagree in the
+// last bit of a score that is sorted and serialized. `rationalPow` computes
+// them exactly instead. Any fraction works. Keep `den` small, since the cost
+// grows with it.
 //
 // Only ratios matter. Every term multiplies. Doubling all three SPREAD_WEIGHT
 // values changes no order, and neither does doubling both LEVEL_WEIGHT values.
@@ -109,7 +121,7 @@ export interface Ranked {
  * scores 0.73. Exponents from 1.5 to 2 and count ratios from 0.4 to 0.6 all
  * landed between 0.68 and 0.74, so the exact values are not load-bearing.
  */
-const SIZE_EXPONENT = 1.5;
+const SIZE_EXPONENT: Exponent = { num: 3, den: 2 };
 
 /**
  * How fast the score grows with the number of copies, by match level.
@@ -122,7 +134,10 @@ const SIZE_EXPONENT = 1.5;
  * every small L0 shape out of the top 40, and the report is meant to keep
  * surfacing copy-paste.
  */
-const COUNT_EXPONENT: Record<Level, number> = { L0: 0.9, L1: 0.6 };
+const COUNT_EXPONENT: Record<Level, Exponent> = {
+  L0: { num: 9, den: 10 },
+  L1: { num: 3, den: 5 },
+};
 
 /**
  * Copies at or below this many lines score zero, however often they repeat.
@@ -485,9 +500,54 @@ export function rankClusters(
 function sizeTerm(cluster: Cluster, copies: number, linesPerCopy: number): number {
   if (linesPerCopy <= MAX_UNSCORED_LINES) return 0;
   return (
-    (copies - 1) ** COUNT_EXPONENT[cluster.level] *
-    cluster.nodeCount ** SIZE_EXPONENT
+    power(copies - 1, COUNT_EXPONENT[cluster.level]) *
+    power(cluster.nodeCount, SIZE_EXPONENT)
   );
+}
+
+function power(x: number, e: Exponent): number {
+  return rationalPow(x, e.num, e.den);
+}
+
+/** Bits of fraction `rationalPow` keeps. A score is a sort key, not a measurement. */
+const POWER_FRACTION_BITS = 32n;
+
+/**
+ * `x^(num/den)` for a non-negative integer `x`, truncated to a multiple of
+ * 2^-32, and the same on every JavaScript engine.
+ *
+ * `x ** 0.9` is not. ECMAScript leaves fractional powers
+ * implementation-approximated, so Bun and Node can return neighbouring
+ * doubles for one input. A score is sorted and written to the JSON sidecar,
+ * so one differing bit breaks the byte-identical report (AGENTS.md section 1).
+ *
+ * This uses only exact operations. It takes the integer `den`-th root of
+ * `x^num * 2^(32 * den)` in BigInt arithmetic, which gives
+ * `floor(x^(num/den) * 2^32)`. Converting that BigInt to a Number and
+ * dividing by a power of two are both exactly specified.
+ */
+export function rationalPow(x: number, num: number, den: number): number {
+  if (!Number.isInteger(x) || x < 0) throw new RangeError(`rationalPow needs a non-negative integer, got ${x}`);
+  const k = BigInt(den);
+  const scaled = BigInt(x) ** BigInt(num) << (POWER_FRACTION_BITS * k);
+  return Number(integerRoot(scaled, k)) / 2 ** Number(POWER_FRACTION_BITS);
+}
+
+/**
+ * `floor(n^(1/k))`, by Newton's method from a power of two above the root.
+ *
+ * Started above the root, the integer iteration falls monotonically to the
+ * floor of the root and then stops falling, so the loop needs no tolerance.
+ */
+function integerRoot(n: bigint, k: bigint): bigint {
+  if (n < 2n) return n;
+  const bits = BigInt(n.toString(2).length);
+  let x = 1n << ((bits + k - 1n) / k);
+  for (;;) {
+    const y = ((k - 1n) * x + n / x ** (k - 1n)) / k;
+    if (y >= x) return x;
+    x = y;
+  }
 }
 
 /**
