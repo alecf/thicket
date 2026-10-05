@@ -39,6 +39,10 @@ bun run test:watch
 bunx vitest run tests/path/to/one.test.ts   # single file
 ```
 
+`bun install` runs husky, which installs the hooks in `.husky/`. After that,
+every `git worktree add` runs `bun install` in the new worktree. The hook is
+`.husky/post-checkout`. It skips ordinary branch switches.
+
 Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; the
 bundled JS fallback shipped in the npm package still runs under Node ≥24.
 
@@ -60,7 +64,7 @@ Unsupported bun.lock 'lockfileVersion' 2 in /bun.lock.
 The bun version Dependabot runs supports up to 1.
 ```
 
-So bump `xxhash-wasm`, `@types/node` and `vitest` by hand. A vitest or
+So bump `xxhash-wasm`, `@types/node`, `vitest` and `husky` by hand. A vitest or
 `@types/node` major deserves a read, not a merge. `.github/dependabot.yml`
 carries the entry to restore once Dependabot reads version 2.
 
