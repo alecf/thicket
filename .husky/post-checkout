@@ -1,9 +1,9 @@
-#!/bin/sh
 # Set up a fresh worktree. `git worktree add` runs post-checkout inside the new
 # worktree with the null SHA as the previous HEAD. An ordinary branch switch
 # never has that, so this does nothing on `git checkout`.
 #
-# Enable once per clone: git config core.hooksPath .githooks
+# husky installs this hook. `bun install` runs `prepare`, which sets
+# core.hooksPath to .husky/_ for every worktree of the clone.
 
 [ "$1" = "0000000000000000000000000000000000000000" ] || exit 0
 
