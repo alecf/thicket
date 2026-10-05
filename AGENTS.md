@@ -39,6 +39,10 @@ bun run test:watch
 bunx vitest run tests/path/to/one.test.ts   # single file
 ```
 
+Run `git config core.hooksPath .githooks` once per clone. Then every
+`git worktree add` runs `bun install` in the new worktree. The hook is
+`.githooks/post-checkout`. It skips ordinary branch switches.
+
 Bun ≥1.4 is required. The cache uses `node:sqlite`, which Bun implements; the
 bundled JS fallback shipped in the npm package still runs under Node ≥24.
 

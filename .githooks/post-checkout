@@ -1,0 +1,19 @@
+#!/bin/sh
+# Set up a fresh worktree. `git worktree add` runs post-checkout inside the new
+# worktree with the null SHA as the previous HEAD. An ordinary branch switch
+# never has that, so this does nothing on `git checkout`.
+#
+# Enable once per clone: git config core.hooksPath .githooks
+
+[ "$1" = "0000000000000000000000000000000000000000" ] || exit 0
+
+# Git uses this hook's exit status for `git worktree add`. A failed install
+# must not make the worktree look broken, so every path exits 0.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "post-checkout: bun not found; run 'bun install' by hand" >&2
+  exit 0
+fi
+
+echo "post-checkout: new worktree, running bun install" >&2
+bun install --frozen-lockfile >&2 || echo "post-checkout: bun install failed" >&2
+exit 0
