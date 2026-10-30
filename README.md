@@ -31,8 +31,24 @@ Every report links to [the field guide](https://alecf.github.io/thicket/report-g
 `--embed` puts the guide in the report instead of a link. The report then stands alone, so you can pipe it straight to an agent:
 
 ```bash
-thicket --embed > thicket.md
+thicket --embed --task triage > thicket.md
 claude -p < thicket.md
+```
+
+`--task` says what the agent should do with the report:
+
+- `triage` judges every finding and edits nothing.
+- `fix` fixes the one finding most worth fixing, runs the tests, and leaves the change uncommitted.
+- `pr` does the same, then commits and opens a pull request.
+
+Without `--task`, your own prompt decides. `fix` and `pr` change one finding per run. Re-run thicket for the next one.
+
+Under `claude -p`, the agent can only verify a fix if it may run your tests. Allow those commands, or it reports the change as unverified:
+
+```bash
+thicket --embed --task fix > thicket.md
+claude -p --permission-mode acceptEdits \
+  --allowedTools "Bash(npm test:*)" "Bash(thicket:*)" < thicket.md
 ```
 
 ### Reporting bad findings
@@ -191,6 +207,7 @@ bun run thicket diff before.json after.json
 | `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
 | `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`. |
 | `--private` | Tell the reading agent not to file issues against thicket. With `--embed`, the guide's section on filing issues is left out. |
+| `--task <task>` | What the reading agent should do: `triage` (judge every finding, edit nothing), `fix` (fix one finding and verify it), or `pr` (fix one finding and open a pull request). Without it, your own prompt decides. |
 | `--json <path>` | Also write the JSON sidecar here. The Markdown still goes to stdout. |
 | `--no-cache` | Re-analyze every file, ignoring `.thicket/cache.db`. |
 | `--help` | Print usage. |

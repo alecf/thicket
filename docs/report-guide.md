@@ -1,12 +1,55 @@
 # How to read a thicket report
 
-You are an agent that has been handed a file called `thicket.md` (or similar) and
-asked to clean something up. This page explains what is in that file, what each
+You are an agent that has been handed a file called `thicket.md` (or similar).
+This page explains what is in that file, what each
 field means, and — the part that matters most — how to tell a finding worth
 acting on from one that merely scored well.
 
 thicket reports **candidates**. It does not judge and it does not edit. Deciding
 what to do is your job, and this guide exists so you can decide well.
+
+## Your task
+
+The report header may carry a **Task** line. Do that task.
+
+With no Task line, do what the person asked. If nobody asked for anything,
+do `triage`. Do not edit files you were not asked to edit.
+
+### `triage`
+
+Judge every finding. For each one, say whether it is worth acting on, and give
+the reason. The rest of this guide explains how to decide. Do not edit any file.
+
+Order your answer by what you would do first. If a person can answer, end by
+asking which finding to fix. If you run non-interactively, stop after the
+verdicts.
+
+### `fix`
+
+Fix one finding only. One finding per run keeps each change small enough to
+review, and it keeps the re-run diff readable.
+
+1. Judge the findings as in `triage`. Pick the one most worth fixing. It need not
+   be the first one.
+2. Fix it. Near-variants of the same shape are part of the same fix. Other
+   findings are not.
+3. Run the project's tests and its typecheck.
+4. Re-run thicket the same way, and check that the finding ID is gone.
+5. Leave the change uncommitted.
+
+Report which finding you fixed, what changed, and how you verified it. Say
+which findings you passed over, and why. If you could not run the tests, say
+so first. An unverified change is not finished.
+
+If no finding is worth fixing, change nothing and say why.
+
+### `pr`
+
+Do the `fix` task. Then create a branch, commit the change, and open a pull
+request. Put the finding ID and your verification in the description.
+
+Open the pull request only if the tests ran and passed. Otherwise stop with the
+change uncommitted, and say what blocked you.
 
 ## This is not a lint report
 

@@ -223,7 +223,16 @@ describe("documented flags", () => {
       ),
     ];
     expect(commands.length).toBeGreaterThan(4);
-    const used = new Set(commands.flatMap((body) => body.match(/--[a-z][a-z-]*/g) ?? []));
+    // Only commands that run thicket. A `claude -p --allowedTools` line in
+    // the same block carries another program's flags. Continuation lines are
+    // joined first, so a wrapped thicket command is still read whole.
+    const thicketCommands = commands
+      .flatMap((body) => body.replace(/\\\n/g, " ").split("\n"))
+      .filter((line) => /^(bun run )?thicket\b/.test(line.trim()));
+    expect(thicketCommands.length).toBeGreaterThan(4);
+    const used = new Set(
+      thicketCommands.flatMap((line) => line.match(/--[a-z][a-z-]*/g) ?? []),
+    );
     expect(used.has("--config")).toBe(true);
     expect([...used].filter((flag) => !accepted.has(flag))).toEqual([]);
   });

@@ -230,6 +230,16 @@ describe("main", () => {
     expect(shallow.stdout()).toMatch(/granularity: dir:1 \(2 modules\)/);
   });
 
+  it("--task puts the task in the report, and rejects one it does not know", async () => {
+    const ok = capture();
+    expect(await main(["--config", fixtureConfig(), "--task", "triage"])).toBe(0);
+    expect(ok.stdout()).toContain("**Task: triage.**");
+    vi.restoreAllMocks();
+    const bad = capture();
+    expect(await main(["--config", fixtureConfig(), "--task", "refactor"])).not.toBe(0);
+    expect(bad.stderr()).toMatch(/--task must be triage, fix, or pr; got refactor/);
+  });
+
   it("still rejects a granularity that is neither a mode nor a depth", async () => {
     const io = capture();
     expect(await main(["--config", fixtureConfig(), "--granularity", "folder"])).not.toBe(0);

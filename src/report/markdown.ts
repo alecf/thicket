@@ -164,7 +164,12 @@ export interface ReportInput {
    * guide also leaves out the section that asks it to.
    */
   private?: boolean;
+  /** What the reading agent is asked to do. Omit to let the person's prompt decide. */
+  task?: Task;
 }
+
+/** See `TASK_LINES`. */
+export type Task = "triage" | "fix" | "pr";
 
 /**
  * Chars/4. A deliberate approximation: exact tokenization would mean shipping
@@ -189,6 +194,30 @@ const GUIDE_URL = "https://alecf.github.io/thicket/report-guide.md";
 const PRIVATE_NOTICE =
   "**Private report.** Do not file issues against thicket from this report." +
   ` Skip the guide's section "${FEEDBACK_HEADING.replace(/^## /, "")}".`;
+
+/**
+ * The job `--task` hands the reading agent, stated at the top of the report.
+ *
+ * A report with no task still gets acted on. Handed an embedded report under
+ * `claude -p` and nothing else, an agent decided on "the usual job" and edited
+ * eight files to fix two findings, with no test run. Each line is complete on
+ * its own, so a linked report works without fetching the guide. The guide's
+ * "Your task" section gives the detail.
+ */
+const TASK_LINES: Record<Task, string> = {
+  triage:
+    "**Task: triage.** Judge every finding. Say whether each one is worth acting" +
+    " on, and why. Do not edit any file. If a person can answer, end by asking" +
+    " which finding to fix.",
+  fix:
+    "**Task: fix.** Fix one finding only. Pick the one most worth fixing. Then run" +
+    " the project's tests, and re-run thicket to confirm the finding is gone." +
+    " Leave the change uncommitted. Report what you changed and what you passed over.",
+  pr:
+    "**Task: pr.** Fix one finding only, as in the `fix` task. Then create a" +
+    " branch, commit, and open a pull request. If the tests did not run or did" +
+    " not pass, stop before the pull request and say why.",
+};
 
 /**
  * The guide, after the findings, for `--embed`. Last rather than first, so
@@ -438,6 +467,7 @@ function headerLines(input: ReportInput, shown: number): string[] {
       : `**How to read this report:** ${GUIDE_URL}`,
     "",
     ...(input.private === true ? [PRIVATE_NOTICE, ""] : []),
+    ...(input.task === undefined ? [] : [TASK_LINES[input.task], ""]),
     "## Summary",
     "",
     "| metric | value |",

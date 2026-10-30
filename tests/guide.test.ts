@@ -102,3 +102,28 @@ describe("report guide modes", () => {
     expect(renderReport(withFinding({ budgetTokens, embedGuide: true })).shown).toBe(0);
   });
 });
+
+describe("--task", () => {
+  it("prints no task line unless asked, so the person's own prompt decides", () => {
+    expect(renderMarkdown(withFinding())).not.toContain("**Task:");
+  });
+
+  it.each(["triage", "fix", "pr"] as const)("states the %s task above the summary", (task) => {
+    const out = renderMarkdown(withFinding({ task }));
+    const line = out.indexOf(`**Task: ${task}.**`);
+    expect(line).toBeGreaterThan(-1);
+    expect(line).toBeLessThan(out.indexOf("## Summary"));
+  });
+
+  it("forbids edits in triage and limits fix to one finding", () => {
+    expect(renderMarkdown(withFinding({ task: "triage" }))).toContain("Do not edit any file.");
+    expect(renderMarkdown(withFinding({ task: "fix" }))).toContain("Fix one finding only.");
+  });
+
+  it("is explained in the guide, before the feedback section a private copy cuts", () => {
+    // A private embedded guide must still explain the task it was given.
+    const text = guideText({ private: true });
+    expect(text).toContain("## Your task");
+    for (const task of ["triage", "fix", "pr"]) expect(text).toContain(`### \`${task}\``);
+  });
+});

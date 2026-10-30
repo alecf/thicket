@@ -57,6 +57,8 @@ Usage: thicket [dir] [options]
                          type declarations and type-only imports are analyzed
   --embed                put the field guide in the report instead of a link
   --private              tell the reading agent not to file issues against thicket
+  --task <task>          triage | fix | pr — what the reading agent should do;
+                         fix and pr change one finding per run
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -90,6 +92,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         types: { type: "string" },
         embed: { type: "boolean" },
         private: { type: "boolean" },
+        task: { type: "string" },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -198,6 +201,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     return fail(`--types must be include, exclude, or only; got ${types}`);
   }
 
+  const task = values.task;
+  if (task !== undefined && task !== "triage" && task !== "fix" && task !== "pr") {
+    return fail(`--task must be triage, fix, or pr; got ${task}`);
+  }
+
   const granularity = parseGranularity(values.granularity);
   if (granularity === undefined) {
     return fail(
@@ -232,6 +240,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       ...(maxLocations === undefined ? {} : { maxLocations }),
       embedGuide: values.embed ?? false,
       private: values.private ?? false,
+      ...(task === undefined ? {} : { task }),
     }));
   } catch (err) {
     // A stack trace on stderr is a worse answer than a sentence: the caller is
