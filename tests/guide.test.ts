@@ -1,0 +1,104 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { FEEDBACK_HEADING, guideText } from "../src/report/guide.js";
+import { renderMarkdown, renderReport, type ReportInput } from "../src/report/markdown.js";
+import type { Ranked } from "../src/report/rank.js";
+import { reportInput } from "./report-fixtures.js";
+
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+const source = readFileSync(join(repo, "docs/report-guide.md"), "utf8");
+const URL = "https://alecf.github.io/thicket/report-guide.md";
+
+const ranked = (id: string): Ranked => ({
+  score: 100,
+  tag: "source",
+  linesPerCopy: 9,
+  recoverableLines: 16,
+  cluster: {
+    id,
+    level: "L0",
+    kind: "Block",
+    nodeCount: 20,
+    mass: 40,
+    occurrences: [
+      { filePath: "src/alpha.ts", start: 60, end: 300, line: 4, endLine: 12, parentId: 1 },
+      { filePath: "src/beta.ts", start: 10, end: 250, line: 2, endLine: 10, parentId: 3 },
+    ],
+  },
+});
+
+const withFinding = (over: Partial<ReportInput> = {}): ReportInput =>
+  reportInput({ duplication: [ranked("THK-DUP-1")], totalFindings: 1, ...over });
+
+describe("guideText", () => {
+  it("is the guide the site publishes, byte for byte", () => {
+    // The binary carries its own copy. It must not drift from the one the
+    // linked URL serves, or `--embed` and the link teach different things.
+    expect(guideText({ private: false })).toBe(source);
+  });
+
+  it("ends with the feedback section, so a private copy can cut it off", () => {
+    expect(source.split(`\n${FEEDBACK_HEADING}\n`)).toHaveLength(2);
+    const after = source.slice(source.indexOf(`\n${FEEDBACK_HEADING}\n`) + 1);
+    // No second-level heading follows it outside a fence. One would be cut too.
+    let fenced = false;
+    for (const line of after.split("\n").slice(1)) {
+      if (line.startsWith("```")) fenced = !fenced;
+      if (!fenced) expect(line.startsWith("## ")).toBe(false);
+    }
+  });
+
+  it("drops only the feedback section when private", () => {
+    const text = guideText({ private: true });
+    expect(text).not.toContain(FEEDBACK_HEADING);
+    expect(text).not.toContain("gh issue create");
+    expect(text).toContain("## Working with the report");
+    expect(source.startsWith(text.trimEnd())).toBe(true);
+  });
+});
+
+describe("report guide modes", () => {
+  it("links the guide and says nothing about privacy by default", () => {
+    const out = renderMarkdown(withFinding());
+    expect(out).toContain(`**How to read this report:** ${URL}`);
+    expect(out).not.toContain("# How to read a thicket report");
+    expect(out).not.toMatch(/private/i);
+  });
+
+  it("--private keeps the link and forbids filing issues, above the summary", () => {
+    const out = renderMarkdown(withFinding({ private: true }));
+    expect(out).toContain(`**How to read this report:** ${URL}`);
+    const line = out.indexOf("**Private report.**");
+    expect(line).toBeGreaterThan(-1);
+    expect(line).toBeLessThan(out.indexOf("## Summary"));
+    // The linked guide still holds the section, so the header has to name it.
+    expect(out).toContain(FEEDBACK_HEADING.replace(/^## /, ""));
+  });
+
+  it("--embed appends the whole guide after the findings and drops the URL", () => {
+    const out = renderMarkdown(withFinding({ embedGuide: true }));
+    expect(out).not.toContain(URL);
+    expect(out.endsWith(source)).toBe(true);
+    expect(out.indexOf("THK-DUP-1")).toBeLessThan(out.indexOf("# How to read a thicket report"));
+    expect(out.indexOf("How to read this report")).toBeLessThan(out.indexOf("## Summary"));
+  });
+
+  it("--embed --private embeds the guide without the feedback section", () => {
+    const out = renderMarkdown(withFinding({ embedGuide: true, private: true }));
+    expect(out).toContain("**Private report.**");
+    expect(out).toContain("## Working with the report");
+    expect(out).not.toContain(FEEDBACK_HEADING);
+    expect(out).not.toContain("gh issue create");
+  });
+
+  it("counts an embedded guide against the token budget", () => {
+    // The budget is a ceiling on what lands in a context window. The guide
+    // lands there too, so a budget that fits a finding beside a link does not
+    // fit it beside the whole guide.
+    const budgetTokens = 2000;
+    expect(renderReport(withFinding({ budgetTokens })).shown).toBe(1);
+    expect(renderReport(withFinding({ budgetTokens, embedGuide: true })).shown).toBe(0);
+  });
+});

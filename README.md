@@ -28,6 +28,19 @@ Then ask an agent to read the file:
 
 Every report links to [the field guide](https://alecf.github.io/thicket/report-guide.md), as raw Markdown. The agent fetches it and learns what every field means. The guide also says which findings to skip and why.
 
+`--embed` puts the guide in the report instead of a link. The report then stands alone, so you can pipe it straight to an agent:
+
+```bash
+thicket --embed > thicket.md
+claude -p < thicket.md
+```
+
+### Reporting bad findings
+
+The guide asks the agent to help improve thicket. A finding can rank high and still be a bad suggestion. When the agent sees one, it drafts an issue for this repository that explains why the finding was wrong. It asks you before it files anything. It quotes your code only if your repository is public and you agree. Otherwise it writes an invented example with the same shape. It never files when it runs without a person to ask.
+
+`--private` turns this off. The report then tells the agent not to file issues. With `--embed`, the embedded guide leaves the section out entirely.
+
 ### Let the agent run it
 
 It is one command that prints text, so the agent can run it too:
@@ -176,6 +189,8 @@ bun run thicket diff before.json after.json
 | `--no-file-conventions` | Stop ranking down a shape that is declared once per file across files of one role, such as one `meta` per `*.stories.tsx`. thicket reads those as a framework's API rather than as duplication, because deleting a copy deletes a story. |
 | `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
 | `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
+| `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`. |
+| `--private` | Tell the reading agent not to file issues against thicket. With `--embed`, the guide's section on filing issues is left out. |
 | `--json <path>` | Also write the JSON sidecar here. The Markdown still goes to stdout. |
 | `--no-cache` | Re-analyze every file, ignoring `.thicket/cache.db`. |
 | `--help` | Print usage. |

@@ -133,6 +133,10 @@ export interface RunOptions {
    * takes and nothing else — the report is identical either way.
    */
   cache?: boolean;
+  /** Append the field guide instead of linking it. See `ReportInput.embedGuide`. */
+  embedGuide?: boolean;
+  /** Tell the reading agent not to file issues. See `ReportInput.private`. */
+  private?: boolean;
 }
 
 /** See `RunOptions.types`. */
@@ -912,6 +916,8 @@ export async function runReport(
       census: census(ranked, cycles.length),
       ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
       ...(opts.maxLocations === undefined ? {} : { maxFilesPerFinding: opts.maxLocations }),
+      embedGuide: opts.embedGuide ?? false,
+      private: opts.private ?? false,
     };
 
     const { markdown, shown } = renderReport(input);

@@ -55,6 +55,8 @@ Usage: thicket [dir] [options]
                          files of one role, such as *.stories.tsx
   --types <mode>         include | exclude | only (default include) — whether
                          type declarations and type-only imports are analyzed
+  --embed                put the field guide in the report instead of a link
+  --private              tell the reading agent not to file issues against thicket
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -86,6 +88,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         "include-call-sites": { type: "boolean" },
         "file-conventions": { type: "boolean", default: true },
         types: { type: "string" },
+        embed: { type: "boolean" },
+        private: { type: "boolean" },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -226,6 +230,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
       ...(maxLocations === undefined ? {} : { maxLocations }),
+      embedGuide: values.embed ?? false,
+      private: values.private ?? false,
     }));
   } catch (err) {
     // A stack trace on stderr is a worse answer than a sentence: the caller is

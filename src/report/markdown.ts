@@ -3,6 +3,7 @@ import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
+import { FEEDBACK_HEADING, guideText } from "./guide.js";
 import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
 import { typescript } from "../lang/typescript/profile.js";
@@ -153,6 +154,16 @@ export interface ReportInput {
    * finding it can act on.
    */
   maxFilesPerFinding?: number;
+  /**
+   * Append the field guide to the report instead of linking it. The report
+   * then works with no network access, for example under `claude -p`.
+   */
+  embedGuide?: boolean;
+  /**
+   * Tell the reading agent not to file issues against thicket. An embedded
+   * guide also leaves out the section that asks it to.
+   */
+  private?: boolean;
 }
 
 /**
@@ -170,6 +181,25 @@ export interface ReportInput {
  * which version it documents at the top instead.
  */
 const GUIDE_URL = "https://alecf.github.io/thicket/report-guide.md";
+
+/**
+ * Printed under the guide line by `--private`. The linked guide still holds
+ * the feedback section, so this line has to name it to switch it off.
+ */
+const PRIVATE_NOTICE =
+  "**Private report.** Do not file issues against thicket from this report." +
+  ` Skip the guide's section "${FEEDBACK_HEADING.replace(/^## /, "")}".`;
+
+/**
+ * The guide, after the findings, for `--embed`. Last rather than first, so
+ * the report header stays the first thing in the file. The guide ends with a
+ * newline and the report adds one, so the final line is dropped here.
+ */
+function embeddedGuide(input: ReportInput): string[] {
+  if (input.embedGuide !== true) return [];
+  const text = guideText({ private: input.private === true });
+  return ["---", "", ...text.replace(/\n$/, "").split("\n")];
+}
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -299,6 +329,8 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
     }),
   );
 
+  lines.push(...embeddedGuide(input));
+
   return { markdown: lines.join("\n") + "\n", shown };
 }
 
@@ -324,6 +356,8 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
       testDuplication: input.census.testDuplication,
       cycles: input.census.cycles,
     }),
+
+    ...embeddedGuide(input),
   ];
   let used = estimateTokens(fixed.join("\n") + "\n");
 
@@ -398,8 +432,12 @@ function headerLines(input: ReportInput, shown: number): string[] {
     // self-describing: every field, and the question of whether a finding is
     // worth acting on at all, is explained at a stable URL. Pure Markdown at
     // the other end, so fetching it costs nothing to parse.
-    `**How to read this report:** ${GUIDE_URL}`,
+    input.embedGuide === true
+      ? "**How to read this report:** the field guide is at the end of this file," +
+        " after the findings."
+      : `**How to read this report:** ${GUIDE_URL}`,
     "",
+    ...(input.private === true ? [PRIVATE_NOTICE, ""] : []),
     "## Summary",
     "",
     "| metric | value |",

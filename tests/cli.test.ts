@@ -88,6 +88,16 @@ describe("main", () => {
     expect(io.stdout()).toContain("# thicket report");
   });
 
+  it("--embed puts the guide in the report, and --private strips its feedback section", async () => {
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--embed", "--private"])).toBe(0);
+    const out = io.stdout();
+    expect(out).toContain("# How to read a thicket report");
+    expect(out).toContain("**Private report.**");
+    expect(out).not.toContain("## Reporting a bad finding to thicket");
+    expect(out).not.toContain("https://alecf.github.io/thicket/report-guide.md");
+  });
+
   it("exits non-zero when the project has no source files", async () => {
     const io = capture();
     expect(await main(["--config", emptyConfig()])).not.toBe(0);
