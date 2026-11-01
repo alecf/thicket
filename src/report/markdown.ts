@@ -236,6 +236,12 @@ function embeddedGuide(input: ReportInput): string[] {
 }
 
 /**
+ * A `--budget-tokens` that cannot hold what the report must print. Its own
+ * class so the CLI states it as a usage error, not as a failed analysis.
+ */
+export class BudgetError extends Error {}
+
+/**
  * Chars/4. A deliberate approximation: exact tokenization would mean shipping
  * a tokenizer per consuming model, and the budget only has to be close enough
  * that a report sized for a context window fits it. Code tokenizes slightly
@@ -401,6 +407,16 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
     ...embeddedGuide(input),
   ];
   let used = estimateTokens(fixed.join("\n") + "\n");
+  // The header and summary print whatever the budget, because a report that
+  // states nothing is useless. A 6000-token guide is not in that class: it
+  // would break the ceiling by itself, so the run is refused instead.
+  if (input.embedGuide === true && used > input.budgetTokens) {
+    const guideTokens = estimateTokens(embeddedGuide(input).join("\n"));
+    throw new BudgetError(
+      `--budget-tokens ${input.budgetTokens} cannot fit the embedded guide` +
+        ` (about ${guideTokens} tokens). Raise it, or drop --embed.`,
+    );
+  }
 
   const out: Block[] = [];
   let section: string | undefined;

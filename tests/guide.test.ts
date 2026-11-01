@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FEEDBACK_HEADING, guideText } from "../src/report/guide.js";
-import { TASKS } from "../src/report/markdown.js";
+import { BudgetError, TASKS } from "../src/report/markdown.js";
 import { renderMarkdown, renderReport, type ReportInput } from "../src/report/markdown.js";
 import type { Ranked } from "../src/report/rank.js";
 import { reportInput } from "./report-fixtures.js";
@@ -114,14 +114,35 @@ describe("report guide modes", () => {
 
   it("counts an embedded guide against the token budget", () => {
     // The budget is a ceiling on what lands in a context window. The guide
-    // lands there too, so a budget that fits a finding beside a link does not
-    // fit it beside the whole guide.
-    const budgetTokens = 2000;
-    expect(renderReport(withFinding({ budgetTokens })).shown).toBe(1);
-    const { markdown, shown } = renderReport(withFinding({ budgetTokens, embedGuide: true }));
-    expect(shown).toBe(0);
-    // Said in the report, or an empty report reads as a clean codebase.
-    expect(markdown).toMatch(/The embedded guide is about \d+ tokens, and it counts against the budget of 2000\./);
+    // lands there too, so a budget that fits findings beside a link fits
+    // fewer beside the whole guide.
+    const budgetTokens = 7000;
+    const findings = Array.from({ length: 40 }, (_, i) => ranked(`THK-DUP-${i}`));
+    const input = { budgetTokens, duplication: findings, totalFindings: 40 };
+    const linked = renderReport(withFinding(input)).shown;
+    const { markdown, shown } = renderReport(withFinding({ ...input, embedGuide: true }));
+    expect(shown).toBeLessThan(linked);
+    // Said in the report, or a short report reads as a clean codebase.
+    expect(markdown).toMatch(/The embedded guide is about \d+ tokens, and it counts against the budget of 7000\./);
+  });
+
+  it("refuses a budget the embedded guide alone overflows", () => {
+    // The budget is a hard ceiling. Appending a 6000-token guide to a report
+    // capped at 2000 breaks it by three times, whatever the warning says.
+    expect(() => renderReport(withFinding({ budgetTokens: 2000, embedGuide: true }))).toThrow(
+      BudgetError,
+    );
+    expect(() => renderReport(withFinding({ budgetTokens: 2000, embedGuide: true }))).toThrow(
+      /--budget-tokens 2000 cannot fit the embedded guide \(about \d+ tokens\)/,
+    );
+  });
+
+  it.each([7000, 8000, 20_000])("stays under an accepted budget of %d with the guide", (budgetTokens) => {
+    const findings = Array.from({ length: 40 }, (_, i) => ranked(`THK-DUP-${i}`));
+    const { markdown } = renderReport(
+      withFinding({ budgetTokens, embedGuide: true, duplication: findings, totalFindings: 40 }),
+    );
+    expect(Math.ceil(markdown.length / 4)).toBeLessThanOrEqual(budgetTokens);
   });
 
   it("says nothing about the guide's cost when the budget did not cut anything", () => {

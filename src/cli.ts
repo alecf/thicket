@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { clearCache } from "./cache/db.js";
 import { commonRootDir } from "./extract/ts-adapter.js";
 import { diffReports, formatDiff, parseReport } from "./report/diff.js";
-import { TASKS, type Task } from "./report/markdown.js";
+import { BudgetError, TASKS, type Task } from "./report/markdown.js";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
 
@@ -244,6 +244,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       ...(task === undefined ? {} : { task }),
     }));
   } catch (err) {
+    if (err instanceof BudgetError) return fail(err.message);
     // A stack trace on stderr is a worse answer than a sentence: the caller is
     // usually a harness, and an unhandled rejection exits 1 with no message.
     return fail(`analysis failed: ${(err as Error).message}`);

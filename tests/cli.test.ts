@@ -230,6 +230,15 @@ describe("main", () => {
     expect(shallow.stdout()).toMatch(/granularity: dir:1 \(2 modules\)/);
   });
 
+  it("--embed refuses a budget the guide cannot fit, naming both fixes", async () => {
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--embed", "--budget-tokens", "2000"])).toBe(1);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(
+      /^thicket: --budget-tokens 2000 cannot fit the embedded guide \(about \d+ tokens\)\. Raise it, or drop --embed\.\n$/,
+    );
+  });
+
   it("--task puts the task in the report, and rejects one it does not know", async () => {
     const ok = capture();
     expect(await main(["--config", fixtureConfig(), "--task", "triage"])).toBe(0);

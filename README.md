@@ -205,7 +205,7 @@ bun run thicket diff before.json after.json
 | `--no-file-conventions` | Stop ranking down a shape that is declared once per file across files of one role, such as one `meta` per `*.stories.tsx`. thicket reads those as a framework's API rather than as duplication, because deleting a copy deletes a story. |
 | `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
 | `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
-| `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`. |
+| `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`, and a budget too small to hold it is refused. |
 | `--private` | Tell the reading agent not to file issues against thicket. With `--embed`, the guide's section on filing issues is left out. |
 | `--task <task>` | What the reading agent should do: `triage` (judge every finding, edit nothing), `fix` (fix one finding and verify it), or `pr` (fix one finding and open a pull request). Without it, your own prompt decides. |
 | `--json <path>` | Also write the JSON sidecar here. The Markdown still goes to stdout. |
