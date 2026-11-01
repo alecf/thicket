@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FEEDBACK_HEADING, guideText } from "../src/report/guide.js";
+import { TASKS } from "../src/report/markdown.js";
 import { renderMarkdown, renderReport, type ReportInput } from "../src/report/markdown.js";
 import type { Ranked } from "../src/report/rank.js";
 import { reportInput } from "./report-fixtures.js";
@@ -50,6 +51,22 @@ describe("guideText", () => {
     }
   });
 
+  it("cuts a CRLF checkout the same way, and emits LF either way", () => {
+    // Windows with core.autocrlf checks the guide out with CRLF. A cut keyed
+    // on "\n## " found nothing there and threw, so no report was produced.
+    const crlf = source.replaceAll("\n", "\r\n");
+    expect(guideText({ private: false }, crlf)).toBe(source);
+    expect(guideText({ private: true }, crlf)).toBe(guideText({ private: true }));
+  });
+
+  it("never asks for the header's file or line counts in an issue", () => {
+    // The header line carries `N files / N LOC`. The privacy list forbids
+    // both, so an instruction to copy that line leaked them.
+    const feedback = source.slice(source.indexOf(FEEDBACK_HEADING));
+    expect(feedback).not.toMatch(/version line/);
+    expect(feedback).toContain("file counts or line counts");
+  });
+
   it("drops only the feedback section when private", () => {
     const text = guideText({ private: true });
     expect(text).not.toContain(FEEDBACK_HEADING);
@@ -88,6 +105,8 @@ describe("report guide modes", () => {
   it("--embed --private embeds the guide without the feedback section", () => {
     const out = renderMarkdown(withFinding({ embedGuide: true, private: true }));
     expect(out).toContain("**Private report.**");
+    // The section is gone, so the notice must not send the agent looking for it.
+    expect(out).not.toContain("Skip the guide's section");
     expect(out).toContain("## Working with the report");
     expect(out).not.toContain(FEEDBACK_HEADING);
     expect(out).not.toContain("gh issue create");
@@ -99,7 +118,15 @@ describe("report guide modes", () => {
     // fit it beside the whole guide.
     const budgetTokens = 2000;
     expect(renderReport(withFinding({ budgetTokens })).shown).toBe(1);
-    expect(renderReport(withFinding({ budgetTokens, embedGuide: true })).shown).toBe(0);
+    const { markdown, shown } = renderReport(withFinding({ budgetTokens, embedGuide: true }));
+    expect(shown).toBe(0);
+    // Said in the report, or an empty report reads as a clean codebase.
+    expect(markdown).toMatch(/The embedded guide is about \d+ tokens, and it counts against the budget of 2000\./);
+  });
+
+  it("says nothing about the guide's cost when the budget did not cut anything", () => {
+    const out = renderMarkdown(withFinding({ budgetTokens: 100_000, embedGuide: true }));
+    expect(out).not.toContain("The embedded guide is about");
   });
 });
 
@@ -118,6 +145,21 @@ describe("--task", () => {
   it("forbids edits in triage and limits fix to one finding", () => {
     expect(renderMarkdown(withFinding({ task: "triage" }))).toContain("Do not edit any file.");
     expect(renderMarkdown(withFinding({ task: "fix" }))).toContain("Fix one finding only.");
+  });
+
+  it("asks fix and pr for the typecheck and the original command, without the guide", () => {
+    // Each line has to stand alone in a linked report. vitest does not
+    // typecheck, and the report shows a config hash, not the flags.
+    for (const task of ["fix", "pr"] as const) {
+      const out = renderMarkdown(withFinding({ task }));
+      expect(out).toContain("typecheck");
+      expect(out).toContain("same command");
+    }
+  });
+
+  it("names every task in one list the CLI, the type and the lines share", () => {
+    expect([...TASKS]).toEqual(["triage", "fix", "pr"]);
+    for (const task of TASKS) expect(renderMarkdown(withFinding({ task }))).toContain(`**Task: ${task}.**`);
   });
 
   it("is explained in the guide, before the feedback section a private copy cuts", () => {

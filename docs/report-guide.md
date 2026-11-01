@@ -34,7 +34,9 @@ review, and it keeps the re-run diff readable.
 2. Fix it. Near-variants of the same shape are part of the same fix. Other
    findings are not.
 3. Run the project's tests and its typecheck.
-4. Re-run thicket the same way, and check that the finding ID is gone.
+4. Re-run thicket with the same command, and check that the finding ID is gone.
+   The report shows a config hash, not the flags. If you do not know the
+   command, say so. A finding can disappear because a flag changed.
 5. Leave the change uncommitted.
 
 Report which finding you fixed, what changed, and how you verified it. Say
@@ -494,8 +496,8 @@ first, the same as for a new issue.
 Title it `Bad finding: <the pattern, in one line>`. Give the body four parts.
 
 **What thicket reported.** Name the section, the level (`L0` or `L1`), the copy
-count and the rank. Include the `thicket` version line from the report header.
-List any flags the run used.
+count and the rank. Give the thicket version, which is the number after
+`thicket` on the report's first line. List any flags the run used.
 
 **Why the static analysis was wrong.** Name the property that thicket missed.
 State it as a fact about the code: "every copy differs in its keys" or "each

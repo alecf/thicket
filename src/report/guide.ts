@@ -15,10 +15,13 @@ export const FEEDBACK_HEADING = "## Reporting a bad finding to thicket";
  * The field guide, for `--embed`. A private copy leaves out the feedback
  * section. An agent cannot act on an instruction it never reads.
  */
-export function guideText(opts: { private: boolean }): string {
-  if (!opts.private) return guide;
-  const at = guide.indexOf(`\n${FEEDBACK_HEADING}\n`);
+export function guideText(opts: { private: boolean }, source: string = guide): string {
+  // A Windows checkout with core.autocrlf holds the guide with CRLF. The cut
+  // below keys on "\n", and the report must be byte-identical across hosts.
+  const text = source.replaceAll("\r\n", "\n");
+  if (!opts.private) return text;
+  const at = text.indexOf(`\n${FEEDBACK_HEADING}\n`);
   if (at === -1) throw new Error(`report guide has no "${FEEDBACK_HEADING}" section`);
   // The section opens after a `---` rule. Drop the rule with it.
-  return guide.slice(0, at).replace(/\n+---\n*$/, "") + "\n";
+  return text.slice(0, at).replace(/\n+---\n*$/, "") + "\n";
 }

@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { clearCache } from "./cache/db.js";
 import { commonRootDir } from "./extract/ts-adapter.js";
 import { diffReports, formatDiff, parseReport } from "./report/diff.js";
+import { TASKS, type Task } from "./report/markdown.js";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
 
@@ -57,7 +58,7 @@ Usage: thicket [dir] [options]
                          type declarations and type-only imports are analyzed
   --embed                put the field guide in the report instead of a link
   --private              tell the reading agent not to file issues against thicket
-  --task <task>          triage | fix | pr — what the reading agent should do;
+  --task <task>          what the reading agent should do: triage, fix, or pr.
                          fix and pr change one finding per run
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
@@ -202,7 +203,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const task = values.task;
-  if (task !== undefined && task !== "triage" && task !== "fix" && task !== "pr") {
+  if (task !== undefined && !isTask(task)) {
     return fail(`--task must be triage, fix, or pr; got ${task}`);
   }
 
@@ -253,6 +254,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     await writeFile(resolve(values.json), JSON.stringify(json, null, 2) + "\n");
   }
   return 0;
+}
+
+function isTask(value: string): value is Task {
+  return (TASKS as readonly string[]).includes(value);
 }
 
 /** True for a path that exists and is a directory. */
