@@ -233,7 +233,7 @@ The depth presets, in full:
 
 ## Report format
 
-Pointed at this repository's own test fixture, `bun run thicket --config tests/fixtures/sample/tsconfig.json` prints this. Only the first line differs between releases. It carries the version and a config hash that includes the version.
+Pointed at this repository's own test fixture, `bun run thicket --config tests/fixtures/sample/tsconfig.json` prints this. Only the third line differs between releases. It names the thicket version, and its config hash includes the version.
 
 `````markdown
 # thicket report

@@ -81,7 +81,7 @@ Non-negotiable §2 covers the move to a stable 7.1.
 
 ## Releasing
 
-Merge the release PR. Nothing else needs a console.
+A release is one merge. Merge the release PR, and the workflows do the rest.
 
 - `release-please.yml` keeps one release PR open against main. Each push to
   main updates it. It bumps `package.json` and `src/version.ts`, and it writes
@@ -98,17 +98,28 @@ Merge the release PR. Nothing else needs a console.
 ### Two tokens
 
 - `RELEASE_TOKEN` lets release-please open the PR and push the tag. The main
-  ruleset requires CI checks, and a PR opened with `github.token` starts no
-  workflows, so it could never merge. A tag pushed with `github.token` does
-  not start `release.yml` either. It is a fine-grained token on `alecf/thicket`
-  with Contents and Pull requests set to read and write.
+  ruleset requires CI checks. A PR opened with `github.token` starts no
+  workflows, so the checks never report and the PR cannot merge. A tag pushed
+  with `github.token` does not start `release.yml` either. The token is a
+  fine-grained token on `alecf/thicket`. It has Contents and Pull requests set
+  to read and write.
 - `TAP_TOKEN` lets `release.yml` push `Formula/thicket.rb`. It is a
   fine-grained token on `alecf/homebrew-tap` with Contents set to read and
   write.
 
 Both expire. Nothing tests `TAP_TOKEN` before a real release, because the
 dry run skips the tap push. If the tap push fails, renew the token and re-run
-the publish job. That job reuses a release that already exists.
+the publish job.
+
+### The release is public before the build
+
+release-please publishes the GitHub release when the release PR merges.
+`release.yml` builds and runs the artifacts after that, then uploads them into
+the existing release. So a failed build leaves a public release with notes and
+no tarballs. The tap is safe, because the formula push runs last. This is a
+deliberate trade for a one-merge release. A failure outside the code, such as
+an expired token, needs only a re-run of the failed jobs. A code fix needs a
+new release.
 
 ### Dry run
 

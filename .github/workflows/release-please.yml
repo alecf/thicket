@@ -22,10 +22,10 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         with:
-          # Not github.token. The main ruleset requires CI checks, and a PR
-          # opened with github.token starts no workflows, so it could never
-          # merge. A tag pushed with github.token does not start release.yml
-          # either. A personal token does both.
+          # Not github.token. The main ruleset requires CI checks. A PR opened
+          # with github.token starts no workflows, so its checks never report
+          # and it cannot merge. A tag pushed with github.token does not start
+          # release.yml either. A personal token does both.
           token: ${{ secrets.RELEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

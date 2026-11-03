@@ -270,7 +270,7 @@ export function build() {
       description: "A complete thicket report over a small fixture project.",
       body: `<article class="prose">
 <h1 id="example-report">Example report</h1>
-<p>This is a complete report over a four-file fixture, rendered exactly as thicket emits it. It is the same file the test suite pins byte for byte, so nothing here is an illustration of output the tool would not produce.</p>
+<p>This is a complete report over a four-file fixture, rendered exactly as thicket emits it. It is the same file the test suite pins byte for byte, so nothing here is an illustration of output the tool would not produce. The test suite pins the version at 0.1.0. A newer release prints its own version and config hash on the third line.</p>
 <hr>
 ${markdownToHtml(exampleMarkdown)}
 </article>`,
