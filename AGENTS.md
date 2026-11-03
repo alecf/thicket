@@ -79,6 +79,48 @@ The tsgo version joins the config hash that keys the cache, so a new compiler ca
 change the report. Bump it by hand, then re-run the determinism job.
 Non-negotiable §2 covers the move to a stable 7.1.
 
+## Releasing
+
+Merge the release PR. Nothing else needs a console.
+
+- `release-please.yml` keeps one release PR open against main. Each push to
+  main updates it. It bumps `package.json` and `src/version.ts`, and it writes
+  `CHANGELOG.md` from the conventional commits since the last release.
+- `feat:` raises the minor version and `fix:` raises the patch. While the
+  version is below 1.0, a breaking change raises the minor version too.
+- Merging the PR creates the `v*` tag and the GitHub release. The tag starts
+  `release.yml`. It builds every target, runs each artifact, uploads the
+  tarballs and pushes the formula to the tap.
+- `tests/version.test.ts` fails if `src/version.ts` and `package.json`
+  disagree. Keep the `x-release-please-version` comment on the `VERSION` line,
+  because release-please finds the line by it.
+
+### Two tokens
+
+- `RELEASE_TOKEN` lets release-please open the PR and push the tag. The main
+  ruleset requires CI checks, and a PR opened with `github.token` starts no
+  workflows, so it could never merge. A tag pushed with `github.token` does
+  not start `release.yml` either. It is a fine-grained token on `alecf/thicket`
+  with Contents and Pull requests set to read and write.
+- `TAP_TOKEN` lets `release.yml` push `Formula/thicket.rb`. It is a
+  fine-grained token on `alecf/homebrew-tap` with Contents set to read and
+  write.
+
+Both expire. Nothing tests `TAP_TOKEN` before a real release, because the
+dry run skips the tap push. If the tap push fails, renew the token and re-run
+the publish job. That job reuses a release that already exists.
+
+### Dry run
+
+Run `release.yml` from the Actions tab with `dry_run` checked. It builds and
+runs every artifact and publishes nothing.
+
+### The golden report pins its own version
+
+`tests/golden.test.ts` mocks `VERSION`. The version appears in the report
+header and feeds the config hash. Without the mock, every release PR would
+fail the golden test.
+
 ## Non-negotiables
 
 ### 1. Determinism is a correctness property
