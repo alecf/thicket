@@ -88,6 +88,16 @@ describe("main", () => {
     expect(io.stdout()).toContain("# thicket report");
   });
 
+  it("--embed puts the guide in the report, and --private strips its feedback section", async () => {
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--embed", "--private"])).toBe(0);
+    const out = io.stdout();
+    expect(out).toContain("# How to read a thicket report");
+    expect(out).toContain("**Private report.**");
+    expect(out).not.toContain("## Reporting a bad finding to thicket");
+    expect(out).not.toContain("https://alecf.github.io/thicket/report-guide.md");
+  });
+
   it("exits non-zero when the project has no source files", async () => {
     const io = capture();
     expect(await main(["--config", emptyConfig()])).not.toBe(0);
@@ -218,6 +228,25 @@ describe("main", () => {
     // Depth 1 collapses three directories into one module. That difference is
     // the whole feature.
     expect(shallow.stdout()).toMatch(/granularity: dir:1 \(2 modules\)/);
+  });
+
+  it("--embed refuses a budget the guide cannot fit, naming both fixes", async () => {
+    const io = capture();
+    expect(await main(["--config", fixtureConfig(), "--embed", "--budget-tokens", "2000"])).toBe(1);
+    expect(io.stdout()).toBe("");
+    expect(io.stderr()).toMatch(
+      /^thicket: --budget-tokens 2000 cannot fit the embedded guide \(about \d+ tokens\)\. Raise it, or drop --embed\.\n$/,
+    );
+  });
+
+  it("--task puts the task in the report, and rejects one it does not know", async () => {
+    const ok = capture();
+    expect(await main(["--config", fixtureConfig(), "--task", "triage"])).toBe(0);
+    expect(ok.stdout()).toContain("**Task: triage.**");
+    vi.restoreAllMocks();
+    const bad = capture();
+    expect(await main(["--config", fixtureConfig(), "--task", "refactor"])).not.toBe(0);
+    expect(bad.stderr()).toMatch(/--task must be triage, fix, or pr; got refactor/);
   });
 
   it("still rejects a granularity that is neither a mode nor a depth", async () => {

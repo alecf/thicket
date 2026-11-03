@@ -223,7 +223,14 @@ describe("documented flags", () => {
       ),
     ];
     expect(commands.length).toBeGreaterThan(4);
-    const used = new Set(commands.flatMap((body) => body.match(/--[a-z][a-z-]*/g) ?? []));
+    // Every line except one that runs `claude`, whose flags are another
+    // program's. Skipping only those keeps `npx thicket` and `cd x && thicket`
+    // checked. Continuation lines are joined first, so a wrapped `claude`
+    // command is skipped whole.
+    const lines = commands
+      .flatMap((body) => body.replace(/\\\n/g, " ").split("\n"))
+      .filter((line) => !/^claude\b/.test(line.trim()));
+    const used = new Set(lines.flatMap((line) => line.match(/--[a-z][a-z-]*/g) ?? []));
     expect(used.has("--config")).toBe(true);
     expect([...used].filter((flag) => !accepted.has(flag))).toEqual([]);
   });

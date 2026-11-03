@@ -1,12 +1,57 @@
 # How to read a thicket report
 
-You are an agent that has been handed a file called `thicket.md` (or similar) and
-asked to clean something up. This page explains what is in that file, what each
+You are an agent that has been handed a file called `thicket.md` (or similar).
+This page explains what is in that file, what each
 field means, and — the part that matters most — how to tell a finding worth
 acting on from one that merely scored well.
 
 thicket reports **candidates**. It does not judge and it does not edit. Deciding
 what to do is your job, and this guide exists so you can decide well.
+
+## Your task
+
+The report header may carry a **Task** line. Do that task.
+
+With no Task line, do what the person asked. If nobody asked for anything,
+do `triage`. Do not edit files you were not asked to edit.
+
+### `triage`
+
+Judge every finding. For each one, say whether it is worth acting on, and give
+the reason. The rest of this guide explains how to decide. Do not edit any file.
+
+Order your answer by what you would do first. If a person can answer, end by
+asking which finding to fix. If you run non-interactively, stop after the
+verdicts.
+
+### `fix`
+
+Fix one finding only. One finding per run keeps each change small enough to
+review, and it keeps the re-run diff readable.
+
+1. Judge the findings as in `triage`. Pick the one most worth fixing. It need not
+   be the first one.
+2. Fix it. Near-variants of the same shape are part of the same fix. Other
+   findings are not.
+3. Run the project's tests and its typecheck.
+4. Re-run thicket with the same command, and check that the finding ID is gone.
+   The report shows a config hash, not the flags. If you do not know the
+   command, say so. A finding can disappear because a flag changed.
+5. Leave the change uncommitted.
+
+Report which finding you fixed, what changed, and how you verified it. Say
+which findings you passed over, and why. If you could not run the tests, say
+so first. An unverified change is not finished.
+
+If no finding is worth fixing, change nothing and say why.
+
+### `pr`
+
+Do the `fix` task. Then create a branch, commit the change, and open a pull
+request. Put the finding ID and your verification in the description.
+
+Open the pull request only if the tests ran and passed. Otherwise stop with the
+change uncommitted, and say what blocked you.
 
 ## This is not a lint report
 
@@ -391,3 +436,107 @@ code, deliberate, or generated.
 **Report what you did not do.** "Findings 2, 4 and 7 are not worth consolidating
 because the copies share only a syntax template" is a better outcome than a
 thousand-line diff that makes the code worse.
+
+---
+
+## Reporting a bad finding to thicket
+
+Skip this section if the report header says **Private report**.
+
+thicket improves when someone reports a finding that was wrong. The reason it
+was wrong is often general. A rule that catches it would improve every report.
+You know the reason at the end of your analysis, and nobody else will.
+
+### When to file
+
+File only after you finish the analysis and decide what is worth fixing.
+
+File when a finding ranked high and was a bad suggestion. Some examples:
+
+- The copies share a syntax template and not a concept.
+- The duplication is a framework's required API.
+- A suggested cut removes no cycle that matters.
+- A field in the report was wrong or misleading.
+
+Do not file when the finding was sound and the person chose not to act on it.
+
+Do not file without a person to ask. If you run non-interactively, for example
+under `claude -p`, file nothing. Say in your summary which finding looked worth
+reporting, and why.
+
+### Ask first
+
+Filing an issue publishes text on GitHub. Deleting it later does not unpublish
+it. So ask before you file, every time.
+
+1. **Ask whether you may file an issue** at
+   <https://github.com/alecf/thicket/issues>. Show the person the draft title and
+   body first.
+2. **Find out whether the analyzed repository is public.** Run
+   `gh repo view --json visibility --jq .visibility` inside it. Treat it as
+   private unless that prints `PUBLIC`. A repository with no GitHub remote is
+   private. So is an internal repository, and a public fork of a private one.
+3. **If it is public, ask what the issue may show.** Ask separately whether it
+   may link to the repository, and whether it may quote or link the code. The
+   person may agree to one and not the other.
+
+### Check for an existing issue
+
+Search before you file:
+
+```bash
+gh issue list --repo alecf/thicket --state all --search "<two or three keywords>"
+```
+
+If an issue already covers the same pattern, add your case as a comment. Ask
+first, the same as for a new issue.
+
+### What the issue says
+
+Title it `Bad finding: <the pattern, in one line>`. Give the body four parts.
+
+**What thicket reported.** Name the section, the level (`L0` or `L1`), the copy
+count and the rank. Give the thicket version, which is the number after
+`thicket` on the report's first line. List any flags the run used.
+
+**Why the static analysis was wrong.** Name the property that thicket missed.
+State it as a fact about the code: "every copy differs in its keys" or "each
+file is required to export one `meta`". A reader must be able to check it
+without the original repository.
+
+**An example.** It must reproduce the same finding at the same level.
+
+- If the repository is public and the person agreed, quote the code. Link it
+  with a permalink to a commit SHA, not to a branch.
+- Otherwise, write a small invented example with the same shape. Two or three
+  short files are usually enough. If you can, run thicket on it and confirm
+  that it reports the same finding.
+
+**A proposed rule. Optional.** If you see a general test that would rank this
+finding down, describe it. Name the syntax it inspects. Say what else it might
+suppress by mistake. A rule that names one codebase's identifiers is not
+general.
+
+### What a private repository's issue must not contain
+
+When the repository is private, or the person declined a link, the issue
+contains none of these:
+
+- the repository, organization, product or package names
+- file paths or directory names
+- identifiers, string literals, comments or domain terms from the code
+- the report's summary table, file counts or line counts
+- the finding ID, because it is a hash of private code
+
+Rename everything in your example. Read the draft once more for leaks before
+you show it to the person. If the problem cannot be shown without the private
+code, do not file.
+
+### Filing
+
+```bash
+gh issue create --repo alecf/thicket --title "Bad finding: …" --body-file issue.md
+```
+
+Write the body to a file first. A body passed on the command line breaks on
+backticks. Give the person the issue URL when you are done.

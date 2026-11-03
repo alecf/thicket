@@ -3,6 +3,7 @@ import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
+import { FEEDBACK_HEADING, guideText } from "./guide.js";
 import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
 import { typescript } from "../lang/typescript/profile.js";
@@ -153,15 +154,29 @@ export interface ReportInput {
    * finding it can act on.
    */
   maxFilesPerFinding?: number;
+  /**
+   * Append the field guide to the report instead of linking it. The report
+   * then works with no network access, for example under `claude -p`.
+   */
+  embedGuide?: boolean;
+  /**
+   * Tell the reading agent not to file issues against thicket. An embedded
+   * guide also leaves out the section that asks it to.
+   */
+  private?: boolean;
+  /** What the reading agent is asked to do. Omit to let the person's prompt decide. */
+  task?: Task;
 }
 
 /**
- * Chars/4. A deliberate approximation: exact tokenization would mean shipping
- * a tokenizer per consuming model, and the budget only has to be close enough
- * that a report sized for a context window fits it. Code tokenizes slightly
- * denser than 4 chars, so this errs toward over-counting, which is the safe
- * direction for a ceiling.
+ * Every `--task`, in the order the CLI lists them. The CLI validates against
+ * this list, so a task added here and to `TASK_LINES` is accepted everywhere.
  */
+export const TASKS = ["triage", "fix", "pr"] as const;
+
+/** See `TASK_LINES`. */
+export type Task = (typeof TASKS)[number];
+
 /**
  * Where the field-by-field guide lives.
  *
@@ -171,6 +186,68 @@ export interface ReportInput {
  */
 const GUIDE_URL = "https://alecf.github.io/thicket/report-guide.md";
 
+/**
+ * Printed under the guide line by `--private`. The linked guide still holds
+ * the feedback section, so a linked report has to name it to switch it off.
+ * An embedded guide has lost the section, so naming it there would send the
+ * agent looking for something cut.
+ */
+function privateNotice(input: ReportInput): string {
+  const notice = "**Private report.** Do not file issues against thicket from this report.";
+  if (input.embedGuide === true) return notice;
+  return notice + ` Skip the guide's section "${FEEDBACK_HEADING.replace(/^## /, "")}".`;
+}
+
+/**
+ * The job `--task` hands the reading agent, stated at the top of the report.
+ *
+ * A report with no task still gets acted on. Handed an embedded report under
+ * `claude -p` and nothing else, an agent decided on "the usual job" and edited
+ * eight files to fix two findings, with no test run. Each line is complete on
+ * its own, so a linked report works without fetching the guide. The guide's
+ * "Your task" section gives the detail.
+ */
+const TASK_LINES: Record<Task, string> = {
+  triage:
+    "**Task: triage.** Judge every finding. Say whether each one is worth acting" +
+    " on, and why. Do not edit any file. If a person can answer, end by asking" +
+    " which finding to fix.",
+  fix:
+    "**Task: fix.** Fix one finding only. Pick the one most worth fixing. Then run" +
+    " the project's tests and its typecheck. Re-run thicket with the same command," +
+    " and confirm the finding is gone. Leave the change uncommitted. Report what" +
+    " you changed and what you passed over.",
+  pr:
+    "**Task: pr.** Fix one finding only. Then run the project's tests and its" +
+    " typecheck, and re-run thicket with the same command to confirm the finding" +
+    " is gone. Then create a branch, commit, and open a pull request. If the tests" +
+    " did not run or did not pass, stop before the pull request and say why.",
+};
+
+/**
+ * The guide, after the findings, for `--embed`. Last rather than first, so
+ * the report header stays the first thing in the file. The guide ends with a
+ * newline and the report adds one, so the final line is dropped here.
+ */
+function embeddedGuide(input: ReportInput): string[] {
+  if (input.embedGuide !== true) return [];
+  const text = guideText({ private: input.private === true });
+  return ["---", "", ...text.replace(/\n$/, "").split("\n")];
+}
+
+/**
+ * A `--budget-tokens` that cannot hold what the report must print. Its own
+ * class so the CLI states it as a usage error, not as a failed analysis.
+ */
+export class BudgetError extends Error {}
+
+/**
+ * Chars/4. A deliberate approximation: exact tokenization would mean shipping
+ * a tokenizer per consuming model, and the budget only has to be close enough
+ * that a report sized for a context window fits it. Code tokenizes slightly
+ * denser than 4 chars, so this errs toward over-counting, which is the safe
+ * direction for a ceiling.
+ */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -299,6 +376,8 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
     }),
   );
 
+  lines.push(...embeddedGuide(input));
+
   return { markdown: lines.join("\n") + "\n", shown };
 }
 
@@ -324,8 +403,20 @@ function selectWithinBudget(input: ReportInput, blocks: readonly Block[]): Block
       testDuplication: input.census.testDuplication,
       cycles: input.census.cycles,
     }),
+
+    ...embeddedGuide(input),
   ];
   let used = estimateTokens(fixed.join("\n") + "\n");
+  // The header and summary print whatever the budget, because a report that
+  // states nothing is useless. A 6000-token guide is not in that class: it
+  // would break the ceiling by itself, so the run is refused instead.
+  if (input.embedGuide === true && used > input.budgetTokens) {
+    const guideTokens = estimateTokens(embeddedGuide(input).join("\n"));
+    throw new BudgetError(
+      `--budget-tokens ${input.budgetTokens} cannot fit the embedded guide` +
+        ` (about ${guideTokens} tokens). Raise it, or drop --embed.`,
+    );
+  }
 
   const out: Block[] = [];
   let section: string | undefined;
@@ -398,8 +489,13 @@ function headerLines(input: ReportInput, shown: number): string[] {
     // self-describing: every field, and the question of whether a finding is
     // worth acting on at all, is explained at a stable URL. Pure Markdown at
     // the other end, so fetching it costs nothing to parse.
-    `**How to read this report:** ${GUIDE_URL}`,
+    input.embedGuide === true
+      ? "**How to read this report:** the field guide is at the end of this file," +
+        " after the findings."
+      : `**How to read this report:** ${GUIDE_URL}`,
     "",
+    ...(input.private === true ? [privateNotice(input), ""] : []),
+    ...(input.task === undefined ? [] : [TASK_LINES[input.task], ""]),
     "## Summary",
     "",
     "| metric | value |",
@@ -533,6 +629,18 @@ function omittedSection(
     ...rows.map(([label, total, seen]) => `| ${label} | ${total} | ${seen} |`),
     "",
   ];
+
+  if (input.embedGuide === true && input.budgetTokens !== undefined) {
+    // An embedded guide is about 6000 tokens. Under a small budget it leaves
+    // room for no findings, and an empty report reads as a clean codebase.
+    const guideTokens = estimateTokens(embeddedGuide(input).join("\n"));
+    lines.push(
+      `The embedded guide is about ${guideTokens} tokens, and it counts against the` +
+        ` budget of ${input.budgetTokens}. Raise \`--budget-tokens\`, or drop` +
+        " `--embed`, to see more findings.",
+      "",
+    );
+  }
 
   if (c.bands.length > 0) {
     lines.push(

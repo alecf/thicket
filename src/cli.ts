@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { clearCache } from "./cache/db.js";
 import { commonRootDir } from "./extract/ts-adapter.js";
 import { diffReports, formatDiff, parseReport } from "./report/diff.js";
+import { BudgetError, TASKS, type Task } from "./report/markdown.js";
 import { runReport } from "./run.js";
 import { VERSION } from "./version.js";
 
@@ -55,6 +56,10 @@ Usage: thicket [dir] [options]
                          files of one role, such as *.stories.tsx
   --types <mode>         include | exclude | only (default include) — whether
                          type declarations and type-only imports are analyzed
+  --embed                put the field guide in the report instead of a link
+  --private              tell the reading agent not to file issues against thicket
+  --task <task>          what the reading agent should do: triage, fix, or pr.
+                         fix and pr change one finding per run
   --json <path>          also write the JSON sidecar here
   --no-cache             re-analyze every file, ignoring .thicket/cache.db
   --help                 show this message
@@ -86,6 +91,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         "include-call-sites": { type: "boolean" },
         "file-conventions": { type: "boolean", default: true },
         types: { type: "string" },
+        embed: { type: "boolean" },
+        private: { type: "boolean" },
+        task: { type: "string" },
         json: { type: "string" },
         cache: { type: "boolean", default: true },
         help: { type: "boolean" },
@@ -194,6 +202,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     return fail(`--types must be include, exclude, or only; got ${types}`);
   }
 
+  const task = values.task;
+  if (task !== undefined && !isTask(task)) {
+    return fail(`--task must be triage, fix, or pr; got ${task}`);
+  }
+
   const granularity = parseGranularity(values.granularity);
   if (granularity === undefined) {
     return fail(
@@ -226,8 +239,12 @@ export async function main(argv: readonly string[]): Promise<number> {
       cache: values.cache ?? true,
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
       ...(maxLocations === undefined ? {} : { maxLocations }),
+      embedGuide: values.embed ?? false,
+      private: values.private ?? false,
+      ...(task === undefined ? {} : { task }),
     }));
   } catch (err) {
+    if (err instanceof BudgetError) return fail(err.message);
     // A stack trace on stderr is a worse answer than a sentence: the caller is
     // usually a harness, and an unhandled rejection exits 1 with no message.
     return fail(`analysis failed: ${(err as Error).message}`);
@@ -238,6 +255,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     await writeFile(resolve(values.json), JSON.stringify(json, null, 2) + "\n");
   }
   return 0;
+}
+
+function isTask(value: string): value is Task {
+  return (TASKS as readonly string[]).includes(value);
 }
 
 /** True for a path that exists and is a directory. */

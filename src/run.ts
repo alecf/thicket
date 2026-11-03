@@ -27,7 +27,12 @@ import { census, type Census } from "./report/census.js";
 import { buildImportIndex, findingContext } from "./report/context.js";
 import { findCoLocated, findVariants } from "./report/variants.js";
 import { fieldNameDrift, variations } from "./report/variation.js";
-import { renderReport, type CycleFinding, type ReportInput } from "./report/markdown.js";
+import {
+  renderReport,
+  type CycleFinding,
+  type ReportInput,
+  type Task,
+} from "./report/markdown.js";
 import {
   driftWeight,
   isTestMajority,
@@ -133,6 +138,12 @@ export interface RunOptions {
    * takes and nothing else — the report is identical either way.
    */
   cache?: boolean;
+  /** Append the field guide instead of linking it. See `ReportInput.embedGuide`. */
+  embedGuide?: boolean;
+  /** Tell the reading agent not to file issues. See `ReportInput.private`. */
+  private?: boolean;
+  /** What the reading agent is asked to do. See `ReportInput.task`. */
+  task?: Task;
 }
 
 /** See `RunOptions.types`. */
@@ -912,6 +923,9 @@ export async function runReport(
       census: census(ranked, cycles.length),
       ...(opts.budgetTokens === undefined ? {} : { budgetTokens: opts.budgetTokens }),
       ...(opts.maxLocations === undefined ? {} : { maxFilesPerFinding: opts.maxLocations }),
+      embedGuide: opts.embedGuide ?? false,
+      private: opts.private ?? false,
+      ...(opts.task === undefined ? {} : { task: opts.task }),
     };
 
     const { markdown, shown } = renderReport(input);
