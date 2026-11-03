@@ -1,0 +1,31 @@
+name: Release PR
+
+# Keeps one release PR open against main. It bumps package.json and
+# src/version.ts and writes CHANGELOG.md from the conventional commits since
+# the last release. Merging it creates the v* tag and the GitHub release, and
+# the tag starts release.yml, which builds, verifies and publishes.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # A fork has no RELEASE_TOKEN and nothing to release.
+    if: github.repository == 'alecf/thicket'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Not github.token. The main ruleset requires CI checks, and a PR
+          # opened with github.token starts no workflows, so it could never
+          # merge. A tag pushed with github.token does not start release.yml
+          # either. A personal token does both.
+          token: ${{ secrets.RELEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

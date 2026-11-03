@@ -1,5 +1,5 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runReport } from "../src/run.js";
 import { fixtureConfig, scratchProject } from "./helpers.js";
 
@@ -14,6 +14,11 @@ import { fixtureConfig, scratchProject } from "./helpers.js";
  * READ the diff. A golden file that pins wrong output is worse than no golden
  * file, because it converts a bug into a requirement.
  */
+// A release bumps VERSION, and VERSION feeds the header and the config hash.
+// The golden file pins the report, not the release, so it gets a fixed one.
+// Otherwise every release PR fails this test and needs a regenerated file.
+vi.mock("../src/version.js", () => ({ VERSION: "0.1.0" }));
+
 const GOLDEN = new URL("./golden/sample-report.md", import.meta.url);
 
 const OPTIONS = { config: fixtureConfig(), minNodes: 15 } as const;
