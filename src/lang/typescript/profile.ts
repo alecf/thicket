@@ -196,8 +196,11 @@ const CALL_SITES: CallSiteVocabulary = {
  * Anchored on a path separator and on a dot so that `latest/` and `attest.ts`
  * -- ordinary source names containing the substring "test" -- are not
  * mistaken for tests and silently down-weighted out of the report.
+ *
+ * The one hyphenated qualifier is `e2e-`, as in NestJS's `*.e2e-spec.ts`.
+ * Any hyphen would also match `openapi-spec.ts`, which is source.
  */
-const TEST_PATTERN = /(\.(test|spec)\.[cm]?[jt]sx?$)|((^|\/)(__tests__|tests?)\/)/;
+const TEST_PATTERN = /(\.(e2e-)?(test|spec)\.[cm]?[jt]sx?$)|((^|\/)(__tests__|tests?)\/)/;
 
 /** Language tags by extension, for the excerpt's fence. */
 const FENCE_LANGUAGE: ReadonlyMap<string, string> = new Map([
