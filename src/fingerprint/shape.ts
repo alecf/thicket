@@ -1,6 +1,7 @@
 import type { FileHandle } from "../extract/types.js";
 import { extractFragments, type ExtractOptions } from "./fragments.js";
 import { normalizeL0, normalizeL1 } from "./normalize.js";
+import { sketchOf, type Sketch } from "./sketch.js";
 
 /**
  * One physical fragment, reduced to the only things clustering needs: where it
@@ -34,6 +35,11 @@ export interface ShapedFragment {
   l0: string;
   /** α-renamed normalization hash: identifiers renumbered, literals dropped. */
   l1: string;
+  /**
+   * Summary of the L2 shape, for finding near copies. Absent for a fragment
+   * too short to shingle. See `sketch.ts`.
+   */
+  sketch?: Sketch;
 }
 
 /**
@@ -44,17 +50,21 @@ export interface ShapedFragment {
  * in the cluster sort fall back to it via a stable sort.
  */
 export function shapeFragments(file: FileHandle, opts: ExtractOptions): ShapedFragment[] {
-  return extractFragments(file, opts).map((f) => ({
-    filePath: f.filePath,
-    kind: f.kind,
-    nodeCount: f.nodeCount,
-    start: f.start,
-    end: f.end,
-    line: f.line,
-    endLine: f.endLine,
-    parentId: f.parentId,
-    literalShare: f.literalShare,
-    l0: normalizeL0(f.tokensL0),
-    l1: normalizeL1(f.tokensL1),
-  }));
+  return extractFragments(file, opts).map((f) => {
+    const sketch = sketchOf(f.tokensL1);
+    return {
+      filePath: f.filePath,
+      kind: f.kind,
+      nodeCount: f.nodeCount,
+      start: f.start,
+      end: f.end,
+      line: f.line,
+      endLine: f.endLine,
+      parentId: f.parentId,
+      literalShare: f.literalShare,
+      l0: normalizeL0(f.tokensL0),
+      l1: normalizeL1(f.tokensL1),
+      ...(sketch === undefined ? {} : { sketch }),
+    };
+  });
 }

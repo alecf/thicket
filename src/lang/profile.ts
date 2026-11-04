@@ -46,6 +46,11 @@ export interface LanguageProfile {
    * value. `fieldNameDrift` reads these.
    */
   nameHolders: ReadonlySet<string>;
+  /**
+   * Kinds that never take near copies: one entry of a data literal beside
+   * another. `attachNear` reads these.
+   */
+  nearExcluded: ReadonlySet<string>;
   /** The kinds `isBareCall` reasons about. */
   callSites: CallSiteVocabulary;
 

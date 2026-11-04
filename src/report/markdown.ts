@@ -270,9 +270,9 @@ interface Block {
  */
 const LEVEL_LEGEND =
   "`L0` matches copies that are identical once formatting is normalized;" +
-  " `L1` also ignores what identifiers are called. Each finding is therefore" +
-  " the copies of one exact shape — a near-variant that differs by an inserted" +
-  " line is a separate finding, cross-referenced as **see also** where one exists.";
+  " `L1` also ignores what identifiers are called. Each finding is the copies of" +
+  " one exact shape. **Near copies** change a line or a field, and are listed" +
+  " apart. A less similar variant is a separate finding, marked **see also**.";
 
 /**
  * Text printed once under a section heading, before its findings.
@@ -711,7 +711,7 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
     // to act on a finding named it as noise -- one noting that on an all-test
     // cross-module cluster the weights multiply to 1.0, so it silently
     // reprints the recoverable-lines figure and reads as a bug.
-    `### ${c.id} · ${c.occurrences.length} copies × ~${r.linesPerCopy} lines · ` +
+    `### ${c.id} · ${c.occurrences.length} copies${nearCount(r)} × ~${r.linesPerCopy} lines · ` +
       `~${r.recoverableLines} lines recoverable`,
     "",
     `${c.level} · \`${typescript.canonicalKind(c.kind)}\`${tag}`,
@@ -724,8 +724,33 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
       ? spreadLine(r)
       : []),
     ...formatOccurrences(r, maxFiles),
+    ...nearBlock(r, maxFiles),
     "",
   ];
+}
+
+function nearCount(r: Ranked): string {
+  const n = r.cluster.near?.length ?? 0;
+  return n === 0 ? "" : ` + ${n} near`;
+}
+
+/**
+ * Near copies, after the exact ones and under their own label.
+ *
+ * Apart, because the level and `varies` describe the exact copies alone. The
+ * percentage is there because 82% and 98% call for different edits: the
+ * first has a line or a field the abstraction must take as an option.
+ */
+function nearBlock(r: Ranked, maxFiles?: number): string[] {
+  const near = r.cluster.near ?? [];
+  if (near.length === 0) return [];
+  const shown = maxFiles === undefined ? near : near.slice(0, maxFiles);
+  const items = shown.map(
+    (o) => `- \`${o.filePath}:${o.line}\` · ${Math.round(o.similarity * 100)}% the same shape`,
+  );
+  const hidden = near.length - shown.length;
+  if (hidden > 0) items.push(`- … and ${hidden} more near copies`);
+  return ["", "**near copies** (the same shape with a line or a field changed):", "", ...items];
 }
 
 /**

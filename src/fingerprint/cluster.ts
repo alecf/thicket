@@ -22,7 +22,7 @@ export type Level = "L0" | "L1";
  * finding. Fragments above it keep their L0 candidacy, so identical copies of
  * a table are still reported.
  */
-const MAX_LITERAL_SHARE_FOR_L1 = 0.35;
+export const MAX_LITERAL_SHARE_FOR_L1 = 0.35;
 
 export interface Occurrence {
   filePath: string;
@@ -62,6 +62,17 @@ export interface Cluster {
    * "delete 115 dead blocks".
    */
   alsoAt?: Occurrence[];
+  /**
+   * Fragments of a nearly identical shape: an inserted line, a dropped field.
+   * They are not copies, so the level and `varies` still describe
+   * `occurrences` alone. Attached by `attachNear`.
+   */
+  near?: NearOccurrence[];
+}
+
+export interface NearOccurrence extends Occurrence {
+  /** Share of sketch bins that agree with this finding's shape, in [0.8, 1). */
+  similarity: number;
 }
 
 export interface DuplicationOptions {
@@ -81,6 +92,17 @@ export async function findDuplication(
   project: Project,
   opts: DuplicationOptions,
 ): Promise<Cluster[]> {
+  return clusterFragments(await collectFragments(project, opts));
+}
+
+/**
+ * Every fragment of the project, from the cache where a file is unchanged.
+ * `attachNear` needs these as well as the clusters made from them.
+ */
+export async function collectFragments(
+  project: Project,
+  opts: DuplicationOptions,
+): Promise<ShapedFragment[]> {
   const { cache } = opts;
   const files = project.files();
   const fragments: ShapedFragment[] = [];
@@ -100,7 +122,7 @@ export async function findDuplication(
   // grow the database forever.
   cache?.purgeExcept(files.map((f) => f.path));
 
-  return clusterFragments(fragments);
+  return fragments;
 }
 
 /**

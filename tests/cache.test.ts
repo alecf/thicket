@@ -41,6 +41,22 @@ describe("openCache", () => {
     cache.close();
   });
 
+  it("round-trips a sketch bin for bin, and keeps a missing one missing", () => {
+    // Near copies are found from sketches alone. A warm run that read back a
+    // different sketch, or invented one, would find different near copies.
+    const sketch = Uint16Array.from({ length: 128 }, (_, i) => (i * 517 + 3) % 0xffff);
+    sketch[5] = 0xffff;
+    sketch[6] = 0x0100; // a byte-order mistake swaps this one
+    const cache = openCache(join(tempDir(), "cache.db"), "config-1")!;
+    cache.replaceFile("a.ts", "h1", [frag({ sketch }), frag({ start: 20, end: 30 })]);
+
+    const [withSketch, without] = cache.fragmentsOf("a.ts");
+    expect([...withSketch!.sketch!]).toEqual([...sketch]);
+    expect(without!.sketch).toBeUndefined();
+    expect("sketch" in without!).toBe(false);
+    cache.close();
+  });
+
   it("preserves the emission order of a file's fragments", () => {
     const cache = openCache(join(tempDir(), "cache.db"), "config-1")!;
     // Post-order emission: a child is emitted before its parent, so the list

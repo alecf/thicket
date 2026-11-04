@@ -2,6 +2,7 @@ import { mkdirSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ShapedFragment } from "../fingerprint/shape.js";
+import type { Sketch } from "../fingerprint/sketch.js";
 import { compareStrings } from "../order.js";
 
 /**
@@ -10,7 +11,7 @@ import { compareStrings } from "../order.js";
  * newer database (or the reverse) is exactly the situation where a cache
  * silently changes the answer.
  */
-export const CACHE_SCHEMA_VERSION = 3;
+export const CACHE_SCHEMA_VERSION = 4;
 
 /** Gitignored already; `thicket cache clear` empties it. */
 const CACHE_DIR = ".thicket";
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS fragment_occurrence (
   node_count INTEGER NOT NULL,
   l0_hash TEXT NOT NULL,
   l1_hash TEXT NOT NULL,
+  sketch BLOB,
   PRIMARY KEY (path, seq)
 );
 `;
@@ -89,7 +91,7 @@ export function openCache(path: string, configHash: string): Cache | null {
 
   const selectFile = db.prepare("SELECT content_hash FROM file WHERE path = ?");
   const selectFragments = db.prepare(
-    `SELECT "start", "end", line, end_line, parent_id, literal_share, kind, node_count, l0_hash, l1_hash
+    `SELECT "start", "end", line, end_line, parent_id, literal_share, kind, node_count, l0_hash, l1_hash, sketch
        FROM fragment_occurrence WHERE path = ? ORDER BY seq`,
   );
   const insertFile = db.prepare("INSERT OR REPLACE INTO file (path, content_hash) VALUES (?, ?)");
@@ -98,8 +100,8 @@ export function openCache(path: string, configHash: string): Cache | null {
   const insertFragment = db.prepare(
     `INSERT INTO fragment_occurrence
        (path, seq, "start", "end", line, end_line, parent_id, literal_share,
-        kind, node_count, l0_hash, l1_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        kind, node_count, l0_hash, l1_hash, sketch)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const selectPaths = db.prepare("SELECT path FROM file");
 
@@ -171,6 +173,7 @@ export function openCache(path: string, configHash: string): Cache | null {
           literalShare: Number(r.literal_share),
           l0: r.l0_hash,
           l1: r.l1_hash,
+          ...(r.sketch === null ? {} : { sketch: decodeSketch(r.sketch) }),
         })),
       ),
 
@@ -195,6 +198,7 @@ export function openCache(path: string, configHash: string): Cache | null {
               f.nodeCount,
               f.l0,
               f.l1,
+              f.sketch === undefined ? null : encodeSketch(f.sketch),
             );
           }
           insertFile.run(p, contentHash);
@@ -239,6 +243,27 @@ interface FragmentRow {
   node_count: number;
   l0_hash: string;
   l1_hash: string;
+  sketch: Uint8Array | null;
+}
+
+/**
+ * Little-endian, byte by byte. Copying the Uint16Array's buffer would store
+ * the host's byte order, and a cache copied between hosts would then read
+ * back different sketches.
+ */
+function encodeSketch(sketch: Sketch): Uint8Array {
+  const out = new Uint8Array(sketch.length * 2);
+  sketch.forEach((v, i) => {
+    out[2 * i] = v & 0xff;
+    out[2 * i + 1] = v >>> 8;
+  });
+  return out;
+}
+
+function decodeSketch(bytes: Uint8Array): Sketch {
+  const out = new Uint16Array(bytes.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = bytes[2 * i]! | (bytes[2 * i + 1]! << 8);
+  return out;
 }
 
 /**

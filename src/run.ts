@@ -10,7 +10,8 @@ import {
   selectWorkspaces,
   type Workspace,
 } from "./extract/workspaces.js";
-import { findDuplication } from "./fingerprint/cluster.js";
+import { clusterFragments, collectFragments } from "./fingerprint/cluster.js";
+import { attachNear } from "./fingerprint/near.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
@@ -112,6 +113,11 @@ export interface RunOptions {
    */
   includeCallSites?: boolean;
   /**
+   * Give each finding the near copies of its shape, and fold a finding into a
+   * larger one it is nearly the same as. On by default. See `attachNear`.
+   */
+  near?: boolean;
+  /**
    * Rank a shape declared once per file across files of one role below
    * duplication of the same size. On by default. See `fileRoleConvention`.
    */
@@ -174,6 +180,8 @@ export interface ReportJson {
     kind: string;
     nodeCount: number;
     occurrences: { filePath: string; line: number; start: number; end: number }[];
+    /** Near copies, when there are any. See `attachNear`. */
+    near?: { filePath: string; line: number; start: number; end: number; similarity: number }[];
   }[];
   cycles: CycleFinding[];
   /** Candidates found, before the per-section cap or the token budget. */
@@ -546,6 +554,7 @@ export async function runReport(
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
   const includeCallSites = opts.includeCallSites ?? false;
+  const near = opts.near ?? true;
   const fileConventions = opts.fileConventions ?? true;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
@@ -568,6 +577,7 @@ export async function runReport(
       includeGenerated,
       bannerScan,
       includeCallSites,
+      near,
       fileConventions,
       exclude,
       types,
@@ -680,7 +690,11 @@ export async function runReport(
             },
           }),
     });
-    const clusters = subsume(await findDuplication(project, { minNodes, minLines, cache }));
+    const fragments = await collectFragments(project, { minNodes, minLines, cache });
+    const exact = subsume(clusterFragments(fragments));
+    // After `subsume`, so a near copy is matched against what the report
+    // would print, not against the nested children it already dropped.
+    const clusters = near ? attachNear(exact, fragments) : exact;
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
@@ -944,6 +958,17 @@ export async function runReport(
         start: o.start,
         end: o.end,
       })),
+      ...(r.cluster.near === undefined
+        ? {}
+        : {
+            near: r.cluster.near.map((o) => ({
+              filePath: o.filePath,
+              line: o.line,
+              start: o.start,
+              end: o.end,
+              similarity: o.similarity,
+            })),
+          }),
     });
 
     return {

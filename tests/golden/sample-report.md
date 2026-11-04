@@ -1,6 +1,6 @@
 # thicket report
 
-thicket 0.1.0 · config bfa30832 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 098e8e76 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -17,7 +17,7 @@ thicket 0.1.0 · config bfa30832 · 4 files / 56 LOC · granularity: file (4 mod
 
 ## Duplication
 
-`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is therefore the copies of one exact shape — a near-variant that differs by an inserted line is a separate finding, cross-referenced as **see also** where one exists.
+`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is the copies of one exact shape. **Near copies** change a line or a field, and are listed apart. A less similar variant is a separate finding, marked **see also**.
 
 ### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
 
