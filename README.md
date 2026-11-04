@@ -201,6 +201,7 @@ bun run thicket diff before.json after.json
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
 | `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and the like, which are skipped by default. Matching is on whole path segments, so `src/distance/` counts as source either way. This also stops thicket honouring a file's own `@generated` banner. |
 | `--no-banner-scan` | Stop reading an `@generated` or "auto-generated" banner as a sign the file is generated. The skipped directories stay skipped. Each opinion has its own off switch. |
+| `--no-near` | Stop adding near copies to a finding. By default a finding also lists fragments of nearly the same shape, and a smaller finding of nearly the same shape is folded into the larger one. |
 | `--include-call-sites` | Also report clusters that are only repeated calls to shared code. thicket leaves these out by default: when the whole fragment is one call, nothing shorter can replace it, so the extraction removes no line. |
 | `--no-file-conventions` | Stop ranking down a shape that is declared once per file across files of one role, such as one `meta` per `*.stories.tsx`. thicket reads those as a framework's API rather than as duplication, because deleting a copy deletes a story. |
 | `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
@@ -238,7 +239,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config bfa30832 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 098e8e76 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -255,7 +256,7 @@ thicket 0.1.0 · config bfa30832 · 4 files / 56 LOC · granularity: file (4 mod
 
 ## Duplication
 
-`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is therefore the copies of one exact shape — a near-variant that differs by an inserted line is a separate finding, cross-referenced as **see also** where one exists.
+`L0` matches copies that are identical once formatting is normalized; `L1` also ignores what identifiers are called. Each finding is the copies of one exact shape. **Near copies** change a line or a field, and are listed apart. A less similar variant is a separate finding, marked **see also**.
 
 ### THK-DUP-d165768d · 3 copies × ~10 lines · ~16 lines recoverable
 

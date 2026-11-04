@@ -182,6 +182,9 @@ of one copy, and slower than linearly with the number of copies. A short shape
 saves little per copy, and every copy still pays for an import and a call. So
 two copies of a 100-line function outrank 50 copies of a 4-line shape.
 
+A heading can read `5 copies + 7 near`. The near copies are listed under the
+locations. They do not count toward the rank or toward `recoverable`.
+
 Exact copies (`L0`) keep more weight per copy than renamed ones (`L1`). An exact
 copy needs no parameters. So **a 6-line shape copied verbatim 231 times still
 outranks a 30-line clone repeated twice, and that is correct.** Do not dismiss
@@ -193,10 +196,10 @@ an `L0` finding for having small copies.
 - **`L1`** — identifier names are also ignored, so copies may differ in what
   things are called.
 
-This decides cluster membership, so it decides whether the location list is
-complete. An `L0` finding lists the copies of one *exact* shape; near-variants
-that differ by a renamed symbol or an inserted line are **separate findings**.
-If one exists, it is linked as `see also`.
+This decides cluster membership. An `L0` finding's copies are one *exact*
+shape. A fragment of nearly the same shape, with a line or a field changed, is
+listed as a **near copy** of the finding. A less similar variant is a separate
+finding, linked as `see also`.
 
 ### `[test]` / `[mixed]`
 
@@ -260,6 +263,29 @@ location in sorted order — so it is representative of the *shape*, not
 necessarily of the majority. Every location is listed as `path:line,line`; the
 report deliberately does not truncate them, because a location you cannot open
 is not actionable.
+
+### Near copies
+
+```
+**near copies** (the same shape with a line or a field changed):
+
+- `examples/app/bedrock/page.tsx:7` · 87% the same shape
+- `examples/app/page.tsx:6` · 92% the same shape
+```
+
+A near copy has nearly the shape of the finding's copies. Most differ by an
+inserted line, a dropped field or an extra option. The level and `varies across
+copies` describe the exact copies only.
+
+Judges rated about three in four near copies worth covering with the finding's
+abstraction. So **open each one before you include it.** Expect to add a
+parameter or an option for the difference. A large test block is the usual
+exception: two tests with the same harness and different assertions look near,
+and a shared helper rarely covers both.
+
+When a smaller finding is nearly the same shape as a larger one, thicket folds
+it in. Its copies appear here as near copies, and it is not printed on its own.
+`--no-near` turns near copies off.
 
 ---
 

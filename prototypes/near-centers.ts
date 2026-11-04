@@ -90,12 +90,37 @@ function buildIndex(bands: number, bandKey: (s: Shape, b: number) => string) {
     const s = population[i]!;
     for (let b = 0; b < bands; b++)
       for (const x of tables[b]!.get(bandKey(s, b)) ?? []) if (only === undefined || only.has(x)) outSet.add(x);
+    return outSet;
+  };
+}
+/** Same lookup, skipping buckets larger than `cap`: a common idiom, not a near copy. */
+function buildCappedIndex(bands: number, bandKey: (s: Shape, b: number) => string, cap: number) {
+  const tables: Map<string, number[]>[] = [];
+  for (let b = 0; b < bands; b++) {
+    const t = new Map<string, number[]>();
+    population.forEach((s, i) => {
+      const k = bandKey(s, b);
+      const l = t.get(k);
+      if (l) l.push(i);
+      else t.set(k, [i]);
+    });
+    tables.push(t);
+  }
+  return (i: number, only: ReadonlySet<number>): Set<number> => {
+    const outSet = new Set<number>();
+    const s = population[i]!;
+    for (let b = 0; b < bands; b++) {
+      const l = tables[b]!.get(bandKey(s, b)) ?? [];
+      if (l.length > cap) continue;
+      for (const x of l) if (only.has(x)) outSet.add(x);
+    }
     outSet.delete(i);
     return outSet;
   };
 }
 const minhashCandidates = buildIndex(BANDS, minhashBand);
 const simhashCandidates = buildIndex(SIM_BANDS, simhashBand);
+const cappedCandidates = buildCappedIndex(BANDS, minhashBand, 200);
 
 // ---------------------------------------------------------------- centers
 interface Center {
@@ -221,7 +246,7 @@ const large = population
 const largeSet = new Set(large);
 const newPairs: { i: number; j: number; jaccard: number }[] = [];
 for (const i of large) {
-  for (const j of minhashCandidates(i, largeSet)) {
+  for (const j of cappedCandidates(i, largeSet)) {
     if (j <= i) continue;
     const a = population[i]!;
     const b = population[j]!;
@@ -350,10 +375,10 @@ const items: Item[] = [
   ...spread(ext.filter((e) => e.sources.includes("embed") && e.jaccard < 0.5), PER, 5, "ext-embed-only"),
   ...controls,
   ...spread(
-    newPairs.map((p) => ({ a: p.i, b: p.j, aCopies: population[p.i]!.copies, category: "", jaccard: p.jaccard, sources: ["minhash"] })),
+    newPairs.filter((p) => p.jaccard >= 0.8).map((p) => ({ a: p.i, b: p.j, aCopies: population[p.i]!.copies, category: "", jaccard: p.jaccard, sources: ["minhash"] })),
     PER,
     6,
-    "new>=0.6",
+    "new>=0.8",
   ),
 ];
 const order = pick(items.map((_, k) => k), items.length, 0x5eed);
