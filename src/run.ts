@@ -366,7 +366,7 @@ interface Discovery {
  * banner describes as SCOPE -- "this run saw 15% of the tree" -- and neither
  * is fixable by the `--config` that banner suggests.
  */
-async function discoverConfigs(
+export async function discoverConfigs(
   root: string,
   opts: {
     filter: readonly string[];
