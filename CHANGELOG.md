@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/alecf/thicket/compare/v0.1.0...v0.2.0) (2026-11-04)
+
+
+### Features
+
+* near copies on findings, measured against embeddings ([#31](https://github.com/alecf/thicket/issues/31)) ([6dba74b](https://github.com/alecf/thicket/commit/6dba74b0e868a10ee0cdd348567af7dd33092f25))
+
+
+### Bug Fixes
+
+* read *.e2e-spec.ts and *.e2e-test.ts as test files ([#33](https://github.com/alecf/thicket/issues/33))2 ([c065bcf](https://github.com/alecf/thicket/commit/c065bcf8db997940076ab6983fac2ab043e56831)), closes [#30](https://github.com/alecf/thicket/issues/30)
+
 ## 0.1.0 (2026-11-03)
 
 
