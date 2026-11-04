@@ -234,6 +234,8 @@ L0 and L1 are exact hash-and-group: linear, trivially cacheable, no tuning.
 5. Compute exact Jaccard on shingle sets; keep pairs ≥ **0.7** (loosened by `--depth`).
 6. Cluster by union-find, edges processed in `(similarity desc, id asc)` order for determinism.
 
+> **Superseded by measurement (2026-11).** Step 6 does not work at scale. On a 2,509-file sample at Jaccard ≥ 0.8, union-find put 26,318 of 65,150 shapes into one group. What shipped is `src/fingerprint/near.ts`: a printed finding is a fixed center and takes only the near copies of its own shape, and the sketch is one-permutation hashing rather than 128 MinHash permutations. Near copies are shown on the finding and not scored. `docs/plans/2026-11-04-near-miss.md` has the judged results.
+
 ### 5.4 Ranking — the core algorithm
 
 Report slots are scarce by two orders of magnitude (§1.1), so ranking *is* the product:
@@ -456,6 +458,8 @@ The report is a pure function of `(source content, config, thicket version)`:
 | 5 | Report format | **Compact Markdown + `--json` sidecar** | LLM-native, human-debuggable; `--budget-tokens` does the real work |
 
 **Re-entry criterion for #4:** build L4 embeddings only if a tuned ranker exhausts good L0/L1/L3 candidates before filling the report budget. Until that happens, more detection is strictly wasted work.
+
+**Measured (2026-11).** A local embedding model was compared with MinHash and SimHash as a source of near copies, on two large repositories. It found no near copy at Jaccard ≥ 0.6 that the structural sources missed. Judges rated its own finds below Jaccard 0.5 useful once in 30. The decision stands. `docs/plans/2026-11-04-near-miss.md` has the method.
 
 ---
 

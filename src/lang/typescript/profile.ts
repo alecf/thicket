@@ -92,6 +92,18 @@ const NAME_HOLDERS: ReadonlySet<string> = new Set([
   "JsxAttribute",
 ]);
 
+/**
+ * One entry of a data literal, or the literal itself. Two of them of nearly
+ * the same shape are two records, and no abstraction covers both. Judges rated
+ * 0 of 38 near copies of these kinds worth sharing, across two repositories
+ * and every similarity band.
+ */
+const NEAR_EXCLUDED: ReadonlySet<string> = new Set([
+  "PropertyAssignment",
+  "ObjectLiteralExpression",
+  "PropertySignature",
+]);
+
 const CALL_SITES: CallSiteVocabulary = {
   calls: new Set(["CallExpression", "NewExpression"]),
 
@@ -207,6 +219,7 @@ export const typescript: LanguageProfile = {
   canonicalKind,
   isTypeKind,
   nameHolders: NAME_HOLDERS,
+  nearExcluded: NEAR_EXCLUDED,
   callSites: CALL_SITES,
   isTestPath: (path) => TEST_PATTERN.test(path),
   fenceLanguage: (path) => FENCE_LANGUAGE.get(path.split(".").pop() ?? "") ?? "",

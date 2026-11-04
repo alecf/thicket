@@ -22,7 +22,7 @@ export type Level = "L0" | "L1";
  * finding. Fragments above it keep their L0 candidacy, so identical copies of
  * a table are still reported.
  */
-const MAX_LITERAL_SHARE_FOR_L1 = 0.35;
+export const MAX_LITERAL_SHARE_FOR_L1 = 0.35;
 
 export interface Occurrence {
   filePath: string;
@@ -62,6 +62,21 @@ export interface Cluster {
    * "delete 115 dead blocks".
    */
   alsoAt?: Occurrence[];
+  /**
+   * Fragments of a nearly identical shape: an inserted line, a dropped field.
+   * They are not copies, so the level and `varies` still describe
+   * `occurrences` alone. Attached by `attachNear`.
+   */
+  near?: NearOccurrence[];
+}
+
+export interface NearOccurrence extends Occurrence {
+  /**
+   * Share of sketch bins that agree with this finding's shape, in [0.8, 1].
+   * Exactly 1 when the two differ only in which names are bound where: the
+   * sketch drops identifier text, and the L1 hash does not.
+   */
+  similarity: number;
 }
 
 export interface DuplicationOptions {
@@ -81,6 +96,17 @@ export async function findDuplication(
   project: Project,
   opts: DuplicationOptions,
 ): Promise<Cluster[]> {
+  return clusterFragments(await collectFragments(project, opts));
+}
+
+/**
+ * Every fragment of the project, from the cache where a file is unchanged.
+ * `attachNear` needs these as well as the clusters made from them.
+ */
+export async function collectFragments(
+  project: Project,
+  opts: DuplicationOptions,
+): Promise<ShapedFragment[]> {
   const { cache } = opts;
   const files = project.files();
   const fragments: ShapedFragment[] = [];
@@ -100,7 +126,7 @@ export async function findDuplication(
   // grow the database forever.
   cache?.purgeExcept(files.map((f) => f.path));
 
-  return clusterFragments(fragments);
+  return fragments;
 }
 
 /**
@@ -163,7 +189,10 @@ function toCluster(id: string, level: Level, frags: readonly ShapedFragment[]): 
       parentId: f.parentId,
     }))
     .sort((a, b) => compareStrings(a.filePath, b.filePath) || a.start - b.start);
-  const nodeCount = Math.min(...frags.map((f) => f.nodeCount));
+  // A loop, not `Math.min(...)`: Node overflows the stack spreading about
+  // 130,000 arguments, and one common shape can have that many copies.
+  let nodeCount = Infinity;
+  for (const f of frags) nodeCount = Math.min(nodeCount, f.nodeCount);
   return {
     id,
     level,

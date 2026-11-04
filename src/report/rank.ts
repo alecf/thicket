@@ -392,6 +392,11 @@ export function rankClusters(
   return clusters
     .map((cluster) => {
       const tag = tagOf(cluster);
+      // Exact copies only. Near copies were counted here at first. Judges
+      // compared each finding that entered the top 40 because of them with
+      // the finding it pushed out, on two repositories, and preferred the
+      // entrant 5 times in 10. Several entrants were example scripts lifted
+      // by their near copies. So near copies are shown, not scored.
       const files = new Set(cluster.occurrences.map((o) => o.filePath));
       // Prefer real module membership when the caller has a module graph;
       // fall back to the containing directory. PRD §5.4 weights cross-module

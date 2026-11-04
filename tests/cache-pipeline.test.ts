@@ -4,9 +4,12 @@ import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cachePathFor, openCache } from "../src/cache/db.js";
 import { openProject } from "../src/extract/ts-adapter.js";
-import { findDuplication } from "../src/fingerprint/cluster.js";
+import { clusterFragments, collectFragments, findDuplication } from "../src/fingerprint/cluster.js";
+import { attachNear } from "../src/fingerprint/near.js";
+import { isTestMajority, rankClusters, subsume } from "../src/report/rank.js";
 import { runReport } from "../src/run.js";
 import { fixtureRoot } from "./helpers.js";
+import { fileURLToPath } from "node:url";
 
 const temps: string[] = [];
 
@@ -181,5 +184,40 @@ describe("runReport with the cache", () => {
     // ...and the recreated cache is usable on the next run.
     const warm = await runReport({ config, minNodes: MIN_NODES });
     expect(warm.markdown).toBe(expected.markdown);
+  });
+
+  it("finds the same near copies cold and warm", async () => {
+    // Near copies come from sketches alone, and a warm run reads sketches
+    // back from the database. The fixture holds a real near copy, so the
+    // assertion cannot pass on two empty lists.
+    const root = mkdtempSync(join(tmpdir(), "thicket-near-"));
+    temps.push(root);
+    cpSync(fileURLToPath(new URL("./fixtures/near", import.meta.url)), root, {
+      recursive: true,
+      filter: (src) => !src.split(sep).includes(".thicket"),
+    });
+    const config = join(root, "tsconfig.json");
+    const cachePath = join(root, "cache.db");
+    const nearWith = async (path: string | undefined) => {
+      const project = await openProject(config);
+      const cache = path === undefined ? null : openCache(path, "cfg-1");
+      try {
+        const fragments = await collectFragments(project, { minNodes: MIN_NODES, cache });
+        const exact = subsume(clusterFragments(fragments));
+        return attachNear(exact, fragments, {
+          order: rankClusters(exact).map((r) => r.cluster),
+          isTestFinding: isTestMajority,
+        });
+      } finally {
+        cache?.close();
+        project.close();
+      }
+    };
+
+    const uncached = await nearWith(undefined);
+    await nearWith(cachePath);
+    const warm = await nearWith(cachePath);
+    expect(warm).toEqual(uncached);
+    expect(uncached.some((c) => (c.near ?? []).some((o) => o.filePath === "src/west.ts"))).toBe(true);
   });
 });

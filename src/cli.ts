@@ -52,6 +52,8 @@ Usage: thicket [dir] [options]
   --no-banner-scan       do not treat an "auto-generated" banner as generated
   --include-call-sites   also report clusters that are only repeated calls to
                          shared code, which no extraction can shorten
+  --no-near              do not add near copies to a finding, or fold a finding
+                         into a larger one of nearly the same shape
   --no-file-conventions  do not rank down a shape declared once per file across
                          files of one role, such as *.stories.tsx
   --types <mode>         include | exclude | only (default include) — whether
@@ -89,6 +91,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         exclude: { type: "string", multiple: true },
         "banner-scan": { type: "boolean", default: true },
         "include-call-sites": { type: "boolean" },
+        near: { type: "boolean", default: true },
         "file-conventions": { type: "boolean", default: true },
         types: { type: "string" },
         embed: { type: "boolean" },
@@ -233,6 +236,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       includeGenerated: values["include-generated"] ?? false,
       bannerScan: values["banner-scan"] ?? true,
       includeCallSites: values["include-call-sites"] ?? false,
+      near: values.near ?? true,
       fileConventions: values["file-conventions"] ?? true,
       types,
       exclude: values.exclude ?? [],
