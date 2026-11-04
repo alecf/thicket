@@ -729,6 +729,16 @@ function duplicationBlock(r: Ranked, maxFiles?: number): string[] {
   ];
 }
 
+/**
+ * Floored, so 0.996 does not print as 100%. A similarity of exactly 1 is a
+ * fragment that differs only in which names are bound where, and saying so
+ * keeps "100%" from reading as a copy the clustering missed.
+ */
+function alike(similarity: number): string {
+  if (similarity === 1) return "the same shape, with names bound differently";
+  return `${Math.floor(similarity * 100)}% the same shape`;
+}
+
 function nearCount(r: Ranked): string {
   const n = r.cluster.near?.length ?? 0;
   return n === 0 ? "" : ` + ${n} near`;
@@ -745,9 +755,7 @@ function nearBlock(r: Ranked, maxFiles?: number): string[] {
   const near = r.cluster.near ?? [];
   if (near.length === 0) return [];
   const shown = maxFiles === undefined ? near : near.slice(0, maxFiles);
-  const items = shown.map(
-    (o) => `- \`${o.filePath}:${o.line}\` · ${Math.round(o.similarity * 100)}% the same shape`,
-  );
+  const items = shown.map((o) => `- \`${o.filePath}:${o.line}\` · ${alike(o.similarity)}`);
   const hidden = near.length - shown.length;
   if (hidden > 0) items.push(`- … and ${hidden} more near copies`);
   return ["", "**near copies** (the same shape with a line or a field changed):", "", ...items];

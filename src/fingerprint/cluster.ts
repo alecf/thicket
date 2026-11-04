@@ -71,7 +71,11 @@ export interface Cluster {
 }
 
 export interface NearOccurrence extends Occurrence {
-  /** Share of sketch bins that agree with this finding's shape, in [0.8, 1). */
+  /**
+   * Share of sketch bins that agree with this finding's shape, in [0.8, 1].
+   * Exactly 1 when the two differ only in which names are bound where: the
+   * sketch drops identifier text, and the L1 hash does not.
+   */
   similarity: number;
 }
 
@@ -185,7 +189,10 @@ function toCluster(id: string, level: Level, frags: readonly ShapedFragment[]): 
       parentId: f.parentId,
     }))
     .sort((a, b) => compareStrings(a.filePath, b.filePath) || a.start - b.start);
-  const nodeCount = Math.min(...frags.map((f) => f.nodeCount));
+  // A loop, not `Math.min(...)`: Node overflows the stack spreading about
+  // 130,000 arguments, and one common shape can have that many copies.
+  let nodeCount = Infinity;
+  for (const f of frags) nodeCount = Math.min(nodeCount, f.nodeCount);
   return {
     id,
     level,

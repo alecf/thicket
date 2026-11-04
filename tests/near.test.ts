@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { clusterFragments, type Cluster } from "../src/fingerprint/cluster.js";
-import { attachNear } from "../src/fingerprint/near.js";
+import { attachNear as attachNearWith } from "../src/fingerprint/near.js";
+import { isTestMajority, rankClusters } from "../src/report/rank.js";
 import type { ShapedFragment } from "../src/fingerprint/shape.js";
 import { isNear, sketchOf } from "../src/fingerprint/sketch.js";
 
@@ -43,6 +44,13 @@ function frag(file: string, tokens: string[], shape: string, over: Partial<Shape
 }
 
 const ids = (cs: readonly Cluster[]) => cs.map((c) => c.id);
+
+/** The pass as run.ts wires it: in rank order, with the section split's test rule. */
+const attachNear = (clusters: readonly Cluster[], frags: readonly ShapedFragment[]) =>
+  attachNearWith(clusters, frags, {
+    order: rankClusters(clusters).map((r) => r.cluster),
+    isTestFinding: isTestMajority,
+  });
 const nearFiles = (c: Cluster | undefined) => (c?.near ?? []).map((o) => o.filePath);
 
 describe("attachNear", () => {
@@ -158,20 +166,39 @@ describe("attachNear", () => {
     expect(out.find((c) => c.id === "base")!.occurrences.map((o) => o.filePath)).toEqual(["a.ts", "b.ts", "c.ts"]);
   });
 
-  it("visits findings by mass, whatever order they arrive in", () => {
-    // `subsume` does not return clusters in mass order. On a real report a
-    // 3-copy finding was visited before a 34-copy finding of nearly its
-    // shape, folded it in, and was then not printed. The 34-copy finding was
-    // ranked third, and vanished from the report.
+  it("visits findings in rank order, whatever order they arrive in", () => {
+    // `subsume` does not return clusters in rank order. On a real report a
+    // 3-copy finding was visited first, folded in a 34-copy finding of nearly
+    // its shape that ranked third, and was not printed itself. The report
+    // lost its third-best finding.
     const frags = [
       frag("a.ts", edited(BASE, 7), "small", { nodeCount: 120 }),
       frag("b.ts", edited(BASE, 7), "small", { nodeCount: 120 }),
       ...["c", "d", "e", "f", "g"].map((n) => frag(`${n}.ts`, BASE, "big")),
     ];
     const clusters = clusterFragments(frags);
-    expect(clusters[0]!.id).toBe("big");
-    const out = attachNear([...clusters].reverse(), frags);
-    expect(ids(out)).toEqual(["big"]);
+    expect(attachNear([...clusters].reverse(), frags).map((c) => c.id)).toEqual(["big"]);
+  });
+
+  it("folds by rank, not by mass", () => {
+    // Mass is nodes × (copies − 1). The score weighs size and count by level,
+    // so a 9-copy L0 finding outranks a 10-copy L1 finding of more mass. In
+    // mass order the L0 finding was folded into the L1 one, and printed only
+    // as near copies under a finding that scored half as much.
+    const l1 = Array.from({ length: 10 }, (_, i) => frag(`x${i}.ts`, BASE, "x", { l0: `x-${i}` }));
+    const l0 = Array.from({ length: 9 }, (_, i) => frag(`y${i}.ts`, edited(BASE, 7), "y"));
+    const frags = [...l1, ...l0];
+    const clusters = clusterFragments(frags);
+    const byId = new Map(clusters.map((c) => [c.id, c]));
+    // The premise: the L1 finding has more mass, the L0 finding ranks higher.
+    expect(byId.get("x")!.level).toBe("L1");
+    expect(byId.get("y")!.level).toBe("L0");
+    expect(byId.get("x")!.mass).toBeGreaterThan(byId.get("y")!.mass);
+    expect(rankClusters(clusters)[0]!.cluster.id).toBe("y");
+
+    const out = attachNear(clusters, frags);
+    expect(ids(out)).toEqual(["y"]);
+    expect(out[0]!.near).toHaveLength(10);
   });
 
   it("gives no near copies to a finding whose copies are mostly tests", () => {

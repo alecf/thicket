@@ -17,17 +17,33 @@ import { EMPTY_BIN, SKETCH_BINS, isNear, similarity, type Sketch } from "./sketc
  * on across the codebase. Here a finding is a fixed center. A shape joins it
  * only when the shape's sketch is near the finding's own.
  *
- * **Larger findings go first.** Clusters arrive sorted by mass, so a finding
- * whose shape is near a larger one is folded into it. Its copies become near
- * copies there, and it is not reported on its own. A finding folded away does
- * not take near copies of its own, so it cannot chain either.
+ * **Higher-ranked findings go first.** The caller passes the ranker's order,
+ * so a finding whose shape is near a higher-ranked one is folded into it. Its
+ * copies become near copies there, and it is not reported on its own. A
+ * finding folded away does not take near copies of its own, so it cannot
+ * chain either.
  *
  * Pure: the same clusters and fragments give the same result in any
  * fragment order. Shapes are visited in hash order, never in Map order.
  */
+export interface NearOptions {
+  /**
+   * The clusters in the order the report ranks them, best first. Folding
+   * runs from earlier to later, so a finding is never folded into one that
+   * ranks below it.
+   */
+  order: readonly Cluster[];
+  /**
+   * True for a finding whose copies are mostly tests. The caller passes the
+   * predicate the section split uses, so the two never disagree.
+   */
+  isTestFinding: (c: Cluster) => boolean;
+}
+
 export function attachNear(
   clusters: readonly Cluster[],
   fragments: readonly ShapedFragment[],
+  opts: NearOptions,
 ): Cluster[] {
   const shapes = shapesOf(fragments);
   const index = bandIndex(shapes);
@@ -51,18 +67,16 @@ export function attachNear(
   // otherwise fold it away after it had taken its own near copies.
   const visited = new Set<Cluster>();
 
-  // By mass, then id, whatever order the clusters arrive in. `subsume` does
-  // not return them in mass order. On a real report a 3-copy finding was
-  // visited before a 34-copy finding of nearly its shape and folded it in.
-  // The 34-copy finding ranked third, and the 3-copy finding was not printed,
-  // so the report lost it.
-  const order = [...clusters].sort((a, b) => b.mass - a.mass || compareStrings(a.id, b.id));
-
-  for (const c of order) {
+  // Rank order, never input order. On a real report a 3-copy finding was
+  // visited first, folded in a 34-copy finding of nearly its shape, and was
+  // not printed itself. The 34-copy finding ranked third, and the report lost
+  // it. Mass order is not enough either: the score weighs size and count
+  // differently by level, so an L0 finding can outrank a heavier L1 one.
+  for (const c of opts.order) {
     if (folded.has(c)) continue;
     visited.add(c);
     const first = fragmentAt.get(keyOf(c.occurrences[0]!, c.kind));
-    if (first?.sketch === undefined || !eligible(first) || mostlyTests(c)) continue;
+    if (first?.sketch === undefined || !eligible(first) || opts.isTestFinding(c)) continue;
     const own = new Set(c.occurrences.map(rangeOf));
     const accepted: NearOccurrence[] = [];
 
@@ -100,6 +114,9 @@ export function attachNear(
         // finding of its own, and the finding listed its own bodies as near
         // copies.
         if (overlaps(f, c.occurrences) || overlaps(f, accepted)) continue;
+        // Tests neither take nor give near copies. Two tests with one harness
+        // and different assertions look near, and they are different tests.
+        // Judges rated 0 of 6 such near copies worth sharing.
         if (typescript.isTestPath(f.filePath)) continue;
         // Overlapping ANOTHER finding's copy is allowed. Exact findings nest
         // the same way: a function's finding and its loop's finding are both
@@ -170,16 +187,6 @@ function eligible(f: ShapedFragment): boolean {
   );
 }
 
-/**
- * Tests neither take nor give near copies. Two tests with one harness and
- * different assertions look near, and they are different tests. Judges rated
- * 0 of 6 such near copies worth sharing.
- */
-function mostlyTests(c: Cluster): boolean {
-  const tests = c.occurrences.filter((o) => typescript.isTestPath(o.filePath)).length;
-  return tests * 2 >= c.occurrences.length;
-}
-
 interface Shape {
   l1: string;
   nodeCount: number;
@@ -197,7 +204,11 @@ function shapesOf(fragments: readonly ShapedFragment[]): Shape[] {
       const sorted = [...frags].sort(
         (a, b) => compareStrings(a.filePath, b.filePath) || a.start - b.start || compareStrings(a.kind, b.kind),
       );
-      return { l1, nodeCount: Math.min(...sorted.map((f) => f.nodeCount)), sketch: sorted[0]!.sketch!, frags: sorted };
+      // A loop, not `Math.min(...)`: Node overflows the stack spreading
+      // about 130,000 arguments, and one common shape can have that many.
+      let nodeCount = Infinity;
+      for (const f of sorted) nodeCount = Math.min(nodeCount, f.nodeCount);
+      return { l1, nodeCount, sketch: sorted[0]!.sketch!, frags: sorted };
     });
 }
 

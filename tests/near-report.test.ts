@@ -41,12 +41,23 @@ describe("near copies in the report", () => {
     const out = renderMarkdown(
       reportInput({ duplication: [ranked([nearCopy("src/c.ts", 7, 0.875), nearCopy("src/d.ts", 3, 0.82)])], totalFindings: 1 }),
     );
-    expect(out).toContain("- `src/c.ts:7` · 88% the same shape");
+    expect(out).toContain("- `src/c.ts:7` · 87% the same shape");
     expect(out).toContain("- `src/d.ts:3` · 82% the same shape");
     // Under their own label, after the exact copies: the level describes
     // only those.
     expect(out.indexOf("`src/b.ts:2`")).toBeLessThan(out.indexOf("**near copies"));
     expect(out.indexOf("**near copies")).toBeLessThan(out.indexOf("`src/c.ts:7`"));
+  });
+
+  it("never prints a near copy as 100% the same", () => {
+    // The sketch drops identifier text, so `x = x + y` and `x = y + x` match
+    // in every bin. "100%" under near copies reads as a missed exact copy.
+    const out = renderMarkdown(
+      reportInput({ duplication: [ranked([nearCopy("src/c.ts", 7, 1), nearCopy("src/d.ts", 3, 0.996)])], totalFindings: 1 }),
+    );
+    expect(out).not.toContain("100%");
+    expect(out).toContain("- `src/c.ts:7` · the same shape, with names bound differently");
+    expect(out).toContain("- `src/d.ts:3` · 99% the same shape");
   });
 
   it("prints nothing about near copies when there are none", () => {

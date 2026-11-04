@@ -6,7 +6,7 @@ import { cachePathFor, openCache } from "../src/cache/db.js";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { clusterFragments, collectFragments, findDuplication } from "../src/fingerprint/cluster.js";
 import { attachNear } from "../src/fingerprint/near.js";
-import { subsume } from "../src/report/rank.js";
+import { isTestMajority, rankClusters, subsume } from "../src/report/rank.js";
 import { runReport } from "../src/run.js";
 import { fixtureRoot } from "./helpers.js";
 import { fileURLToPath } from "node:url";
@@ -203,7 +203,11 @@ describe("runReport with the cache", () => {
       const cache = path === undefined ? null : openCache(path, "cfg-1");
       try {
         const fragments = await collectFragments(project, { minNodes: MIN_NODES, cache });
-        return attachNear(subsume(clusterFragments(fragments)), fragments);
+        const exact = subsume(clusterFragments(fragments));
+        return attachNear(exact, fragments, {
+          order: rankClusters(exact).map((r) => r.cluster),
+          isTestFinding: isTestMajority,
+        });
       } finally {
         cache?.close();
         project.close();

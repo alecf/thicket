@@ -694,7 +694,14 @@ export async function runReport(
     const exact = subsume(clusterFragments(fragments));
     // After `subsume`, so a near copy is matched against what the report
     // would print, not against the nested children it already dropped.
-    const clusters = near ? attachNear(exact, fragments) : exact;
+    const clusters = near
+      ? attachNear(exact, fragments, {
+          // The score ignores near copies, so ranking the exact clusters
+          // gives the order the report will print them in.
+          order: rankClusters(exact, graph.moduleOf, { fileConventions }).map((r) => r.cluster),
+          isTestFinding: isTestMajority,
+        })
+      : exact;
     // `Cluster.id` is the normalized shape hash — the right key for grouping,
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
