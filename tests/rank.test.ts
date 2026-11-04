@@ -286,6 +286,18 @@ describe("isTestPath", () => {
     expect(typescript.isTestPath("src/attest.ts")).toBe(false);
     expect(typescript.isTestPath("src/latest/a.ts")).toBe(false); // must not match "test" inside a word
   });
+
+  it("recognizes end-to-end tests named with a hyphenated qualifier", () => {
+    // NestJS generates `*.e2e-spec.ts`, often outside a `test/` directory.
+    expect(typescript.isTestPath("apps/api/src/users.e2e-spec.ts")).toBe(true);
+    expect(typescript.isTestPath("apps/web/login.e2e-test.tsx")).toBe(true);
+  });
+
+  it("does not read a hyphenated spec or test name as a test", () => {
+    // These name what a file holds. An OpenAPI document is source.
+    expect(typescript.isTestPath("src/openapi-spec.ts")).toBe(false);
+    expect(typescript.isTestPath("src/ab-test.ts")).toBe(false);
+  });
 });
 
 describe("rankClusters", () => {
