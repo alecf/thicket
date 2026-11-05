@@ -1,4 +1,4 @@
-import { SyntaxKind } from "typescript/unstable/ast";
+import { SyntaxKind } from "typescript/ast";
 import type { CallSiteVocabulary, LanguageProfile } from "../profile.js";
 import { canonicalKind, isTypeKind } from "./kinds.js";
 

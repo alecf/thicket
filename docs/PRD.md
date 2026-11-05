@@ -42,16 +42,16 @@ Everything below was measured against two real private codebases, referred to he
 
 TypeScript 7.0 went GA 2026-07-08; the Go rewrite (`microsoft/typescript-go`) *is* mainline `tsc`. Its Go packages live under `internal/` and are not importable, and Microsoft has deliberately declined to expose them — the `tsgolint` fork-and-patch approach is an explicitly unmaintained prototype.
 
-But `typescript@next` (`7.1.0-dev.20260808.1`) ships a curated API:
+But `typescript@beta` (`7.1.0-beta`) ships a curated API:
 
 | Export | Provides |
 |---|---|
-| `typescript/unstable/async` | `API`, `Snapshot`, `Project`, `Program`, **`Checker`**, `Emitter` |
-| `typescript/unstable/ast` | `SyntaxKind`, node types, scanner, visitor, factory |
+| `typescript/async` | `API`, `Snapshot`, `Project`, `Program`, **`Checker`**, `Emitter` |
+| `typescript/ast` | `SyntaxKind`, node types, scanner, visitor, factory |
 
 The AST is lazily materialized from a binary buffer over JSON-RPC to the `tsgo` Go binary. The checker is complete enough for everything here: `getResolvedSignature`, `getSymbolAtLocation`, `getTypeAtLocation`, `getReferencedSymbolsForNode`, `getConstantValue`, `isTypeAssignableTo`, `getExportsOfModule`.
 
-**Risk:** the path is named `unstable` and 7.1 is a dev build. Mitigated by pinning the nightly and confining all API contact to one adapter module (§4.1). 7.1 is expected to stabilize around October 2026.
+**Risk:** 7.1 is a beta, and its announcement gives no API stability guarantee. Mitigated by pinning the version exactly and confining all API contact to one adapter module (§4.1).
 
 ### 2.2 Measured performance (Sample A, 971 files / 14 MB)
 
@@ -144,7 +144,7 @@ Both repos: tests are 17–21% of files but only **14% of duplicated mass**. 78�
 | Concern | Choice | Rationale |
 |---|---|---|
 | Language | **TypeScript on Bun ≥1.4** | §2.3; runs live, no build step |
-| TS frontend | **`typescript@next` → `typescript/unstable/async`** | Only path to real types; §2.1. The `sync` variant reads POSIX fds off child stdio, which Bun does not expose |
+| TS frontend | **`typescript@beta` → `typescript/async`** | Only path to real types; §2.1. The `sync` variant reads POSIX fds off child stdio, which Bun does not expose |
 | Cache | **`node:sqlite`** (built-in, SQLite 3.53.1) | Zero native deps; relational |
 | Hashing | **xxhash64 / FNV-1a** (not SHA-256) | ~3× faster; collision risk irrelevant here |
 | Near-miss detection | **MinHash + LSH**, fixed seeds | Deterministic, 564 ms over 3.9k shapes |
@@ -185,7 +185,7 @@ thicket <command> [--depth N] [--budget-tokens N] [--granularity G]
 
 ### 4.1 The adapter boundary
 
-All contact with `typescript/unstable/*` — and every hazard in §2.4 — is confined to `src/extract/ts-adapter.ts`:
+All contact with the `typescript` API — and every hazard in §2.4 — is confined to `src/extract/ts-adapter.ts`:
 
 ```ts
 interface SourceModel {
@@ -198,7 +198,7 @@ interface SourceModel {
 }
 ```
 
-Everything downstream consumes `SourceModel`. When 7.1 stabilizes, one file changes.
+Everything downstream consumes `SourceModel`. An API change touches one file.
 
 ---
 
@@ -439,7 +439,7 @@ The report is a pure function of `(source content, config, thicket version)`:
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| `typescript/unstable` API churn | **High** | Single adapter (§4.1); pinned nightly; 7.1 stabilizes ~Oct 2026 |
+| `typescript` API churn | **High** | Single adapter (§4.1); exact version pin; 7.1 is still in beta |
 | **Ranking surfaces the wrong 40 of 495** | **High** | §5.4 is the core algorithm; validate against real repos before adding detectors |
 | Silent-wrong API hazards (§2.4) | Medium | All four sealed in the adapter, each with a regression test |
 | Adaptive granularity picks badly | Medium | `--granularity` override; report the chosen level in the header |

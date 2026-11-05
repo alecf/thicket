@@ -7,7 +7,7 @@
  *  - The compiler, through `tsc --explainFiles`. It resolves every import the
  *    program has, including `import type`, `export type … from` and
  *    `import("typescript").Node` in a type position. Those are erased at
- *    runtime, but they still tie the file to the unstable API.
+ *    runtime, but they still tie the file to the compiler API.
  *  - Bun's transpiler. It sees a `require()` call, which the compiler does not
  *    treat as an import in an ESM `.ts` file.
  *
