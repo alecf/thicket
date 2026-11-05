@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/alecf/thicket/compare/v0.2.0...v0.3.0) (2026-11-05)
+
+
+### Features
+
+* move to the TypeScript 7.1 beta API ([#35](https://github.com/alecf/thicket/issues/35)) ([1cfda3d](https://github.com/alecf/thicket/commit/1cfda3dd706fdbdb5f4f421e65972fb287865b45))
+
 ## [0.2.0](https://github.com/alecf/thicket/compare/v0.1.0...v0.2.0) (2026-11-04)
 
 
