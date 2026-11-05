@@ -1,4 +1,4 @@
-// Structural types for the parts of the unstable TS API we touch. Keeping our
+// Structural types for the parts of the TS API we touch. Keeping our
 // own aliases here means an upstream rename is a one-file change.
 export interface Node {
   readonly kind: number;

@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { SyntaxKind } from "typescript/unstable/ast";
-import { API } from "typescript/unstable/async";
+import { SyntaxKind } from "typescript/ast";
+import { API } from "typescript/async";
 import { hash, initHash } from "../hash.js";
 import { compareStrings, mostFrequent } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
@@ -212,7 +212,7 @@ function importedNameOf(spec: Node): string {
 /**
  * The `isTypeOnly` flag, read defensively.
  *
- * It is a lazy getter on the unstable AST rather than an own property, and it
+ * It is a lazy getter on the AST rather than an own property, and it
  * is absent on the node kinds that cannot carry it. Reading it through a cast
  * keeps every other access in this file on the typed surface.
  */
@@ -334,12 +334,12 @@ async function expandReferences(
   api: InstanceType<typeof API>,
   initial: readonly string[],
 ): Promise<{
-  snapshot: Awaited<ReturnType<InstanceType<typeof API>["updateSnapshot"]>>;
+  snapshot: Awaited<ReturnType<InstanceType<typeof API>["createSnapshot"]>>;
   configs: string[];
 }> {
   const open = [...initial];
   const visited = new Set(open.map((c) => c.toLowerCase()));
-  let snapshot = await api.updateSnapshot({ openProjects: open });
+  let snapshot = await api.createSnapshot({ openProjects: open });
 
   for (let depth = 0; depth < MAX_REFERENCE_DEPTH; depth++) {
     const added: string[] = [];
@@ -355,7 +355,7 @@ async function expandReferences(
     if (added.length === 0) break;
     added.sort(compareStrings); // deterministic open order
     open.push(...added);
-    snapshot = await api.updateSnapshot({ openProjects: open });
+    snapshot = await snapshot.update({ openProjects: open });
   }
   return { snapshot, configs: open };
 }
@@ -887,6 +887,8 @@ export async function sourceFileNames(configs: readonly string[]): Promise<Probe
         seen.add(rel);
         own.add(rel);
       }
+      // Only inferred and synthetic projects lack a config, and we open neither.
+      if (project.configFileName === undefined) continue;
       byConfig.set(project.configFileName.toLowerCase(), [...own].sort(compareStrings));
     }
     // `compareStrings`, never `localeCompare`: under `en-US` collation folds

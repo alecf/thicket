@@ -1,4 +1,4 @@
-import { SyntaxKind } from "typescript/unstable/ast";
+import { SyntaxKind } from "typescript/ast";
 import { compareStrings } from "../../order.js";
 
 /**

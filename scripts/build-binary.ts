@@ -2,7 +2,7 @@
  * Compiles thicket to a self-contained directory per platform, and tars it.
  *
  * The binary is not self-contained on its own and cannot be made so: analysis
- * runs through `typescript/unstable/async`, which spawns a NATIVE tsgo child
+ * runs through `typescript/async`, which spawns a NATIVE tsgo child
  * process. That executable is 24MB, is per-platform, and refuses to start
  * without the ~110 `lib.*.d.ts` files beside it -- it panics with "this
  * executable may be misplaced" rather than degrading. So the shipping unit is

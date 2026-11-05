@@ -74,7 +74,7 @@ fails teaches readers to ignore a red mark.
 ### Never let Dependabot bump `typescript`
 
 Three reasons make that bump deliberate rather than routine. The version is
-pinned exactly. Analysis talks to `typescript/unstable/async`, a dev-build API.
+pinned exactly. Analysis talks to `typescript/async`, a beta API with no stability guarantee.
 The tsgo version joins the config hash that keys the cache, so a new compiler can
 change the report. Bump it by hand, then re-run the determinism job.
 Non-negotiable §2 covers the move to a stable 7.1.
@@ -149,11 +149,11 @@ The report must be a pure function of `(source content, config, thicket version)
 
 ### 2. All TypeScript API contact goes through the adapter
 
-`typescript/unstable/*` is a dev-build API on a path literally named `unstable`. Everything downstream consumes the `SourceModel` interface (PRD §4.1) so that when 7.1 stabilizes, one file changes. The `typescript` dependency is **pinned exactly**, not caret-ranged.
+The 7.1 entry points dropped the `unstable/` prefix in the beta, but the beta post gives no stability guarantee. The API still changes between nightlies. Everything downstream consumes the `SourceModel` interface (PRD §4.1), so an API change touches one file. The `typescript` dependency is **pinned exactly**, not caret-ranged.
 
-**One exception: the TypeScript language profile.** `src/lang/typescript/` imports `SyntaxKind` from `typescript/unstable/ast`. It needs the enum values, because rules must match kinds by value (§3). It makes no client calls. Before it existed, `fingerprint/` and `report/` imported `SyntaxKind` in two files and spelled kind names in two more. Now the profile holds every rule that names a kind. A 7.1 migration changes the adapter and the profile, and nothing else. `bun run check:boundary` enforces this in CI. It fails on any import of `typescript` outside `src/extract/` and `src/lang/typescript/`, type-only imports included.
+**One exception: the TypeScript language profile.** `src/lang/typescript/` imports `SyntaxKind` from `typescript/ast`. It needs the enum values, because rules must match kinds by value (§3). It makes no client calls. Before it existed, `fingerprint/` and `report/` imported `SyntaxKind` in two files and spelled kind names in two more. Now the profile holds every rule that names a kind. A compiler migration changes the adapter and the profile, and nothing else. The move from the August nightly to `7.1.0-beta` proved this: the only source edits were in `ts-adapter.ts` and the two profile files. `bun run check:boundary` enforces this in CI. It fails on any import of `typescript` outside `src/extract/` and `src/lang/typescript/`, type-only imports included.
 
-The seal earned its keep when the runtime moved to Bun. `typescript/unstable/sync` cannot run there at all: it spawns the `tsgo` server and does blocking RPC over `child.stdout._handle.fd`, a Node internal Bun does not expose, and its client refuses the alternative (`"Socket connections are not yet supported in the sync client"`). The fix was `typescript/unstable/async`, which talks over the child's *streams* — six awaits in `ts-adapter.ts` and nothing else in the repository changed. The sync API is auto-generated from the async one, so the two are the same surface with `Promise` wrappers, and AST materialization makes no client calls at all: a source file arrives as one payload and the tree materializes locally, which is why `walk`, `forEachChildSafe` and fragment extraction stayed synchronous.
+The seal earned its keep when the runtime moved to Bun. `typescript/sync` cannot run there at all: it spawns the `tsgo` server and does blocking RPC over `child.stdout._handle.fd`, a Node internal Bun does not expose, and its client refuses the alternative (`"Socket connections are not yet supported in the sync client"`). The fix was `typescript/async`, which talks over the child's *streams* — six awaits in `ts-adapter.ts` and nothing else in the repository changed. The sync API is auto-generated from the async one, so the two are the same surface with `Promise` wrappers, and AST materialization makes no client calls at all: a source file arrives as one payload and the tree materializes locally, which is why `walk`, `forEachChildSafe` and fragment extraction stayed synchronous.
 
 Two consequences worth keeping:
 
@@ -311,7 +311,7 @@ with almost no em dashes. `README.md` went from 19.3 words and 101 em dashes to
 
 ### 7. What ships is a directory, and the binary must be run to be tested
 
-Analysis goes through `typescript/unstable/async`, which spawns a **native tsgo
+Analysis goes through `typescript/async`, which spawns a **native tsgo
 child process**. That is the fact the whole distribution story is downstream of,
 and it cannot be engineered away from this side.
 

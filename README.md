@@ -239,7 +239,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config 098e8e76 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 6962b4ae · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -545,7 +545,7 @@ That one conclusion cut embeddings from v1, removed every native dependency, and
 
 ## Stack
 
-TypeScript on Bun 1.4 or later, with **nothing to compile at install time**. The cache uses `node:sqlite`, and the frontend uses `typescript@next`. TypeScript 7.1 ships a real programmatic API, `typescript/unstable/async`, backed by the Go compiler. That is the only way to get real type information instead of approximate syntax.
+TypeScript on Bun 1.4 or later, with **nothing to compile at install time**. The cache uses `node:sqlite`, and the frontend uses `typescript@7.1.0-beta`. TypeScript 7.1 ships a real programmatic API, `typescript/async`, backed by the Go compiler. That is the only way to get real type information instead of approximate syntax.
 
 That compiler is a native binary, and thicket starts it as a child process. It is why a release is a folder rather than a single file. Each platform's build ships in the tarball, so you do not need a toolchain for it.
 
