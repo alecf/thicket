@@ -253,10 +253,12 @@
 
 /* ---- rail ---------------------------------------------------------- */
 
+/* The caption and the step buttons always show in full. The chapter list
+   and the inspector give up height, and scroll, when the rail is short. */
 .rail {
   grid-area: rail;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   border-left: 1px solid var(--t-card-edge);
   background: var(--t-panel);
   padding: 1rem 1.1rem 1.2rem;
@@ -270,7 +272,12 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 2px;
+  align-content: start;
+  gap: 1px;
+  flex: 0 1 auto;
+  min-height: 4rem;
+  overflow-y: auto;
+  position: relative;
 }
 
 .chapters button {
@@ -280,7 +287,7 @@
   grid-template-columns: 1.6rem 1fr;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.32rem 0.5rem;
+  padding: 0.24rem 0.5rem;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -329,6 +336,7 @@
 }
 
 .caption {
+  flex: none;
   font-size: 0.98rem;
   line-height: 1.55;
 }
@@ -355,6 +363,9 @@
 }
 
 .inspector {
+  flex: 0 1 auto;
+  min-height: 3rem;
+  overflow-y: auto;
   border: 1.5px solid var(--t-near);
   border-radius: 10px;
   padding: 0.7rem 0.8rem;
@@ -392,6 +403,154 @@
   color: var(--t-soft);
   padding: 0.2rem 0.55rem;
   cursor: pointer;
+}
+
+.chapters .part-h {
+  font: 600 0.74rem var(--font-code);
+  color: var(--t-faint);
+  padding: 0.7rem 0.5rem 0.2rem;
+}
+
+.chapters .part-h:first-child {
+  padding-top: 0;
+}
+
+/* ---- steps --------------------------------------------------------- */
+
+.stepnav {
+  flex: none;
+  margin: auto -1.1rem -1.2rem;
+  padding: 0.7rem 1.1rem 1rem;
+  background: var(--t-panel);
+  border-top: 1px solid var(--t-card-edge);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.stepnav button {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.stepnav .back {
+  border: 1px solid var(--t-card-edge);
+  background: transparent;
+  color: var(--t-ink);
+}
+
+.stepnav .back:disabled {
+  color: var(--t-faint);
+  cursor: default;
+}
+
+.stepnav .next {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  background: var(--t-exact);
+  color: var(--t-panel);
+  min-width: 6.5rem;
+}
+
+/* Fills while Play waits on a caption, so the reader sees the next step coming. */
+.next-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--t-panel) 28%, transparent);
+  transform-origin: left;
+  transform: scaleX(var(--dwell, 0));
+}
+
+.next-l {
+  position: relative;
+}
+
+.steps {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.steps .dots {
+  display: flex;
+  gap: 5px;
+}
+
+.steps .d {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-card-edge);
+}
+
+.steps .d.d-past {
+  background: var(--t-faint);
+}
+
+.steps .d.d-on {
+  background: var(--t-exact);
+  transform: scale(1.3);
+}
+
+.steps .step-n {
+  font-size: 0.76rem;
+  color: var(--t-soft);
+  white-space: nowrap;
+}
+
+/* ---- parts --------------------------------------------------------- */
+
+.part {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--t-panel) 88%, transparent);
+  border: 1px solid var(--t-card-edge);
+  font: 600 0.82rem var(--font-display);
+  color: var(--t-soft);
+  pointer-events: none;
+}
+
+.part-big {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 0.2rem;
+  padding: 1.2rem 2.2rem 1.4rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--t-panel) 92%, transparent);
+  border: 1px solid var(--t-card-edge);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--t-ink) 14%, transparent);
+  pointer-events: none;
+  text-align: center;
+}
+
+.part-big .pb-n {
+  font: 600 0.9rem var(--font-code);
+  color: var(--t-soft);
+}
+
+.part-big .pb-t {
+  font: 700 clamp(1.6rem, 4vw, 2.8rem) / 1.1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--t-ink);
+}
+
+.scrub-ticks span.part-tick {
+  top: 4px;
+  height: 20px;
+  width: 3px;
+  background: var(--t-ink);
 }
 
 /* ---- transport ----------------------------------------------------- */
@@ -1104,6 +1263,73 @@
   fill: var(--t-near);
 }
 
+/* the token window */
+
+.ctok rect {
+  fill: var(--t-card);
+  stroke: var(--t-card-edge);
+  stroke-width: 1.5;
+}
+
+.ctok.id rect {
+  fill: var(--t-renamed-wash);
+  stroke: var(--t-renamed);
+}
+
+.ctok-t {
+  font: 500 13px var(--font-code);
+  fill: var(--t-ink);
+}
+
+.ctok.paren .ctok-t {
+  fill: var(--t-faint);
+}
+
+.conv-frame {
+  fill: color-mix(in srgb, var(--t-near) 10%, transparent);
+  stroke: var(--t-near);
+  stroke-width: 3;
+}
+
+.conv-read {
+  font: 600 17px var(--font-code);
+  fill: var(--t-near);
+}
+
+.conv-read2 {
+  font: 500 15px var(--font-code);
+  fill: var(--t-soft);
+}
+
+.run-dot {
+  fill: var(--t-near);
+}
+
+/* from duplication to imports */
+
+.import-band {
+  fill: var(--t-cycle-wash);
+}
+
+.ghost rect {
+  fill: var(--t-card);
+  stroke: var(--t-ink);
+  stroke-width: 2;
+}
+
+.part-bracket {
+  fill: none;
+  stroke: var(--t-soft);
+  stroke-width: 14;
+  stroke-linejoin: round;
+}
+
+.part-name {
+  font: 700 190px var(--font-display) !important;
+  fill: var(--t-ink);
+  letter-spacing: -0.02em;
+}
+
 /* graph */
 
 .gnode rect {
@@ -1276,6 +1502,23 @@
 
   .chapters {
     display: none;
+  }
+
+  .caption {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .stepnav {
+    margin: auto calc(-1 * max(16px, env(safe-area-inset-right, 0px))) -0.7rem;
+    padding: 0.5rem max(16px, env(safe-area-inset-right, 0px)) 0.6rem;
+  }
+
+  .part {
+    font-size: 0.72rem;
+    left: 8px;
+    bottom: 8px;
   }
 
   .caption {

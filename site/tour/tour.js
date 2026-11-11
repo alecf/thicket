@@ -100,19 +100,53 @@
   }
 
   // ------------------------------------------------------------- timeline --
-  const CHAPTERS = [
-    { id: "read", title: "Read the code", t0: 0, t1: 8 },
-    { id: "tree", title: "Build the syntax tree", t0: 8, t1: 22 },
-    { id: "fingerprint", title: "Fingerprint a fragment", t0: 22, t1: 36 },
-    { id: "fragments", title: "Cut every file", t0: 36, t1: 44 },
-    { id: "index", title: "File by fingerprint", t0: 44, t1: 60 },
-    { id: "nested", title: "Drop nested repeats", t0: 60, t1: 68 },
-    { id: "near", title: "Catch the near copy", t0: 68, t1: 78 },
-    { id: "rank", title: "Rank the findings", t0: 78, t1: 92 },
-    { id: "imports", title: "Trace the imports", t0: 92, t1: 106 },
-    { id: "report", title: "Write the report", t0: 106, t1: 120 },
+  // Two clocks. `u` is story time: every stage below is a function of it.
+  // `t` is page time: what scrolling, the scrubber and the steps move. They
+  // agree except during a hold, where page time runs on and story time stands
+  // still, so the camera can move or an explainer can play with nothing else
+  // changing.
+  const SKETCH_HOLD = 16;
+  const PART2_HOLD = 10;
+  const HOLDS = [
+    [50.8, 1.6], // zoom into the index
+    [52.25, 1.2], // widen for the exact-copy groups
+    [54.25, 1.4], // back to the index for L1
+    [59.9, 1.2], // widen for the renamed-copy groups
+    [70.45, SKETCH_HOLD], // how a sketch is built
+    [91.9, PART2_HOLD], // from duplication to imports
+    [105.9, 2.4], // into the report
   ];
-  const T_END = 120;
+  /** Page time where story time `u` starts. A hold at `u` comes after it. */
+  const T = (u) => u + HOLDS.reduce((a, [h, d]) => a + (h < u ? d : 0), 0);
+  /** Page time where a hold at `u` ends. */
+  const Te = (u) => u + HOLDS.reduce((a, [h, d]) => a + (h <= u ? d : 0), 0);
+  function warp(t) {
+    let shift = 0;
+    for (const [h, d] of HOLDS) {
+      const th = h + shift;
+      if (t < th) return t - shift;
+      if (t < th + d) return h;
+      shift += d;
+    }
+    return t - shift;
+  }
+  const U_END = 120;
+  const T_END = T(U_END);
+  const PARTS = ["Find duplication", "Find import cycles", "Write one report"];
+  const CHAPTERS = [
+    { id: "read", part: 0, title: "Read the code", t0: 0 },
+    { id: "tree", part: 0, title: "Build the syntax tree", t0: 8 },
+    { id: "fingerprint", part: 0, title: "Fingerprint a fragment", t0: 22 },
+    { id: "fragments", part: 0, title: "Cut every file", t0: 36 },
+    { id: "index", part: 0, title: "File by fingerprint", t0: T(44) },
+    { id: "nested", part: 0, title: "Drop nested repeats", t0: T(61.8) },
+    { id: "near", part: 0, title: "Catch the near copy", t0: T(68) },
+    { id: "rank", part: 0, title: "Rank the findings", t0: T(78) },
+    { id: "imports", part: 1, title: "Draw the import graph", t0: T(91.9) },
+    { id: "ring", part: 1, title: "Find the ring", t0: T(97.8) },
+    { id: "report", part: 2, title: "Write the report", t0: T(105.9) },
+  ];
+  CHAPTERS.forEach((c, i) => (c.t1 = i + 1 < CHAPTERS.length ? CHAPTERS[i + 1].t0 : T_END));
 
   // ----------------------------------------------------------------- data --
   const FIELD_ALIAS = {
@@ -231,6 +265,8 @@
     report: layer("report"),
     groups: layer("groups"),
     chips: layer("chips"),
+    ghosts: layer("ghosts"),
+    parts: layer("parts"),
   };
 
   // ---- cards ---------------------------------------------------------------
@@ -318,7 +354,15 @@
       codeLine(g, card.x + GUT, y, src);
     });
     const brackets = svg("g", { class: "brackets" }, g);
-    cardEls.set(card.file.path, { g, band, brackets, card });
+    // The import lines light up when thicket reads the files a second time.
+    const imports = [];
+    card.file.lines.forEach((src, i) => {
+      if (!src.startsWith("import ")) return;
+      const r = svg("rect", { x: card.x + 1, y: lineTop(card, i + 1), width: card.w - 2, height: LH, class: "import-band" }, g);
+      g.insertBefore(r, g.children[4]);
+      imports.push(r);
+    });
+    cardEls.set(card.file.path, { g, band, brackets, card, imports });
   }
   for (const f of frags) {
     const card = cards.get(f.file);
@@ -378,7 +422,8 @@
     const o = charXY(featuredPath, n.start);
     n.ox = o.x + Math.min(n.w, 80) / 2;
     n.oy = o.y;
-    n.arrive = 11 + n.pre * 0.055 + 1.5;
+    // Every node lands by 14.8, before the next caption.
+    n.arrive = 11 + 1.5 + n.pre * (2.3 / treeNodes.length);
     n.lines = n.endLine - n.line + 1;
   }
   const candidates = treeNodes.filter((n) => n.nodes >= D.minNodes);
@@ -502,8 +547,8 @@
     const j1 = P1.slots.get(f.eligible ? "1" + f.l1 : "0" + f.l0).indexOf(f);
     f.cell0 = { x: c0.x + 10 + j0 * 9, y: c0.y + 10 - j0 * 5 };
     f.cell1 = { x: c1.x + 10 + j1 * 9, y: c1.y + 10 - j1 * 5 };
-    f.t0 = 45 + f.n * 0.13;
-    f.t1 = 54 + f.n * 0.07;
+    f.t0 = 45 + f.n * 0.12;
+    f.t1 = 55.1 + f.n * 0.06;
     f.group0 = raw.find((c) => c.level === "L0" && c.members.includes(f));
     f.group1 = raw.find((c) => c.level === "L1" && c.members.includes(f));
   }
@@ -540,26 +585,60 @@
   }
   const GROUPS_H = order.reduce((a, c) => a + groupH(c, false) + 22, 0);
   const GROUPS = { x: GROUPS_X - 80, y: -120, w: GROUP_W + 160, h: GROUPS_H + 200 };
+  // Each pass's groups leave the index together, after its slots light up.
+  for (const level of ["L0", "L1"]) {
+    order.filter((c) => c.level === level).forEach((c, j) => (c.spawn = level === "L0" ? 52.3 + j * 0.25 : 59.95 + j * 0.2));
+  }
   for (const c of order) {
-    const lastIn = (at) => Math.max(...c.members.map(at));
-    c.spawn = (c.level === "L0" ? lastIn((f) => f.t0 + 1.5) : lastIn((f) => f.t1 + 1.2)) + 0.5;
     const cell = groupCell(c);
     c.cx = cell.x;
     c.cy = cell.y;
   }
 
   // ---- sketch -------------------------------------------------------------------
-  const SK_X = GROUPS_X + GROUP_W + 220;
+  const SK_X = GROUPS_X + GROUP_W + 520;
   const SK_CELL = 30;
   const SK_COLS = 16;
-  const SK_Y_A = 40;
-  const SK_Y_B = SK_Y_A + (D.sketchBins / SK_COLS) * SK_CELL + 150;
-  const SKETCH = { x: SK_X - 60, y: SK_Y_A - 140, w: SK_COLS * SK_CELL + 300, h: SK_Y_B + 8 * SK_CELL + 260 };
+  const SK_Y_A = 120;
+  const SK_ROWS = D.sketchBins / SK_COLS;
+  const SK_Y_B = SK_Y_A + SK_ROWS * SK_CELL + 150;
+  const CONV_Y = SK_Y_A - 175;
+  const CONV_W = 820;
+  const CONV_WIN = SK_X + 150;
+  const SK_BOTTOM = SK_Y_B + SK_ROWS * SK_CELL + 160;
+  const SKETCH = { x: SK_X - 60, y: CONV_Y - 110, w: CONV_W + 100, h: SK_BOTTOM - (CONV_Y - 110) };
+  // The explainer's own view: the token window and the first sketch.
+  const CONV = { x: SK_X - 40, y: CONV_Y - 130, w: CONV_W + 60, h: SK_Y_A + SK_ROWS * SK_CELL + 30 - (CONV_Y - 130) };
+  // Just the two sketches, for comparing them.
+  const GRIDS = { x: SK_X - 80, y: SK_Y_A - 80, w: SK_COLS * SK_CELL + 160, h: SK_BOTTOM - (SK_Y_A - 80) };
   const bins = D.near.binsA.map((a, i) => {
     const b = D.near.binsB[i];
     const state = a < 0 && b < 0 ? "skip" : a === b ? "agree" : "differ";
-    return { i, a, b, state, t: 70.4 + i * (3.8 / D.sketchBins) };
+    return { i, a, b, state, t: 70.5 + i * (3.8 / D.sketchBins) };
   });
+  // How each sketch fills, in explainer time `e` (beats into the sketch hold).
+  // The first runs of orderTotal are shown one at a time, the rest go fast,
+  // then reportTotal's sketch fills the same way.
+  const SHOWN_RUNS = 6;
+  const runAt = (k) => (k === 0 ? 1.0 : k < SHOWN_RUNS ? 3.2 + (k - 1) * 1.3 : 9.9 + ((k - SHOWN_RUNS) / (D.near.shinglesA.length - SHOWN_RUNS)) * 3);
+  const landAt = (k) => (k === 0 ? 2.6 : k < SHOWN_RUNS ? runAt(k) + 1.2 : runAt(k) + 0.1);
+  const fillEvents = (runs, at) => {
+    const perBin = new Map();
+    runs.forEach(([, bin, value], k) => {
+      const list = perBin.get(bin) || [];
+      const prev = list.length ? list[list.length - 1].value : Infinity;
+      if (value < prev) list.push({ e: at(k), value });
+      perBin.set(bin, list);
+    });
+    return perBin;
+  };
+  const fillA = fillEvents(D.near.shinglesA, landAt);
+  const fillB = fillEvents(D.near.shinglesB, (k) => 13.4 + (k / D.near.shinglesB.length) * 2);
+  const binNow = (perBin, bin, e) => {
+    let v = -1;
+    for (const ev of perBin.get(bin) || []) if (e >= ev.e) v = ev.value;
+    return v;
+  };
 
   // ---- rank -----------------------------------------------------------------------
   const RANK_X = SKETCH.x + SKETCH.w + 360;
@@ -805,10 +884,9 @@
     const g1 = k1 && k1[0] === "1" && raw.some((c) => c.level === "L1" && c.members[0].l1 === k1.slice(1));
     const g0 = k1 && k1[0] === "0" && n1 > 1;
     const ring = svg("rect", { x: -CELL_W / 2, y: -CELL_H / 2, width: CELL_W, height: CELL_H, rx: 12, class: "cell-ring" }, L.cells);
-    // A slot lights up when its last fragment lands.
-    const lastIn = (list, at) => Math.max(...list.map((f) => at(f)));
-    const hit0 = n0 > 1 ? lastIn(P0.slots.get(k0), (f) => f.t0 + 1.5) : null;
-    const hit1 = g1 || g0 ? lastIn(P1.slots.get(k1), (f) => f.t1 + 1.2) : null;
+    // Slots with copies light up once every fragment has landed.
+    const hit0 = n0 > 1 ? 50.9 + cells.filter((c) => c.hit0 !== null).length * 0.2 : null;
+    const hit1 = g1 || g0 ? 58.5 + cells.filter((c) => c.hit1 !== null).length * 0.15 : null;
     cells.push({ g, r, l0, l1, b0, b1, n0, n1, k0, k1, g1, g0, has0: !!k0, has1: !!k1, ring, hit0, hit1, cx: x + CELL_W / 2, cy: y + CELL_H / 2 });
   }
 
@@ -888,28 +966,52 @@
   // Sketch
   const skEls = { a: [], b: [] };
   const skG = svg("g", { class: "sketch" }, L.sketch);
-  label(skG, SK_X, SK_Y_A - 40, `sketch of orderTotal (${base(featuredPath)})`, "sk-label");
-  label(skG, SK_X, SK_Y_B - 40, `sketch of reportTotal (${base(nearFrag.file)})`, "sk-label");
-  const skMeter = label(skG, SK_X, SK_Y_B + 8 * SK_CELL + 70, "", "sk-meter");
-  const skVerdict = label(skG, SK_X, SK_Y_B + 8 * SK_CELL + 120, "", "sk-verdict");
+  label(skG, SK_X, SK_Y_A - 40, `sketch of orderTotal (${base(featuredPath)}), 128 bins`, "sk-label");
+  const skLabelB = label(skG, SK_X, SK_Y_B - 40, `sketch of reportTotal (${base(nearFrag.file)})`, "sk-label");
+  const skMeter = label(skG, SK_X, SK_Y_B + SK_ROWS * SK_CELL + 70, "", "sk-meter");
+  const skVerdict = label(skG, SK_X, SK_Y_B + SK_ROWS * SK_CELL + 120, "", "sk-verdict");
+  const binXY = (side, i) => ({
+    x: SK_X + (i % SK_COLS) * SK_CELL,
+    y: (side === "a" ? SK_Y_A : SK_Y_B) + Math.floor(i / SK_COLS) * SK_CELL,
+  });
   for (const b of bins) {
     for (const side of ["a", "b"]) {
-      const v = b[side];
-      const x = SK_X + (b.i % SK_COLS) * SK_CELL;
-      const y = (side === "a" ? SK_Y_A : SK_Y_B) + Math.floor(b.i / SK_COLS) * SK_CELL;
-      const r = svg("rect", {
-        x: x + 2,
-        y: y + 2,
-        width: SK_CELL - 4,
-        height: SK_CELL - 4,
-        rx: 4,
-        class: "bin" + (v < 0 ? " empty" : ""),
-        ...(v < 0 ? {} : { "fill-opacity": fmt(0.18 + 0.7 * (v / 65535), 2) }),
-      }, skG);
+      const { x, y } = binXY(side, b.i);
+      const r = svg("rect", { x: x + 2, y: y + 2, width: SK_CELL - 4, height: SK_CELL - 4, rx: 4, class: "bin empty" }, skG);
       skEls[side].push(r);
     }
   }
-  const scan = svg("rect", { x: 0, y: SK_Y_A - 6, width: 4, height: SK_Y_B - SK_Y_A + 8 * SK_CELL + 12, rx: 2, class: "scan" }, skG);
+  const scan = svg("rect", { x: 0, y: SK_Y_A - 6, width: 4, height: SK_Y_B - SK_Y_A + SK_ROWS * SK_CELL + 12, rx: 2, class: "scan" }, skG);
+
+  // The token window: orderTotal's tokens slide under a frame 5 tokens wide.
+  // Names show as Id, because the sketch ignores them.
+  const sketchTok = (t) => (t.startsWith("Id:") ? "Id" : t === "(" || t === ")" ? t : abbr(t));
+  const convToks = D.featured[featuredPath].l1.map(sketchTok);
+  const convX = [];
+  {
+    let x = 0;
+    for (const s of convToks) {
+      const w = s.length === 1 ? 18 : s.length * 13 * 0.6 + 16;
+      convX.push({ x, w });
+      x += w + 4;
+    }
+  }
+  const convG = svg("g", { class: "conv" }, L.sketch);
+  const clipId = "conv-clip";
+  const clip = svg("clipPath", { id: clipId }, defs);
+  svg("rect", { x: SK_X - 20, y: CONV_Y - 30, width: CONV_W + 40, height: 60 }, clip);
+  label(convG, SK_X, CONV_Y - 46, "orderTotal's tokens, names as Id", "sk-label");
+  const convRow = svg("g", { "clip-path": `url(#${clipId})` }, convG);
+  const convStrip = svg("g", null, convRow);
+  convToks.forEach((s, i) => {
+    const g = svg("g", { class: "ctok" + (s === "Id" ? " id" : s.length === 1 ? " paren" : "") }, convStrip);
+    if (s.length > 1) svg("rect", { x: convX[i].x, y: CONV_Y - 15, width: convX[i].w, height: 30, rx: 6 }, g);
+    label(g, convX[i].x + convX[i].w / 2, CONV_Y + 4.5, s, "ctok-t", { "text-anchor": "middle" });
+  });
+  const convFrame = svg("rect", { y: CONV_Y - 24, height: 48, rx: 9, class: "conv-frame" }, convG);
+  const convRead = label(convG, CONV_WIN, CONV_Y + 56, "", "conv-read");
+  const convRead2 = label(convG, CONV_WIN, CONV_Y + 80, "", "conv-read2");
+  const runDot = svg("circle", { r: 9, class: "run-dot" }, convG);
 
   // Graph
   const gEdgeEls = gedges.map((e) => {
@@ -988,6 +1090,18 @@
     lines.forEach((s, i) => label(cutNote, x, y + i * 26, s, i === 0 ? "cut-h" : "cut-t"));
   }
 
+  // From duplication to imports: each file card shrinks to a node and
+  // travels to its place in the import graph.
+  const ghosts = [...gnodes.values()].map((n) => {
+    const card = cards.get(n.path);
+    const g = svg("g", { class: "ghost gnode" + (inCycle.has(n.path) ? " in-ring" : "") }, L.ghosts);
+    const r = svg("rect", { rx: 12 }, g);
+    const t = svg("text", { class: "gnode-t", "text-anchor": "middle" }, g);
+    svg("tspan", { class: "dir" }, t).textContent = n.path.split("/").slice(0, -1).join("/") + "/";
+    svg("tspan", null, t).textContent = n.path.split("/").pop();
+    return { n, card, g, r, t };
+  });
+
   // Report
   const paper = svg("g", { class: "paper" }, L.report);
   svg("rect", { x: PAPER.x, y: PAPER.y, width: PAPER.w, height: PAPER.h, rx: 6, class: "paper-bg" }, paper);
@@ -1019,12 +1133,30 @@
     w: (b - a) * COL_STEP + CARD_W + 60,
     h: Math.max(...[...cards.values()].filter((c) => c.col >= a && c.col <= b).map((c) => c.y + c.h)) + 80,
   });
+  // The whole run, with each part named above its stages.
+  const PART_Y = Math.min(REPO.y, INDEX.y, GROUPS.y, SKETCH.y, RANK.y, GRAPH.y) - 260;
+  const partSpans = [
+    [0, REPO.x, RANK.x + RANK.w],
+    [1, GRAPH.x, GRAPH.x + GRAPH.w],
+    [2, PAPER.x - 60, PAPER.x + PAPER.w + 60],
+  ];
+  const partEls = partSpans.map(([i, x0, x1]) => {
+    const g = svg("g", { class: "part-span part-" + i }, L.parts);
+    svg("path", { d: `M${x0},${PART_Y + 110} V${PART_Y + 70} H${x1} V${PART_Y + 110}`, class: "part-bracket" }, g);
+    label(g, x0, PART_Y, `${i + 1}. ${["Duplication", "Import cycles", "Report"][i]}`, "part-name");
+    return g;
+  });
+  const WORLD = union({ x: REPO.x, y: PART_Y - 200, w: 10, h: 10 }, REPO, TOKENS, INDEX, GROUPS, SKETCH, RANK, GRAPH, PAPER);
   const top = candidates;
   const TREE_TOP = (() => {
     const xs = top.flatMap((n) => [n.tx - 260, n.tx + 260]);
     const x = Math.min(...xs);
     return { x, y: TREE_Y0 - 120, w: Math.max(...xs) - x, h: 4 * DY + 120 };
   })();
+  const WIDE = union(REPO, INDEX);
+  const IG = union(INDEX, GROUPS);
+  const P2 = T(91.9);
+  const SK0 = T(70.45);
   const CAMERA = [
     [0, REPO],
     [1.4, REPO],
@@ -1036,31 +1168,50 @@
     [10.2, ZOOM_FN],
     [11.4, ZOOM_FN],
     [13.6, union(featCard, TREE)],
-    [15.2, TREE],
+    [14.8, TREE],
     [16.8, TREE],
     [17.8, TREE_TOP],
     [21.4, TREE_TOP],
     [23.4, union(TOKENS, { x: TREE.x, y: TREE.y + TREE.h * 0.4, w: TREE.w, h: 10 })],
     [25, TOKENS],
-    [35.4, TOKENS],
-    [37.6, REPO],
-    [43.6, REPO],
-    [47.4, INDEX],
-    [59.4, INDEX],
-    [61, GROUPS],
-    [67.6, GROUPS],
-    [69.6, SKETCH],
-    [75.4, SKETCH],
-    [76.4, GROUPS],
-    [77.8, GROUPS],
-    [79.4, union(GROUPS, RANK)],
-    [80.6, RANK],
-    [91.6, RANK],
-    [93.4, GRAPH],
-    [105.4, GRAPH],
-    [107, reportView(0)],
-    [118.6, reportView(1)],
-    [120, reportView(1)],
+    [36, TOKENS],
+    [37.8, REPO],
+    [43.9, REPO],
+    // Zoomed out while fragments leave their brackets, in to see the copies
+    // stack, and out again whenever groups leave for the right.
+    [45, WIDE],
+    [T(50.8), WIDE],
+    [Te(50.8), INDEX],
+    [T(52.25), INDEX],
+    [Te(52.25), IG],
+    [T(54.25), IG],
+    [Te(54.25), INDEX],
+    [T(59.9), INDEX],
+    [Te(59.9), IG],
+    [T(61.8), IG],
+    [T(62.8), GROUPS],
+    [T(68), GROUPS],
+    [T(69.6), GRIDS],
+    [SK0, GRIDS],
+    [SK0 + 1, CONV],
+    [SK0 + 12.9, CONV],
+    [SK0 + 14.1, GRIDS],
+    [T(76), GRIDS],
+    [T(77), GROUPS],
+    [T(78), GROUPS],
+    [T(79.3), union(GROUPS, RANK)],
+    [T(80.3), RANK],
+    [P2 + 0.2, RANK],
+    // Out to the whole run, back to the files, then along with them.
+    [P2 + 2.2, WORLD],
+    [P2 + 3.2, WORLD],
+    [P2 + 4.8, REPO],
+    [P2 + 6.8, REPO],
+    [P2 + 9.6, GRAPH],
+    [T(105.4), GRAPH],
+    [T(107), reportView(0)],
+    [T(118.6), reportView(1)],
+    [T_END, reportView(1)],
   ];
   const scene = document.getElementById("scene");
   let sceneW = 1;
@@ -1135,14 +1286,18 @@
   const fnName = (p) => (p === featuredPath ? "orderTotal" : "cartSubtotal");
   void fnName;
   const testArray = frags.find((f) => f.kind === "ArrayLiteralExpression" && f.file.endsWith(".test.ts"));
+  // Each caption is one step. Next plays the step's animation, which runs
+  // from the caption's time to the next caption's, and stops there.
+  const runsA = D.near.shinglesA.length;
+  const filledA = D.near.binsA.filter((v) => v >= 0).length;
   const CAPTIONS = [
-    [0, "This is a small shop codebase: 8 files and 100 lines. A few functions add up totals, and they look a lot alike. Scroll, or press Play, to watch thicket read it."],
-    [4, "Every fingerprint, group and score on this page comes from one real run of thicket over these files. The finished report is at the bottom of the page."],
+    [0, "This is a small shop codebase: 8 files and 100 lines. A few functions add up totals, and they look a lot alike. Press Next to watch thicket read it."],
+    [1.4, "Every fingerprint, group and score on this page comes from one real run of thicket over these files. The finished report is at the bottom of the page."],
     [8, "thicket starts by parsing each file. Here is <code>orderTotal</code> in <code>src/orders/total.ts</code>."],
     [11, "The parser turns the text into a syntax tree. Each part of the code becomes a node. Watch each piece drop into its place."],
     [15, `thicket counts the nodes under each node. The whole function holds ${D.tree.nodes}.`],
     [17.4, `A subtree is worth comparing when it has at least ${D.minNodes} nodes and spans at least ${D.minLines} lines. Three subtrees have enough nodes. The <code>for…of</code> loop spans only 3 lines, so it drops out.`],
-    [20, "That leaves 2 fragments in this function: the function itself and its body. A bracket in the margin marks each one."],
+    [20, "That leaves 2 fragments in this function: the function itself and its body."],
     [22, "To compare fragments quickly, thicket flattens each one into a row of tokens. A token is a node's kind, or the text of a name or a value. The parentheses keep the tree's shape. Long kind names are shortened here."],
     [25, `thicket hashes the row into a short fingerprint, <code>${hashOf(featuredPath, "l0")}</code>. Two fragments with the same fingerprint have the same code. This is the L0 fingerprint.`],
     [27.4, `Here is <code>cartSubtotal</code> from <code>src/cart/subtotal.ts</code>. The structure matches, but the names differ. So its L0 fingerprint differs too.`],
@@ -1150,26 +1305,31 @@
     [32.8, `Now the two rows are identical, so both L1 fingerprints are <code>${hashOf(featuredPath, "l1")}</code>. These two functions are one shape with renamed parts.`],
     [36, "thicket does the same for every file. Each bracket in a margin is one fragment."],
     [40, `The sample has ${frags.length} fragments, and each one has both fingerprints. Most of them are nested inside each other.`],
-    [44, "thicket files each fragment under its L0 fingerprint. Fragments that land in the same slot are exact copies."],
-    [50.6, "Three slots hold more than one fragment: the pasted <code>orderTotal</code>, its body, and a test fixture array. Each becomes a group."],
-    [53, `Then thicket files them again under L1. A fragment that is mostly values sits this pass out, because ignoring its values would match unrelated data. The test array is ${Math.round(testArray.literalShare * 100)}% values, over the 35% limit.`],
-    [57.2, "Three more groups form: the renamed function, its body, and two interfaces that differ only in their names. That makes 6 groups."],
-    [60, "Some groups are copies inside copies. Each copy of the body sits inside a copy of the function."],
-    [63, "A group whose copies all sit inside a bigger group adds nothing to the report. thicket drops it, and 4 groups remain."],
-    [68, `<code>reportTotal</code> in <code>${nearFrag.file}</code> matched nothing. It has one extra line, so both of its fingerprints differ.`],
-    [70, `thicket also keeps a sketch of each fragment: ${D.sketchBins} small hashes of its runs of 5 tokens, with names ignored. Similar code gets similar sketches.`],
-    [72.6, `It compares two sketches bin by bin. ${D.near.match} of the ${D.near.of} filled bins agree. That is ${Math.round((D.near.match / D.near.of) * 100)}%, which meets the 80% bar for a near copy.`],
-    [76, "So <code>reportTotal</code> joins the renamed group as a near copy. The report lists it apart, because it needs a small change before it fits."],
-    [78, "Now thicket scores each group. The score grows with the size of one copy, raised to the power 1.5. So one long copy beats several short ones."],
-    [80.4, "It grows more slowly with the number of copies. Copies in different modules count more, because merging them also removes a dependency."],
-    [82.4, "The renamed group pays two discounts. Renamed copies count a little less than exact ones. And its field names differ: <code>items</code> in one copy, <code>lines</code> in another. When copies use different field names, they may hold different ideas. So the score keeps only 25%."],
-    [86.2, "Types and tests are scored too, but each goes into a section of its own. A test fixture never takes a slot from production code."],
-    [92, "Duplication is half of the report. The other half is imports. thicket draws an arrow from each file to every file it imports. A dashed arrow imports only types, which disappear at compile time."],
-    [97.8, "Three files import each other in a ring: <code>orders/total.ts</code> needs <code>invoice/total.ts</code>, which needs <code>reports/rows.ts</code>, which needs <code>orders/total.ts</code>. A ring like this can fail at startup, when one file runs before another has finished loading."],
-    [101, `thicket looks for the cheapest import to remove. Each import here carries one symbol. Moving <code>formatMoney</code> out of <code>reports/rows.ts</code> breaks the ring completely.`],
-    [106, "Last, thicket writes the report. Each finding names its copies and shows the first lines of the code."],
-    [111.5, "The import ring gets a chart and a suggested cut. An agent reads this report and decides what to change. thicket only points."],
-    [116.5, "The same code always gives the same report, byte for byte. So you can run thicket after each change and compare the two reports."],
+    [T(44), "thicket files each fragment under its L0 fingerprint. Watch each fragment leave its bracket for a slot in the index on the right. Each slot holds one fingerprint."],
+    [T(50.8), "Fragments with the same fingerprint land in the same slot. Three slots hold more than one fragment: the pasted <code>orderTotal</code>, its body, and a test fixture array."],
+    [T(52.25), "Each slot that holds copies becomes a group. The groups line up to the right of the index."],
+    [T(54.25), `Then thicket files every fragment again, under L1. A fragment that is mostly values sits this pass out, because ignoring its values would match unrelated data. The test array is ${Math.round(testArray.literalShare * 100)}% values, over the 35% limit.`],
+    [T(58.45), "Three more slots hold copies: the renamed function, its body, and two interfaces that differ only in their names. They become groups too, so there are 6."],
+    [T(61.8), "Some groups are copies inside copies. Each copy of the body sits inside a copy of the function."],
+    [T(63), "A group whose copies all sit inside a bigger group adds nothing to the report. thicket drops it, and 4 groups remain."],
+    [T(68), `<code>reportTotal</code> in <code>${nearFrag.file}</code> matched nothing. It has one extra line, so both of its fingerprints differ. A sketch can still catch it.`],
+    [SK0, "A sketch is 128 numbers that sum up a fragment's shape. thicket builds it from the fragment's tokens. Every name becomes <code>Id</code>, so renamed code gives the same sketch."],
+    [SK0 + 3.2, "thicket reads the tokens 5 at a time and hashes each run. The hash picks one of the 128 bins and gives a value. A bin keeps the smallest value it gets."],
+    [SK0 + 9.7, `After all ${runsA} runs, ${filledA} bins hold a value and the rest stay empty. <code>reportTotal</code> gets its sketch the same way. Similar code has many of the same runs, so it fills many bins with the same values.`],
+    [Te(70.45), `thicket compares the two sketches bin by bin. ${D.near.match} of the ${D.near.of} filled bins agree. That is ${Math.round((D.near.match / D.near.of) * 100)}%, which meets the 80% bar for a near copy.`],
+    [T(76), "So <code>reportTotal</code> joins the renamed group as a near copy. The report lists it apart, because it needs a small change before it fits."],
+    [T(78), "Now thicket scores each group. The score grows with the size of one copy, raised to the power 1.5. So one long copy beats several short ones."],
+    [T(80.4), "It grows more slowly with the number of copies. Copies in different modules count more, because merging them also removes a dependency."],
+    [T(82.4), "The renamed group pays two discounts. Renamed copies count a little less than exact ones. And its field names differ: <code>items</code> in one copy, <code>lines</code> in another. When copies use different field names, they may hold different ideas. So the score keeps only 25%."],
+    [T(86.2), "Types and tests are scored too, but each goes into a section of its own. A test fixture never takes a slot from production code."],
+    [P2, "That finishes the search for duplication. thicket's second job is to find import cycles. For that it goes back to the same 8 files and reads only their import lines."],
+    [P2 + 5.5, "Each file becomes one node of a graph. The nodes carry the file names across to the import graph."],
+    [Te(91.9), "thicket draws an arrow from each file to every file it imports. A dashed arrow imports only types, which disappear at compile time."],
+    [T(97.8), "Three files import each other in a ring: <code>orders/total.ts</code> needs <code>invoice/total.ts</code>, which needs <code>reports/rows.ts</code>, which needs <code>orders/total.ts</code>. A ring like this can fail at startup, when one file runs before another has finished loading."],
+    [T(101), `thicket looks for the cheapest import to remove. Each import here carries one symbol. Moving <code>formatMoney</code> out of <code>reports/rows.ts</code> breaks the ring completely.`],
+    [T(105.9), "Both searches are done. thicket writes their results into one report. Each finding names its copies and shows the first lines of the code."],
+    [T(111.5), "The import ring gets a chart and a suggested cut. An agent reads this report and decides what to change. thicket only points."],
+    [T(116.5), "The same code always gives the same report, byte for byte. So you can run thicket after each change and compare the two reports."],
   ];
 
   // HUD: one live number per chapter.
@@ -1178,18 +1338,18 @@
   function hud(t) {
     const count = (target, a, b) => Math.round(target * lin(t, a, b));
     if (t < 8) return [String(D.files.length), `files · ${json.lineCount} lines`];
-    if (t < 22) return [String(count(D.tree.nodes, 14.6, 16.6) || 0), "nodes in orderTotal"];
-    if (t < 36) return [t < 32.6 ? (t < 27.4 ? "1" : "2") : "1", t < 32.6 ? (t < 27.4 ? "L0 fingerprint" : "L0 fingerprints") : "L1 fingerprint, shared"];
-    if (t < 44) return [String(count(frags.length, 36.4, 42)), "fragments"];
-    if (t < 60) return [String(t < 51 ? 0 : t < 57.4 ? 3 : 6), "groups"];
+    if (t < 22) return [String(count(D.tree.nodes, 15.1, 16.9) || 0), "nodes in orderTotal"];
+    if (t < 36) return [t < 33.4 ? (t < 27.4 ? "1" : "2") : "1", t < 33.4 ? (t < 27.4 ? "L0 fingerprint" : "L0 fingerprints") : "L1 fingerprint, shared"];
+    if (t < 44) return [String(count(frags.length, 36.6, 39.8)), "fragments"];
+    if (t < 61.8) return [String(t < 50.9 ? 0 : t < 58.5 ? 3 : 6), "groups"];
     if (t < 68) return [t < 64 ? "6" : "4", "groups"];
     if (t < 78) {
       const done = bins.filter((b) => b.t <= t && b.state !== "skip");
       const agree = done.filter((b) => b.state === "agree").length;
       return [done.length ? Math.round((agree / done.length) * 100) + "%" : "–", "of bins agree"];
     }
-    if (t < 92) return [String(kept.length), "findings ranked"];
-    if (t < 106) return [t < 98 ? "0" : "1", t < 98 ? "cycles" : "cycle, 3 files"];
+    if (t < 91.9) return [String(kept.length), "findings ranked"];
+    if (t < 105.9) return [t < 98 ? "0" : "1", t < 98 ? "cycles" : "cycle, 3 files"];
     return [String(json.duplication.length + json.typeDuplication.length + json.cycles.length), "findings in the report"];
   }
 
@@ -1210,9 +1370,9 @@
     if (t >= (featured ? 32.6 : 40)) {
       rows.push(["L1", f.eligible ? `<code>${f.l1}</code>` : `skipped, ${Math.round(f.literalShare * 100)}% values`]);
     }
-    if (t >= 51) {
+    if (t >= 50.9) {
       const g0 = f.group0;
-      const g1 = t >= 57.4 ? f.group1 : null;
+      const g1 = t >= 58.5 ? f.group1 : null;
       const parts = [];
       if (g0) parts.push(`exact copy, ${g0.members.length} in group`);
       if (g1) parts.push(`renamed copy, ${g1.members.length} in group`);
@@ -1259,10 +1419,10 @@
     attr(band, "height", fmt((fn.endLine - fn.line + 1) * LH));
     show(band, bo);
     for (const f of frags) {
-      const appear = f.file === featuredPath ? 20.6 + f.depth * 0.3 : 36.6 + fileOrder.indexOf(f.file) * 0.55 + f.depth * 0.12;
+      const appear = f.file === featuredPath ? 20.6 + f.depth * 0.3 : 36.4 + fileOrder.indexOf(f.file) * 0.33 + f.depth * 0.1;
       const o = prog(t, appear, appear + 0.6);
       show(f.bracket, o);
-      const fate = t < 51 ? "" : f.group0 || (t >= 57.4 && f.group1) ? ((f.group0 && f.group0.kept) || (f.group1 && f.group1.kept) ? "kept" : t < 63 ? "kept" : "dropped") : f === nearFrag && t >= 76 ? "near" : "single";
+      const fate = t < 50.9 ? "" : f.group0 || (t >= 58.5 && f.group1) ? ((f.group0 && f.group0.kept) || (f.group1 && f.group1.kept) ? "kept" : t < 63 ? "kept" : "dropped") : f === nearFrag && t >= 76 ? "near" : "single";
       cls(f.bracket, "fate-kept", fate === "kept");
       cls(f.bracket, "fate-dropped", fate === "dropped");
       cls(f.bracket, "fate-near", fate === "near");
@@ -1283,14 +1443,14 @@
   }
 
   function renderTree(t) {
-    const visible = t > 10.6 && t < 36.5;
+    const visible = t > 10.6 && t < 36.9;
     show(L.tree, visible ? 1 : 0);
-    show(L.tokens, t > 21.8 && t < 36.5 ? 1 : 0);
+    show(L.tokens, t > 21.8 && t < 36.9 ? 1 : 0);
     if (!visible) return;
     const flip = (tok) => 30 + tok.i * 0.022;
     for (const n of treeNodes) {
       const p = nodePos(n, t);
-      const o = prog(t, n.arrive - 1.6, n.arrive - 1.3) * (1 - prog(t, 35.6, 36.4));
+      const o = prog(t, n.arrive - 1.6, n.arrive - 1.3) * (1 - prog(t, 36.0, 36.8));
       const tok = n.tok;
       // At the flip, the token squashes and comes back as its L1 text.
       const fk = lin(t, flip(tok) - 0.18, flip(tok) + 0.18);
@@ -1301,7 +1461,7 @@
       attr(n.rect, "width", fmt(w));
       const text = p.k2 < 0.5 ? n.label : fk < 0.5 ? tok.texts[0] : tok.texts[2];
       txt(n.text, text);
-      if (n.badge) show(n.badge, prog(t, 14.6 + (treeDepth - n.depth) * 0.16, 15 + (treeDepth - n.depth) * 0.16) * (1 - prog(t, 22, 22.6)));
+      if (n.badge) show(n.badge, prog(t, 15.1 + (treeDepth - n.depth) * 0.16, 15.5 + (treeDepth - n.depth) * 0.16) * (1 - prog(t, 22, 22.6)));
       const cand = n.nodes >= D.minNodes;
       cls(n.g, "cand", cand && t >= 17.6 && t < 22.4);
       const ok = cand && n.lines >= D.minLines;
@@ -1332,35 +1492,35 @@
       const sy = tk.role === "id" || tk.role === "lit" ? Math.max(0.06, Math.abs(1 - 2 * fk)) : 1;
       if (e.a) {
         txt(e.a.s, tk.texts[0]);
-        put(e.a.g, tk.x, tk.ya, 1, prog(t, 24.2 + tk.i * 0.006, 25) * (1 - prog(t, 35.6, 36.4)));
+        put(e.a.g, tk.x, tk.ya, 1, prog(t, 24.2 + tk.i * 0.006, 25) * (1 - prog(t, 36.0, 36.8)));
       }
-      const bo = prog(t, 27.4 + tk.i * 0.01, 28.2 + tk.i * 0.01) * (1 - prog(t, 35.6, 36.4));
+      const bo = prog(t, 27.4 + tk.i * 0.01, 28.2 + tk.i * 0.01) * (1 - prog(t, 36.0, 36.8));
       const dy = (1 - prog(t, 27.4 + tk.i * 0.01, 28.2 + tk.i * 0.01)) * 22;
       put(e.b.g, tk.x, tk.yb + dy, 1, bo, sy);
       txt(e.b.s, fk < 0.5 ? tk.texts[1] : tk.texts[3]);
       cls(e.b.g, "diff", tk.diff && t >= 28.2 && t < flip(tk));
       cls(e.b.g, "l1", t >= flip(tk) && (tk.role === "id" || tk.role === "lit"));
     }
-    show(rowLabels[0], prog(t, 23, 24) * (1 - prog(t, 35.6, 36.4)));
-    show(rowLabels[1], prog(t, 27.4, 28.2) * (1 - prog(t, 35.6, 36.4)));
+    show(rowLabels[0], prog(t, 23, 24) * (1 - prog(t, 36.0, 36.8)));
+    show(rowLabels[1], prog(t, 27.4, 28.2) * (1 - prog(t, 36.0, 36.8)));
     const seed = Math.floor(t * 18);
-    show(hpa.g, prog(t, 25, 25.6) * (1 - prog(t, 35.6, 36.4)));
+    show(hpa.g, prog(t, 25, 25.6) * (1 - prog(t, 36.0, 36.8)));
     txt(hpa.l0, scramble(hashOf(featuredPath, "l0"), lin(t, 25.2, 26.4), seed));
-    txt(hpa.l1, t < 32.4 ? "" : scramble(hashOf(featuredPath, "l1"), lin(t, 32.4, 33.4), seed + 3));
-    show(hpb.g, prog(t, 27.6, 28.2) * (1 - prog(t, 35.6, 36.4)));
+    txt(hpa.l1, t < 32.9 ? "" : scramble(hashOf(featuredPath, "l1"), lin(t, 32.9, 33.9), seed + 3));
+    show(hpb.g, prog(t, 27.6, 28.2) * (1 - prog(t, 36.0, 36.8)));
     txt(hpb.l0, scramble(hashOf("src/cart/subtotal.ts", "l0"), lin(t, 27.8, 29), seed + 5));
-    txt(hpb.l1, t < 32.6 ? "" : scramble(hashOf("src/cart/subtotal.ts", "l1"), lin(t, 32.6, 33.6), seed + 7));
-    show(sameMark, prog(t, 33.6, 34.2) * (1 - prog(t, 35.6, 36.4)));
+    txt(hpb.l1, t < 33.0 ? "" : scramble(hashOf("src/cart/subtotal.ts", "l1"), lin(t, 33.0, 34.0), seed + 7));
+    show(sameMark, prog(t, 34.2, 34.8) * (1 - prog(t, 36.0, 36.8)));
   }
 
   function renderIndex(t) {
     show(L.cells, prog(t, 44.4, 45.4));
-    const k = prog(t, 53.2, 54.6);
+    const k = prog(t, 54.3, 55.1);
     for (const c of cells) {
       show(c.l0, c.has0 ? 1 - k : 0);
       show(c.l1, c.has1 ? k : 0);
-      show(c.b0, c.n0 > 1 && t >= 50.6 ? 1 - k : 0);
-      show(c.b1, c.n1 > 1 && t >= 57.2 ? k : 0);
+      show(c.b0, c.n0 > 1 && t >= c.hit0 ? 1 - k : 0);
+      show(c.b1, c.n1 > 1 && t >= (c.hit1 ?? 58.5) ? k : 0);
       const filled = (c.has0 && k < 0.5) || (c.has1 && k >= 0.5);
       cls(c.g, "empty", !filled);
       cls(c.g, "hit0", k < 0.5 && c.hit0 !== null && t >= c.hit0);
@@ -1404,15 +1564,15 @@
       }
       const leave = 1 - prog(t, 79, 80.5);
       put(f.chip, x, y, s, appear * leave);
-      txt(f.chipHash, t < 53.4 || !f.eligible ? f.l0 : f.l1);
-      txt(f.chipTag, t >= 53.4 && !f.eligible ? `${Math.round(f.literalShare * 100)}% values` : short(f.kind));
-      cls(f.chip, "ineligible", t >= 53.4 && !f.eligible);
-      const inG0 = !!f.group0 && t >= 50.6;
-      const inG1 = !!f.group1 && t >= 57.2;
+      txt(f.chipHash, t < 54.7 || !f.eligible ? f.l0 : f.l1);
+      txt(f.chipTag, t >= 54.7 && !f.eligible ? `${Math.round(f.literalShare * 100)}% values` : short(f.kind));
+      cls(f.chip, "ineligible", t >= 54.7 && !f.eligible);
+      const inG0 = !!f.group0 && t >= 50.9;
+      const inG1 = !!f.group1 && t >= 58.5;
       cls(f.chip, "g0", inG0);
       cls(f.chip, "g1", inG1);
       cls(f.chip, "near-hit", f === nearFrag && t >= 68 && t < 78);
-      cls(f.chip, "dim", t >= 59 && !inG0 && !inG1 && f !== nearFrag);
+      cls(f.chip, "dim", t >= 59.9 && !inG0 && !inG1 && f !== nearFrag);
       cls(f.chip, "followed", followed === f);
     }
   }
@@ -1448,9 +1608,9 @@
       attr(c.stripe, "height", fmt(h));
       show(c.membersG, 1 - rank);
       if (c.nearRow) show(c.nearRow, nearK);
-      if (c.inside) show(c.inside, prog(t, 61, 61.8));
-      cls(c.g, "nesting", !c.kept && t >= 61 && t < 65);
-      cls(c.g, "parent", c.kept && raw.some((d) => d.parent === c) && t >= 61 && t < 65);
+      if (c.inside) show(c.inside, prog(t, 62, 62.8));
+      cls(c.g, "nesting", !c.kept && t >= 62 && t < 65);
+      cls(c.g, "parent", c.kept && raw.some((d) => d.parent === c) && t >= 62 && t < 65);
       const mine = !!followed && (c.members.includes(followed) || (c === nearGroup && followed === nearFrag && t >= 77));
       cls(c.g, "followed", mine);
       for (const r of c.memberRows) cls(r.row, "followed", r.m === followed);
@@ -1485,10 +1645,74 @@
     }
   }
 
-  function renderSketch(t) {
+  // `t` is story time and `pt` is page time. The explainer runs inside a
+  // hold, where only page time moves.
+  function renderSketch(t, pt) {
     const o = prog(t, 69.6, 70.4) * (1 - prog(t, 78.4, 79.4));
     show(L.sketch, o);
     if (o === 0) return;
+    const e = pt - T(70.45);
+    // Fill the bins as runs land.
+    for (const b of bins) {
+      for (const side of ["a", "b"]) {
+        const v = binNow(side === "a" ? fillA : fillB, b.i, e);
+        const r = skEls[side][b.i];
+        cls(r, "empty", v < 0);
+        attr(r, "fill-opacity", v < 0 ? "0" : fmt(0.18 + 0.7 * (v / 65535), 2));
+      }
+    }
+    show(skLabelB, prog(e, 12.9, 13.5));
+    // The token window.
+    const convO = prog(e, 0.2, 1.0) * (1 - prog(e, 12.9, 13.6));
+    show(convG, convO);
+    if (convO > 0) {
+      let at = 0;
+      for (let k = 1; k < SHOWN_RUNS; k++) at += prog(e, runAt(k), runAt(k) + 0.4);
+      at += lin(e, runAt(SHOWN_RUNS), runAt(D.near.shinglesA.length - 1)) * (D.near.shinglesA.length - SHOWN_RUNS);
+      const k0 = Math.floor(at);
+      const fr = at - k0;
+      const xAt = (i) => mix(convX[i].x, convX[Math.min(i + 1, convX.length - 1)].x, fr);
+      const x0 = xAt(k0);
+      const end = convX[Math.min(k0 + 4, convX.length - 1)];
+      const endNext = convX[Math.min(k0 + 5, convX.length - 1)];
+      const x1 = mix(end.x + end.w, endNext.x + endNext.w, fr);
+      attr(convStrip, "transform", `translate(${fmt(CONV_WIN - x0)},0)`);
+      attr(convFrame, "x", fmt(CONV_WIN - 6));
+      attr(convFrame, "width", fmt(x1 - x0 + 12));
+      show(convFrame, prog(e, 0.8, 1.2));
+      // Read out the run under the window, and throw it at its bin.
+      const k = Math.round(at);
+      const run = D.near.shinglesA[Math.min(k, D.near.shinglesA.length - 1)];
+      const detailed = k < SHOWN_RUNS && e < runAt(SHOWN_RUNS);
+      if (detailed && e >= runAt(k) + (k === 0 ? 0.4 : 0.35)) {
+        const [, bin, value] = run;
+        txt(convRead, `run ${k + 1} of ${D.near.shinglesA.length}: hash → bin ${bin}, value ${value}`);
+        const before = binNow(fillA, bin, runAt(k));
+        txt(convRead2, before >= 0 && before < value ? `bin ${bin} already holds ${before}, which is smaller, so it stays` : before >= 0 ? `smaller than ${before}, so bin ${bin} takes it` : `bin ${bin} was empty, so it takes the value`);
+        show(convRead2, prog(e, landAt(k) - 0.1, landAt(k) + 0.2));
+      } else if (e >= runAt(SHOWN_RUNS)) {
+        txt(convRead, `run ${Math.min(k + 1, D.near.shinglesA.length)} of ${D.near.shinglesA.length}`);
+        txt(convRead2, "");
+      } else {
+        txt(convRead, "");
+        txt(convRead2, "");
+      }
+      // The dot flies from the window to the run's bin.
+      let dotO = 0;
+      for (let j = 0; j < SHOWN_RUNS; j++) {
+        const f0 = landAt(j) - (j === 0 ? 0.8 : 0.6);
+        const f = lin(e, f0, landAt(j));
+        if (f > 0 && f < 1) {
+          const { x, y } = binXY("a", D.near.shinglesA[j][1]);
+          const q = ease(f);
+          const sx = CONV_WIN + (x1 - x0) / 2;
+          attr(runDot, "cx", fmt(mix(sx, x + SK_CELL / 2, q)));
+          attr(runDot, "cy", fmt(mix(CONV_Y + 24, y + SK_CELL / 2, q) - Math.sin(Math.PI * q) * 40));
+          dotO = 1;
+        }
+      }
+      show(runDot, dotO);
+    }
     let done = 0;
     let agree = 0;
     for (const b of bins) {
@@ -1514,13 +1738,13 @@
   }
 
   function renderGraph(t) {
-    const on = prog(t, 92, 93) * (1 - prog(t, 106.4, 107.4));
+    const on = (t > 91.9 ? 1 : 0) * (1 - prog(t, 106.4, 107.4));
     show(L.graph, on);
     if (on === 0) return;
     for (const { n, g } of gNodeEls) {
       const ringK = prog(t, 97.8, 98.6);
       const dim = inCycle.has(n.path) ? 1 : mix(1, 0.4, ringK * (1 - prog(t, 104, 105)));
-      show(g, prog(t, 92.4, 93.2) * dim);
+      show(g, dim);
       cls(g, "followed", !!followed && followed.file === n.path);
     }
     for (const el of gEdgeEls) {
@@ -1552,8 +1776,37 @@
     show(cutNote, prog(t, 101.6, 102.4));
   }
 
+  // Part 2 opens: out to the whole run, back to the files, then each file
+  // card shrinks to a node and travels to the import graph.
+  function renderBridge(t, pt) {
+    const e = pt - P2;
+    const bandO = prog(e, 4.4, 5.0) * (1 - prog(e, 6.4, 7.2));
+    for (const c of cardEls.values()) for (const r of c.imports) show(r, bandO);
+    for (const g of partEls) show(g, prog(e, 1.2, 2.2) * (1 - prog(e, 3.4, 4.4)));
+    const m = prog(e, 5.7, 6.7);
+    const k = prog(e, 6.8, 9.6);
+    const on = t <= 91.9 && e >= 5.6;
+    show(L.ghosts, on ? 1 : 0);
+    if (!on) return;
+    for (const gh of ghosts) {
+      const { card, n } = gh;
+      const w = mix(card.w, NODE_W, m);
+      const h = mix(card.h, NODE_H, m);
+      const cx = mix(card.x + card.w / 2, n.x, k);
+      const cy = mix(card.y + card.h / 2, n.y, k);
+      attr(gh.r, "x", fmt(cx - w / 2));
+      attr(gh.r, "y", fmt(cy - h / 2));
+      attr(gh.r, "width", fmt(w));
+      attr(gh.r, "height", fmt(h));
+      attr(gh.t, "x", fmt(cx));
+      attr(gh.t, "y", fmt(cy + 6));
+      show(gh.t, m);
+      show(gh.g, prog(e, 5.6, 5.9));
+    }
+  }
+
   function renderReport(t) {
-    show(L.report, prog(t, 105.6, 106.6));
+    show(L.report, prog(t, 105.9, 106.6));
     let last = -1;
     reportEls.forEach((e, i) => {
       const r = reportLines[i];
@@ -1574,25 +1827,64 @@
   void findLine;
 
   // ----------------------------------------------------------------- rail --
+  const STEPS = CAPTIONS.map(([at, html], i) => ({
+    at,
+    html,
+    end: i + 1 < CAPTIONS.length ? CAPTIONS[i + 1][0] : T_END,
+    words: html.replace(/<[^>]+>/g, "").split(/\s+/).length,
+  }));
+  // The first step is a still picture. Next moves straight on from it.
+  STEPS[0].still = true;
+  const restOf = (i) => (i === STEPS.length - 1 ? T_END : STEPS[i].end - 0.02);
+  const stepAt = (t) => {
+    let k = 0;
+    for (let i = 0; i < STEPS.length; i++) if (t >= STEPS[i].at - 1e-6) k = i;
+    return k;
+  };
+  const chapterAt = (t) => {
+    let k = 0;
+    CHAPTERS.forEach((c, i) => {
+      if (t >= c.t0 - 1e-6) k = i;
+    });
+    return k;
+  };
+  for (const c of CHAPTERS) c.steps = STEPS.map((s, i) => i).filter((i) => chapterAt(STEPS[i].at) === CHAPTERS.indexOf(c));
+
   const chaptersEl = document.getElementById("chapters");
   const captionEl = document.getElementById("caption");
+  let partSeen = -1;
   const chapterEls = CHAPTERS.map((c, i) => {
+    if (c.part !== partSeen) {
+      partSeen = c.part;
+      const h = document.createElement("li");
+      h.className = "part-h";
+      h.textContent = `${c.part + 1}. ${PARTS[c.part]}`;
+      chaptersEl.appendChild(h);
+    }
     const li = document.createElement("li");
     const b = document.createElement("button");
     b.type = "button";
     b.innerHTML = `<span class="ch-n">${i + 1}</span><span class="ch-t">${c.title}</span><span class="ch-fill"></span>`;
-    b.addEventListener("click", () => jump(c.t0 + 0.01));
+    b.addEventListener("click", () => playStep(c.steps[0]));
     li.appendChild(b);
     chaptersEl.appendChild(li);
     return { li, b, fill: b.querySelector(".ch-fill") };
   });
+  const backBtn = document.getElementById("back");
+  const nextBtn = document.getElementById("next");
+  const nextLabel = nextBtn.querySelector(".next-l");
+  const stepsEl = document.getElementById("steps");
+  const partEl = document.getElementById("part");
+  const partBig = document.getElementById("part-big");
   const scrub = document.getElementById("scrub");
   const scrubFill = document.getElementById("scrub-fill");
   const scrubTicks = document.getElementById("scrub-ticks");
+  scrub.setAttribute("aria-valuemax", fmt(T_END, 1));
   for (const c of CHAPTERS) {
     const s = document.createElement("span");
     s.style.left = (c.t0 / T_END) * 100 + "%";
     s.title = c.title;
+    if (c.part !== (CHAPTERS[CHAPTERS.indexOf(c) - 1] || c).part) s.className = "part-tick";
     scrubTicks.appendChild(s);
   }
   const nowEl = document.getElementById("now");
@@ -1617,50 +1909,97 @@
     s.textContent = name;
     map.insertBefore(s, mapView);
   }
+  // A part opens with its name across the scene, which then settles in the
+  // corner.
+  const PART_OPEN = [
+    [P2, 1],
+    [T(105.9), 2],
+  ];
 
-  function renderRail(t, view) {
-    const ci = Math.max(0, CHAPTERS.findIndex((c) => t < c.t1) === -1 ? CHAPTERS.length - 1 : CHAPTERS.findIndex((c) => t < c.t1));
+  function renderRail(pt, t, view) {
+    const ci = chapterAt(pt);
+    const si = stepAt(pt);
+    const ch = CHAPTERS[ci];
+    if (chaptersEl._ci !== ci) {
+      chaptersEl._ci = ci;
+      const li = chapterEls[ci].li;
+      const top = li.offsetTop - chaptersEl.offsetTop;
+      if (top < chaptersEl.scrollTop || top + li.offsetHeight > chaptersEl.scrollTop + chaptersEl.clientHeight) {
+        chaptersEl.scrollTop = top - chaptersEl.clientHeight / 2;
+      }
+    }
     chapterEls.forEach((e, i) => {
       const c = CHAPTERS[i];
       cls(e.li, "current", i === ci);
-      cls(e.li, "done", t >= c.t1);
-      e.fill.style.transform = `scaleX(${fmt(lin(t, c.t0, c.t1), 3)})`;
+      cls(e.li, "done", pt >= c.t1);
+      e.fill.style.transform = `scaleX(${fmt(lin(pt, c.t0, c.t1), 3)})`;
     });
-    let cap = CAPTIONS[0][1];
-    for (const [at, html] of CAPTIONS) if (t >= at) cap = html;
-    const html = `<p class="cap-chapter">${ci + 1} of ${CHAPTERS.length} · ${CHAPTERS[ci].title}</p><p>${cap}</p>`;
+    const html = `<p class="cap-chapter">${ci + 1} of ${CHAPTERS.length} · ${ch.title}</p><p>${STEPS[si].html}</p>`;
     if (captionEl._h !== html) {
       captionEl.innerHTML = html;
       captionEl._h = html;
     }
-    scrubFill.style.transform = `scaleX(${fmt(t / T_END, 4)})`;
-    scrub.setAttribute("aria-valuenow", fmt(t, 1));
-    scrub.setAttribute("aria-valuetext", CHAPTERS[ci].title);
-    txt(nowEl, CHAPTERS[ci].title);
+    const dots = ch.steps.map((i) => `<span class="${i < si ? "d d-past" : i === si ? "d d-on" : "d"}"></span>`).join("");
+    const stepsHtml = `<span class="dots" aria-hidden="true">${dots}</span><span class="step-n">Step ${ch.steps.indexOf(si) + 1} of ${ch.steps.length}</span>`;
+    if (stepsEl._h !== stepsHtml) {
+      stepsEl.innerHTML = stepsHtml;
+      stepsEl._h = stepsHtml;
+    }
+    backBtn.disabled = pt <= 0.01;
+    txt(nextLabel, si === STEPS.length - 1 && pt >= T_END - 0.05 ? "Start over" : "Next");
+    txt(partEl, `${ch.part + 1}. ${PARTS[ch.part]}`);
+    let big = 0;
+    let bigPart = 0;
+    for (const [at, p] of PART_OPEN) {
+      const k = prog(pt - at, 0.1, 0.7) * (1 - prog(pt - at, 2.2, 2.8));
+      if (k > big) {
+        big = k;
+        bigPart = p;
+      }
+    }
+    if (big > 0) {
+      const html = `<span class="pb-n">Part ${bigPart + 1} of 3</span><span class="pb-t">${PARTS[bigPart]}</span>`;
+      if (partBig._h !== html) {
+        partBig.innerHTML = html;
+        partBig._h = html;
+      }
+    }
+    partBig.style.opacity = fmt(big, 3);
+    partBig.style.transform = `translate(-50%, -50%) scale(${fmt(0.92 + 0.08 * big, 3)})`;
+    partBig.hidden = big === 0;
+    scrubFill.style.transform = `scaleX(${fmt(pt / T_END, 4)})`;
+    scrub.setAttribute("aria-valuenow", fmt(pt, 1));
+    scrub.setAttribute("aria-valuetext", ch.title);
+    txt(nowEl, ch.title);
     const [n, l] = hud(t);
     txt(hudN, n);
     txt(hudL, l);
     const vx = (view.x - WORLD_X0) / (WORLD_X1 - WORLD_X0);
     const vw = view.w / (WORLD_X1 - WORLD_X0);
     mapView.style.left = clamp(vx, 0, 1) * 100 + "%";
-    mapView.style.width = clamp(vw, 0.01, 1) * 100 + "%";
+    mapView.style.width = clamp(vw, 0.01, 1 - clamp(vx, 0, 1)) * 100 + "%";
   }
 
-  function render(t) {
-    const view = camera(t);
+  function render(pt) {
+    const t = warp(pt);
+    const view = camera(pt);
     renderCards(t);
     renderTree(t);
     renderIndex(t);
     renderGroups(t);
     renderChips(t);
-    renderSketch(t);
+    renderSketch(t, pt);
     renderGraph(t);
+    renderBridge(t, pt);
     renderReport(t);
-    renderRail(t, view);
+    renderRail(pt, t, view);
     inspect(t);
   }
 
   // ------------------------------------------------------------- controls --
+  // Next plays one step and stops. Play runs the steps in order and waits on
+  // each one long enough to read its caption. Scrolling still moves through
+  // the run directly.
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
   const BEAT_PX = 72;
   const stage = document.getElementById("stage");
@@ -1668,11 +2007,16 @@
   const speedBtn = document.getElementById("speed");
   let target = 0;
   let shown = -1;
-  let playing = false;
+  let stopAt = null; // a step is playing, and stops here
+  let auto = false;
+  let dwellFrom = 0;
+  let dwellFor = 0;
   let rate = 1.5;
   let lastFrame = 0;
   let raf = 0;
-  let programmatic = 0;
+  // Where the page last scrolled itself. A scroll event that lands there is
+  // the page's own, and does not move the target.
+  let ownY = null;
 
   function header() {
     const h = document.querySelector("header.site");
@@ -1690,50 +2034,111 @@
   const rootTop = () => root.getBoundingClientRect().top + window.scrollY - header();
   const tFromScroll = () => clamp((window.scrollY - rootTop()) / BEAT_PX, 0, T_END);
   function scrollToT(t) {
-    programmatic = 2;
-    window.scrollTo(0, rootTop() + t * BEAT_PX);
+    ownY = Math.round(rootTop() + t * BEAT_PX);
+    window.scrollTo(0, ownY);
+  }
+
+  // Reading time for a caption, at the chosen speed.
+  const dwellMs = (i) => ((1400 + STEPS[i].words * 280) * 1.5) / rate;
+  function startDwell(now) {
+    dwellFrom = now;
+    dwellFor = dwellMs(stepAt(target));
+  }
+  function setNextFill(k) {
+    nextBtn.style.setProperty("--dwell", fmt(clamp(k), 3));
   }
 
   function frame(now) {
     raf = 0;
     const dt = lastFrame ? Math.min(0.1, (now - lastFrame) / 1000) : 0;
     lastFrame = now;
-    if (playing) {
-      target = Math.min(T_END, target + dt * rate);
+    if (stopAt !== null) {
+      target = Math.min(stopAt, target + dt * rate);
       scrollToT(target);
-      if (target >= T_END) setPlaying(false);
+      if (target >= stopAt) {
+        stopAt = null;
+        if (auto) startDwell(now);
+      }
+    } else if (auto && dwellFor) {
+      const k = (now - dwellFrom) / dwellFor;
+      setNextFill(k);
+      if (k >= 1) {
+        dwellFor = 0;
+        setNextFill(0);
+        if (target >= T_END - 0.01) setAuto(false);
+        else next();
+      }
     }
-    // Ease the shown time toward the target, so a wheel step glides.
+    // Ease the shown time toward the target, so a jump glides.
     if (shown < 0 || reduce.matches || Math.abs(target - shown) > 14) shown = target;
     else shown += (target - shown) * Math.min(1, dt * 9 || 0.25);
     if (Math.abs(target - shown) < 0.002) shown = target;
     render(shown);
-    if (playing || shown !== target) raf = requestAnimationFrame(frame);
+    if (stopAt !== null || shown !== target || (auto && dwellFor)) raf = requestAnimationFrame(frame);
     else lastFrame = 0;
   }
   function requestRender(immediate) {
     if (immediate) render(shown < 0 ? target : shown);
     if (!raf) raf = requestAnimationFrame(frame);
   }
-  function setPlaying(on) {
-    playing = on;
-    playBtn.setAttribute("aria-pressed", String(on));
-    playBtn.querySelector(".label").textContent = on ? "Pause" : target >= T_END - 0.01 ? "Replay" : "Play";
-    stage.classList.toggle("is-playing", on);
-    if (on) {
-      if (target >= T_END - 0.01) {
-        target = 0;
-        shown = 0;
-        scrollToT(0);
-      }
-      const top = rootTop();
-      if (window.scrollY < top - 2 || window.scrollY > top + T_END * BEAT_PX + 2) scrollToT(target);
+
+  /** Play step `i` from its start, and stop at its end. */
+  function playStep(i) {
+    i = clamp(i, 0, STEPS.length - 1);
+    dwellFor = 0;
+    setNextFill(0);
+    target = STEPS[i].at;
+    stopAt = STEPS[i].still ? null : restOf(i);
+    if (stopAt === null) scrollToT(target);
+    if (reduce.matches && stopAt !== null) {
+      target = stopAt;
+      stopAt = null;
+      scrollToT(target);
+    }
+    lastFrame = 0;
+    requestRender();
+  }
+  function next() {
+    dwellFor = 0;
+    setNextFill(0);
+    if (stopAt !== null) {
+      // A step is playing: finish it at once.
+      target = shown = stopAt;
+      stopAt = null;
+      scrollToT(target);
+      if (auto) startDwell(performance.now());
+      requestRender(true);
+      return;
+    }
+    if (target >= T_END - 0.01) return playStep(0);
+    const i = stepAt(target);
+    // Partway through a step, Next finishes it. At its end, Next moves on.
+    if (!STEPS[i].still && target < restOf(i) - 0.3) {
+      stopAt = restOf(i);
       lastFrame = 0;
       requestRender();
-    }
+    } else playStep(i + 1);
+  }
+  function back() {
+    setAuto(false);
+    stopAt = null;
+    const i = stepAt(target);
+    target = i === 0 ? 0 : i === 1 ? 0 : restOf(i - 1);
+    scrollToT(target);
+    requestRender();
+  }
+  function setAuto(on) {
+    auto = on;
+    dwellFor = 0;
+    setNextFill(0);
+    playBtn.setAttribute("aria-pressed", String(on));
+    playBtn.querySelector(".label").textContent = on ? "Pause" : "Play";
+    stage.classList.toggle("is-playing", on);
+    if (on && stopAt === null) next();
   }
   function jump(t) {
-    setPlaying(false);
+    setAuto(false);
+    stopAt = null;
     target = clamp(t, 0, T_END);
     scrollToT(target);
     requestRender();
@@ -1742,16 +2147,33 @@
   window.addEventListener(
     "scroll",
     () => {
-      if (programmatic > 0) programmatic--;
-      if (!playing) target = tFromScroll();
+      if (ownY !== null && Math.abs(window.scrollY - ownY) <= 2) {
+        /* the page's own scroll */
+      } else if (stopAt === null) {
+        ownY = null;
+        target = tFromScroll();
+      }
       requestRender();
     },
     { passive: true },
   );
   for (const ev of ["wheel", "touchstart"]) {
-    window.addEventListener(ev, () => playing && setPlaying(false), { passive: true });
+    window.addEventListener(
+      ev,
+      (e) => {
+        if (e.target.closest && e.target.closest(".rail, .transport")) return;
+        ownY = null;
+        if (auto || stopAt !== null) {
+          setAuto(false);
+          stopAt = null;
+        }
+      },
+      { passive: true },
+    );
   }
-  playBtn.addEventListener("click", () => setPlaying(!playing));
+  nextBtn.addEventListener("click", () => next());
+  backBtn.addEventListener("click", () => back());
+  playBtn.addEventListener("click", () => setAuto(!auto));
   speedBtn.addEventListener("click", () => {
     rate = rate === 1.5 ? 3 : rate === 3 ? 0.75 : 1.5;
     speedBtn.textContent = rate === 1.5 ? "1×" : rate === 3 ? "2×" : "½×";
@@ -1787,17 +2209,13 @@
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const r = root.getBoundingClientRect();
     if (r.bottom < 0 || r.top > window.innerHeight) return;
-    const ci = CHAPTERS.findIndex((c) => target < c.t1 - 0.05);
     if (e.key === " " || e.key === "k") {
       if (e.target.closest && e.target.closest("button")) return;
-      setPlaying(!playing);
+      setAuto(!auto);
     } else if (e.key === "ArrowRight" || e.key === "l") {
-      const next = CHAPTERS[Math.min(CHAPTERS.length - 1, (ci < 0 ? CHAPTERS.length - 1 : ci) + 1)];
-      jump(next.t0 + 0.01);
+      next();
     } else if (e.key === "ArrowLeft" || e.key === "j") {
-      const cur = CHAPTERS[ci < 0 ? CHAPTERS.length - 1 : ci];
-      const prev = target - cur.t0 > 1.5 ? cur : CHAPTERS[Math.max(0, (ci < 0 ? CHAPTERS.length - 1 : ci) - 1)];
-      jump(prev.t0 + 0.01);
+      back();
     } else return;
     e.preventDefault();
   });
@@ -1806,7 +2224,7 @@
   function fromHash() {
     const id = location.hash.slice(1);
     const c = CHAPTERS.find((x) => x.id === id);
-    if (c) jump(c.t0 + 0.01);
+    if (c) playStep(c.steps[0]);
   }
   window.addEventListener("hashchange", fromHash);
 
@@ -1820,8 +2238,14 @@
     requestRender(true);
   });
 
-  // Testing hook: render one moment without scrolling.
-  window.__tour = { render: (t) => ((target = shown = t), render(t)), T_END, CHAPTERS };
+  // Testing hooks: render one moment without scrolling, and list each step's
+  // start and resting time.
+  window.__tour = {
+    render: (t) => ((target = shown = t), render(t)),
+    T_END,
+    CHAPTERS,
+    steps: STEPS.map((s, i) => ({ at: s.at, rest: restOf(i) })),
+  };
 
   layoutPage();
   try {

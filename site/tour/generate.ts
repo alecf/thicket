@@ -22,7 +22,7 @@ import { extractFragments } from "../../src/fingerprint/fragments.js";
 import { forEachChildSafe, safeText } from "../../src/extract/traverse.js";
 import type { Node } from "../../src/extract/types.js";
 import { typescript } from "../../src/lang/typescript/profile.js";
-import { SKETCH_BINS, EMPTY_BIN, similarity } from "../../src/fingerprint/sketch.js";
+import { SKETCH_BINS, EMPTY_BIN, shinglesOf, similarity } from "../../src/fingerprint/sketch.js";
 import { subsume } from "../../src/report/rank.js";
 import { runReport } from "../../src/run.js";
 import { VERSION } from "../../src/version.js";
@@ -53,13 +53,15 @@ try {
 
   // Token streams for the fragments the tour opens up. Only these two are
   // shown token by token: the original and its renamed copy.
+  const streamsOf = (path: string) => {
+    const file = files.find((f) => f.path === path)!;
+    const f = extractFragments(file, { minNodes: MIN_NODES, minLines: MIN_LINES }).find(
+      (x) => x.kind === "FunctionDeclaration",
+    )!;
+    return { l0: f.tokensL0, l1: f.tokensL1 };
+  };
   const featured: Record<string, { l0: string[]; l1: string[] }> = {};
-  for (const file of files) {
-    if (file.path !== "src/orders/total.ts" && file.path !== "src/cart/subtotal.ts") continue;
-    for (const f of extractFragments(file, { minNodes: MIN_NODES, minLines: MIN_LINES })) {
-      if (f.kind === "FunctionDeclaration") featured[file.path] = { l0: f.tokensL0, l1: f.tokensL1 };
-    }
-  }
+  for (const path of ["src/orders/total.ts", "src/cart/subtotal.ts"]) featured[path] = streamsOf(path);
 
   // The syntax tree of the original, with positions, so the page can grow
   // each node out of the text it covers. Walked the way fragments.ts walks.
@@ -149,6 +151,9 @@ try {
       binsB: bins(nearB.sketch!),
       match: sim.match,
       of: sim.of,
+      // Where each run of 5 tokens lands, for drawing the sketches filling.
+      shinglesA: shinglesOf(streamsOf(nearA.filePath).l1).map((s) => [s.start, s.bin, s.value]),
+      shinglesB: shinglesOf(streamsOf(nearB.filePath).l1).map((s) => [s.start, s.bin, s.value]),
     },
     imports: files.map((f) => ({
       file: f.path,
