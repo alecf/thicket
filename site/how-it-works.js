@@ -381,7 +381,7 @@ function fpDemo() {
       head = "Same shape, different data · no match";
       const worst = Math.max(A.literalShare, B.literalShare);
       body =
-        `They match at L1, but ${pct(worst)} of the names and values are literals. ` +
+        `They match at L1, but strings and numbers make up ${pct(worst)} of the names and values. ` +
         `Over 35%, a fragment can only match at L0, so these count as two different tables.`;
     } else if (j >= NEAR) {
       cls = "near";
@@ -713,7 +713,7 @@ const DRIFT = {
       ["header", "", [["title", "post.title"], ["author", "post.by"], ["date", "post.at"]]],
       ["badge", "", [["label", "tag.text"], ["color", "tag.hue"], ["count", "tag.uses"]]],
     ],
-    say: "Same shape at L1: three keys, each one reading a property. But no field name repeats. These are three different objects. A helper that builds all three would just be a worse object literal.",
+    say: "Same shape at L1: three keys, each reading a property. But no field name repeats, so these are three different objects. A helper that built all three would just be a worse object literal.",
   },
   jsx: {
     lang: "jsx",
@@ -830,7 +830,7 @@ function tangleDemo() {
       .join("");
     svg.innerHTML = defs + edges + boxes;
     $("#tangle-caption", root).textContent = after
-      ? "ui/ now imports formatDate from where it really lives. The ui/ → lib/ edge is gone, and so is the cycle. Same program, one find-and-replace."
+      ? "ui/ now imports formatDate from where it really lives. The ui/ → lib/ edge is gone, and so is the cycle. The program behaves exactly the same, and the fix was a find-and-replace."
       : "ui/ and lib/ import each other, so they're a tangle. But ui/ only reaches lib/ for formatDate, and lib/ just re-exports that from shared/.";
   };
   buttonGroup(root, "tangle", draw)("before");

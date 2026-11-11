@@ -22,7 +22,7 @@
     <a href="#ranking">5. Rank what is left</a>
     <a href="#drift">6. Ask if merging buys anything</a>
     <a href="#not-duplication">7. Skip what only looks duplicated</a>
-    <a href="#lanes">8. Give tests and types their own lanes</a>
+    <a href="#lanes">8. Give tests and types their own sections</a>
     <a href="#varies">9. Say what changes between copies</a>
     <a href="#tangles">10. Untangle the imports</a>
   </nav>
@@ -32,8 +32,8 @@
   <p>
     thicket parses every file with the TypeScript compiler. That gives it an
     <strong>AST</strong>, or abstract syntax tree: the code as a tree of nodes, one for each
-    piece of syntax. A function is a node. So is a loop, a variable name, and the
-    <code>*</code> in <code>a * b</code>.
+    piece of syntax. A function is a node. So are a loop, a variable name, and even
+    the <code>*</code> in <code>a * b</code>.
   </p>
   <p>
     thicket walks that tree. Every node that is big enough becomes a <strong>fragment</strong>.
@@ -64,8 +64,9 @@
   </figure>
 
   <p>
-    "Big enough" means at least 15 AST nodes and 4 lines by default. You can raise or lower
-    both with <code>--depth</code>. Imports, exports and parameter lists never become
+    "Big enough" means at least 15 AST nodes and 4 lines by default. <code>--depth</code> raises or
+    lowers both at once, and <code>--min-nodes</code> and <code>--min-lines</code> set them one
+    at a time. Imports, exports and parameter lists never become
     fragments. They look alike in every file, and you can't extract them into anything.
   </p>
 
@@ -73,8 +74,10 @@
   <h2 id="fingerprints">2. Fingerprint each piece</h2>
   <p>
     To compare fragments, thicket flattens each one into a list. It walks the fragment's part of
-    the tree, top to bottom, and writes down each node's kind. Parentheses mark where a node's
-    children start and end. At the leaves of the tree it writes the actual name or value.
+    the tree, top to bottom, and writes down what kind of node each one is, like
+    <code>BinaryExpression</code> or <code>PropertyAccessExpression</code>. Each child goes
+    inside its own pair of parentheses, so the list keeps the shape of the tree. At the leaves
+    it writes the actual name or value.
     Whitespace and comments aren't in the tree, so they never show up.
   </p>
   <p>Here's <code>item.price * item.qty</code>. Hover over a node to find it in the list.</p>
@@ -89,10 +92,12 @@
       </div>
       <div class="ast-stream"></div>
     </div>
+    <figcaption>L1 swaps names for numbered placeholders. More on that just below.</figcaption>
   </figure>
 
   <p>
-    Then thicket hashes that list at two levels, which it calls L0 and L1.
+    Then thicket boils that list down to a short fingerprint, a hash. It makes two of them, at
+    two levels it calls L0 and L1. Fragments with the same hash count as the same code.
   </p>
   <ul>
     <li>
@@ -110,9 +115,10 @@
     Fragments that match form a <strong>finding</strong>. That's one entry in the report.
   </p>
   <p>
-    Try it below. Edit either side, or pick an example. This demo lists source tokens rather
-    than AST nodes, so that you can type into it. It's a simplified version of the real list,
-    but the matching works the same way.
+    Try it below. Edit either side, or pick an example. This demo works on tokens
+    instead of AST nodes, so that you can type into it. A token is one word, name, number or bit
+    of punctuation, the way you'd type it. It's a simplified version of the real list, but the
+    matching works the same way.
   </p>
 
   <figure class="demo" id="fp-demo">
@@ -140,13 +146,13 @@
       <span>Show tokens as</span>
       <button type="button" data-mode="l0">L0</button>
       <button type="button" data-mode="l1" aria-pressed="true">L1</button>
-      <button type="button" data-mode="l2">near-copy sketch</button>
+      <button type="button" data-mode="l2">names ignored (near copies)</button>
     </div>
     <div class="verdict" id="fp-verdict" aria-live="polite"></div>
     <figcaption>
-      Simplified. The real thing walks the syntax tree, so its stream has structure markers this
-      one skips. It also estimates the near-copy score (section 3) instead of computing it
-      exactly. For code this size, you get the same answer either way.
+      Simplified. The real list comes from the syntax tree, so it has the parentheses this one
+      leaves out. thicket also estimates the near-copy score (section 3), where this demo
+      computes it exactly. For code this short, you get the same answer.
     </figcaption>
   </figure>
 
@@ -163,8 +169,8 @@
     <li>
       <strong>Data-heavy fragments sit out L1.</strong> Try the <em>Label maps</em> example. At L1,
       two lookup tables of strings look identical, but they're really two different tables that
-      happen to share a format. So if more than 35% of a fragment's names and values are
-      literals, it can only match at L0. On one real app, this one rule kept a 5-entry label map
+      happen to share a format. So if strings and numbers make up more than 35% of a
+      fragment's names and values, it can only match at L0. On one real app, this one rule kept a 5-entry label map
       from matching 428 other little string maps and ranking first.
     </li>
   </ul>
@@ -178,13 +184,14 @@
   </p>
   <p>
     So thicket also does a looser comparison. It ignores names completely and slices each
-    fragment into overlapping runs of five tokens. If at least 80% of those runs show up in both
+    fragment's list into overlapping runs of five entries. If at least 80% of those runs show up in both
     fragments, they're <strong>near copies</strong>.
   </p>
   <p>
-    Comparing every run against every other fragment's runs would be slow. So thicket squeezes
-    each fragment's runs down to 128 numbers and compares those instead. The estimate comes out
-    within a few percent of the real answer. (The trick is called MinHash, if you want to look
+    Comparing every run against every other fragment's runs would be slow. So thicket hashes
+    each run, sorts the hashes into 128 buckets, and keeps only the smallest hash in each
+    bucket. Two fragments that share most of their runs end up sharing most of those 128
+    numbers, so comparing them gives an estimate within a few percent. (The trick is called MinHash, if you want to look
     it up.)
   </p>
   <p>
@@ -192,11 +199,11 @@
   </p>
   <p>
     Why 80%? I had LLM judges rate near copies from two real codebases. They never saw thicket's
-    scores. At 80% and up, they said 70% of the near copies were worth folding into the same fix.
-    Between 70% and 80%, only 30% were.
+    scores. For pairs at least 80% alike, the judges said 7 in 10 were worth folding into the same fix.
+    For pairs 70 to 80% alike, only 3 in 10 were.
   </p>
 
-  <h3 id="no-chains">Near copies can drift apart</h3>
+  <h3 id="no-chains">Near copies can form chains</h3>
   <p>
     Here's a problem with "near". Code gets copied, tweaked, and then copied again. Each version
     is near the one before it. The first and last versions may not be near each other at all.
@@ -223,9 +230,10 @@
     codebase. 26,318 of its 65,150 distinct fragments landed in a single group.
   </p>
   <p>
-    thicket breaks chains by clustering around fixed centers. The best-ranked finding becomes
-    the first center. It claims only the fragments that are near it directly. Then the
-    best-ranked finding that's still unclaimed becomes the next center, and so on. Every member
+    thicket breaks chains by clustering around fixed centers. The centers are findings, taken
+    in rank order (section 5 explains how findings are ranked). The best-ranked finding becomes
+    the first center, and it claims only what's near it directly. Then the best-ranked finding
+    that's still unclaimed becomes the next center, and so on. Every member
     of a group is near its center, so a group can't stretch.
   </p>
   <p>
@@ -235,7 +243,7 @@
 
   <figure class="demo" id="chain-demo">
     <div class="presets" role="group" aria-label="Grouping rule">
-      <button type="button" data-chain="union" aria-pressed="true">Group every near pair</button>
+      <button type="button" data-chain="union" aria-pressed="true">Link every near pair</button>
       <button type="button" data-chain="center">thicket: fixed centers</button>
     </div>
     <svg viewBox="0 0 640 220" role="img" aria-labelledby="chain-caption"></svg>
@@ -243,10 +251,10 @@
   </figure>
 
   <p>
-    A finding that gets folded into a bigger one doesn't vanish. Its copies are listed under the
-    bigger finding as near copies. Near copies show up in the report, but they don't change the
-    score. When the judges compared rankings with and without near copies counted, they
-    preferred each about half the time. So the score ignores them.
+    A finding that gets claimed by a center doesn't vanish. Its copies are listed under the
+    center's finding as near copies. They show up in the report but don't count toward the
+    score. When the judges compared rankings with and without them counted, they preferred each
+    about half the time.
   </p>
 
   <!-- 4 ------------------------------------------------------------------ -->
@@ -257,9 +265,10 @@
     That's one finding reported four times.
   </p>
   <p>
-    thicket keeps the biggest one and drops what sits inside it. The same goes for L0 and L1. If
-    an L1 finding just repeats an L0 finding, thicket drops it. It only keeps an L1 finding when
-    the renaming joins copies that L0 saw as different.
+    thicket keeps the biggest one and drops what sits inside it. It also cleans up between
+    levels. Every exact copy is also a renamed copy, so many L1 findings just repeat an L0 one.
+    thicket drops those, and keeps an L1 finding only when the renaming joins copies that L0 saw
+    as different.
   </p>
   <p>
     Before thicket throws away an inner piece, it checks whether that piece also shows up
@@ -278,9 +287,9 @@
   </figure>
 
   <p>
-    On one real report, 115 test files carried the same browser stub. The leftover pointed at
-    the project's test setup file, which already had it. So the fix was just deleting 115
-    blocks, not extracting a new helper.
+    On one real report, 115 test files carried the same browser stub. Its <em>same shape in
+    other surroundings</em> line pointed at the project's test setup file, which already had
+    that stub. So the fix was deleting 115 blocks. Nobody had to write a new helper.
   </p>
 
   <!-- 5 ------------------------------------------------------------------ -->
@@ -297,10 +306,12 @@
   <p>Here's what thicket uses instead:</p>
   <p class="formula">score = size<sup>1.5</sup> × (copies − 1)<sup>k</sup></p>
   <p>
-    <em>Size</em> is the syntax node count of one copy. <em>k</em> is 0.9 for exact copies and
-    0.6 for renamed ones, because a renamed copy needs parameters and an exact one doesn't.
-    Last, thicket multiplies by how far apart the copies are. Copies in different modules get
-    2.5, since merging them also removes a dependency between modules. Copies in different files
+    <em>Size</em> is the syntax node count of one copy. <em>k</em> is 0.9 for exact (L0) copies
+    and 0.6 for renamed (L1) ones. An exponent below 1 means each extra copy adds a bit less
+    than the one before. Renamed copies get the smaller one, because each extracted copy needs
+    parameters for its names.
+    Last, thicket multiplies by how far apart the copies are. Copies in different modules (by default,
+    a module is a directory) get 2.5, since merging them also removes a dependency between modules. Copies in different files
     of one module get 1.4, and copies in a single file get 0.8.
   </p>
 
@@ -312,13 +323,18 @@
     </div>
     <div class="rank-cards"></div>
     <div class="rank-bars" aria-live="polite"></div>
+    <figcaption>
+      The demo takes lines and assumes about 7 AST nodes per line. It also includes a small 0.9
+      discount on renamed copies.
+    </figcaption>
   </figure>
 
   <p>
     Those exponents weren't picked by feel. The same judges rated 243 findings from two large
     codebases, from "leave it" to "definitely merge". I scored how well each formula's top 40
-    matched their ratings, using nDCG, a standard ranking metric. Lines saved got 0.48, and this
-    formula gets 0.73. Anything from 1.5 to 2 for size scored about the same, so the exact number
+    matched their ratings, using nDCG, a standard ranking metric. On a scale where 1.0
+    means the top 40 lines up perfectly with the judges, lines saved got 0.48 and this formula
+    gets 0.73. Anything from 1.5 to 2 for size scored about the same, so the exact number
     doesn't matter much.
   </p>
 
@@ -342,8 +358,10 @@
     </li>
   </ul>
   <p>
-    thicket counts how many field names change between copies, and calls that
-    <strong>drift</strong>. More drift means a lower score, down to a quarter of the original. Local variable names don't count, since L1 already ignores those.
+    thicket works out what share of the field names change between copies, and calls that
+    <strong>drift</strong>. No drift keeps the full score, and total drift cuts it to a quarter.
+    Local variable names don't count. Copies that differ only in local names are exactly what
+    L1 matching is for.
   </p>
 
   <figure class="demo" id="drift-demo">
@@ -381,7 +399,7 @@
     <div class="card">
       <h3>It's already shared</h3>
       <pre><code>export async function GET(req) {
-  return handle(req, { auth: true });
+  return handle(req, { user: session.user });
 }</code></pre>
       <p>
         43 route handlers that each call one shared helper look exactly like copy-paste. But
@@ -410,8 +428,9 @@
 const meta = { component: Button,
   parameters: { layout: "centered" } };</code></pre>
       <p>
-        Storybook wants one <code>meta</code> per story file. When each file of one type, like
-        <code>.stories.tsx</code>, holds exactly one copy, the score drops to a quarter. Compare
+        Storybook wants one <code>meta</code> per story file. When the copies sit in files that
+        share a suffix, like <code>.stories.tsx</code>, one per file, the score drops to a
+        quarter. Compare
         a database column definition repeated seven times inside one <code>.schema.ts</code>
         file. That's not one per file, so it's real duplication and keeps its full score.
       </p>
@@ -428,10 +447,10 @@ const meta = { component: Button,
   </div>
 
   <!-- 8 ------------------------------------------------------------------ -->
-  <h2 id="lanes">8. Give tests and types their own lanes</h2>
+  <h2 id="lanes">8. Give tests and types their own sections</h2>
   <p>
     Some kinds of duplication can't be ranked fairly against the rest. So they get their own
-    section of the report, with their own slots.
+    section of the report, with its own cap on how many findings it shows.
   </p>
   <div class="lanes">
     <div class="lane">
@@ -450,24 +469,27 @@ const meta = { component: Button,
   <p>
     <strong>Tests</strong> repeat themselves on purpose. Four parallel arrange-act-assert blocks
     often read better than a helper. When tests were ranked with everything else, test
-    scaffolding took 10 of the top 40 spots. I tried scoring test findings lower, but no setting
-    was obviously right. The count just slid toward zero. A separate section avoids the
-    question.
+    scaffolding took 10 of the top 40 spots. I tried scoring test findings lower. As I turned the
+    weight down, the number of test findings in the top 40 shrank smoothly toward zero, with no
+    point where it obviously looked right. A separate section avoids the question.
   </p>
   <p>
-    <strong>Types</strong> are small by nature. Measured in lines saved, a five-line interface
+    <strong>Types</strong> are small by nature, and any score built on size has the same
+    problem with them. Measured in lines saved, a five-line interface
     pasted four times scores 13, and a typical duplicated function scores 43. Types lose every
     contest decided by size. One app had 33 groups of identical type declarations, and the
     report showed none of them. Three of those were separate logger interfaces that should have
-    been one. That's real complexity. Merging them removes an
+    been one. That's real complexity, and merging them removes an idea even if it barely removes
+    lines. Merging them removes an
     idea, even if it barely removes lines.
   </p>
 
   <!-- 9 ------------------------------------------------------------------ -->
   <h2 id="varies">9. Say what changes between copies</h2>
   <p>
-    "19 classes are the same shape" leaves the real work to the reader. Every agent handed that
-    finding went and rebuilt the list of what differed by hand. So thicket lists it.
+    "19 classes are the same shape" leaves the real work to the reader. When I handed that
+    finding to coding agents, every one of them went and rebuilt the list of what differed by
+    hand. So thicket lists it.
   </p>
   <pre><code>### THK-DUP-… · 19 copies × ~14 lines · ~220 lines recoverable
 
@@ -483,20 +505,22 @@ L1 · `ClassDeclaration`
     thicket compares up to 20 copies. If every one of those differs, it prints
     <code>≥20</code>, not <code>20</code>. On one real 103-copy finding, a bare 20 would have
     said "small, fixed set of values, build a table". In fact there were 101 different values,
-    which means the opposite.
+    so that field has to stay a parameter.
   </p>
 
   <!-- 10 ----------------------------------------------------------------- -->
   <h2 id="tangles">10. Untangle the imports</h2>
   <p>
     thicket also builds a graph of which modules import which. A module is a directory by
-    default. It finds the groups of modules that can all reach each other, which are the
-    strongly connected components. Those are your tangles.
+    default. It finds groups of modules where each one can reach every other by following
+    imports. Those groups are called strongly connected components, and they're your tangles.
+    In the diagrams below, each arrow is an <strong>edge</strong>: all the imports from one
+    module into another.
   </p>
   <p>
     Then it suggests a fix, cheapest first. Sometimes an import only goes through a module
     because that module re-exports something from somewhere else. Point the import at the real
-    source, and the link is gone. Nothing about the program changes. If that doesn't break the
+    source, and the edge is gone. Nothing about the program changes. If that doesn't break the
     tangle, thicket suggests a <strong>cut</strong>: the imports you'd have to remove.
   </p>
 
@@ -512,9 +536,9 @@ L1 · `ClassDeclaration`
   <h3 id="cuts">Finding a good cut</h3>
   <p>
     When there's nothing to repoint, thicket looks for a cut. It tries removing each edge in the
-    tangle, one at a time, and measures the biggest tangle left over. The best cut leaves the
-    smallest tangle. Cost only breaks ties. Then thicket prefers fewer files to edit and fewer
-    imports to move.
+    tangle, one at a time, and measures the biggest tangle left over. The best cut is the one
+    that leaves the smallest tangle. Cost only breaks ties: among cuts that leave the same
+    tangle, thicket picks the one with fewer files to edit and fewer imports to move.
   </p>
   <p>
     So the cheapest edge isn't always the best one. Click edges below to cut them. The numbers
@@ -538,8 +562,10 @@ L1 · `ClassDeclaration`
   <ul>
     <li>
       <strong>Type-only imports are counted separately.</strong> <code>import type</code>
-      disappears at compile time. A runtime cycle can crash at startup. A type cycle can't, but
-      you still can't read one module without the other. When ignoring type imports
+      disappears at compile time, so a cycle made only of type imports can't break anything at
+      runtime. A runtime cycle can, because one module may use another's export before it's
+      been defined. A type cycle still matters, since you can't understand either module without
+      the other. When ignoring type imports
       changes the size of a tangle, the report gives both sizes.
     </li>
     <li>
@@ -548,8 +574,10 @@ L1 · `ClassDeclaration`
       cut would have removed, so you can see why.
     </li>
     <li>
-      <strong>Folders can fake a cycle.</strong> Two directories can import each other while no
-      file is in a loop. thicket checks the files underneath and says which kind you have.
+      <strong>Folders can fake a cycle.</strong> If <code>a/x.ts</code> imports
+      <code>b/y.ts</code> and <code>b/z.ts</code> imports <code>a/w.ts</code>, the directories
+      form a cycle but no file does. thicket checks the files underneath and tells you whether the
+      cycle is real at the file level, or only exists because of how the folders are grouped.
     </li>
   </ul>
 
