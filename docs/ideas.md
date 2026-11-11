@@ -18,8 +18,9 @@ work used (`docs/plans/2026-11-04-near-miss.md`).
    real extraction code under Bun. It writes candidates as judging samples. It
    changes nothing in the report.
 2. **Run it on at least two real repositories.** Use the anonymized samples
-   from the PRD. One small repository hides problems that scale exposes. Union-find over
-   near pairs looked fine on small inputs and put 26,318 shapes in one group
+   from the PRD. One small repository hides problems that scale exposes.
+   Union-find over near pairs looked fine on small inputs and put 26,318
+   shapes in one group
    on Sample D.
 3. **Judge blind.** A subagent judge gets a neutral brief, the code, and the
    candidate. It does not see which candidates are controls, or what the
@@ -60,7 +61,8 @@ version should go. The import graph can answer that.
   `orders/total.ts` already imports `invoice/total.ts`. So putting `orderTotal`
   in either file is not neutral.
 - **PRD link.** PRD §7.4, "the join", is the same idea for the case where the
-  copies are in a cycle. Roadmap step 8 in the PRD names it as the next feature.
+  copies are in a cycle. Step 8 of the PRD §12 roadmap names it as the next
+  feature.
 - **Judge question.** "An agent must extract this finding. Here is the home
   thicket suggests. Would you put the shared code there? Answer yes, acceptable,
   or no, and say where you would put it instead."
@@ -220,8 +222,9 @@ reaches, even through other modules, has no test coverage of any kind.
 
 ### 11. Hub modules
 
-These are modules with both high fan-in and high fan-out. PRD §7.3 lists hubs, hinges, and
-instability. `src/graph/metrics.ts` already computes propagation cost.
+These are modules with both high fan-in and high fan-out. PRD §7.3 lists hubs,
+hinges, and instability. `src/graph/metrics.ts` already computes propagation
+cost.
 
 - **Risk.** This is the idea most likely to be noise. Any large application has
   a few modules that everything touches, and most of them are fine.
@@ -230,8 +233,9 @@ instability. `src/graph/metrics.ts` already computes propagation cost.
 
 ## Already planned in the PRD
 
-PRD §6 lists simplification checks, and roadmap step 9 starts them with
-always-same-argument parameters. They need the type checker across call sites.
+PRD §6 lists simplification checks, and step 9 of the §12 roadmap starts them
+with always-same-argument parameters. They need the type checker across call
+sites.
 They are a different family from everything above, which reuses data thicket
 already has. Those checks are constant conditions, parameters that always get
 the same argument, optional parameters that are never undefined, dead exports,
