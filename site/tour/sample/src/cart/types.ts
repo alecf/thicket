@@ -1,0 +1,6 @@
+export interface CartLine {
+  sku: string;
+  name: string;
+  price: number;
+  qty: number;
+}

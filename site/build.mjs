@@ -200,10 +200,11 @@ export function markdownToHtml(markdown) {
 const CSS = readFileSync(join(here, "style.css"), "utf8");
 
 /** Wrap rendered body HTML in the site chrome. */
-function page({ title, description, body, mermaid = false, script = "", active = "" }) {
+function page({ title, description, body, mermaid = false, script = "", scripts = [], head = "", active = "" }) {
   const nav = [
     ["", "Overview"],
     ["how-it-works.html", "How it works"],
+    ["tour.html", "Tour"],
     ["report-guide.html", "Report guide"],
     ["example.html", "Example report"],
   ]
@@ -222,6 +223,7 @@ function page({ title, description, body, mermaid = false, script = "", active =
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <style>${CSS}</style>
+${head}
 </head>
 <body>
 <header class="site">
@@ -236,7 +238,7 @@ ${body}
   <p>thicket is a CLI that reports candidates. Something else does the judging and the editing.</p>
   <p><a href="https://github.com/alecf/thicket">Source on GitHub</a> · <a href="report-guide.md">Report guide as raw Markdown</a></p>
 </footer>
-${script ? `<script src="${script}" defer></script>` : ""}
+${[...(script ? [script] : []), ...scripts].map((src) => `<script src="${src}" defer></script>`).join("\n")}
 ${mermaid ? '<script type="module">import m from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";m.initialize({startOnLoad:true,theme:"neutral"});</script>' : ""}
 </body>
 </html>
@@ -306,6 +308,28 @@ ${markdownToHtml(exampleMarkdown)}
   );
   cpSync(join(here, "how-it-works.js"), join(dist, "how-it-works.js"));
 
+  // The tour animates data recorded from a real run. `tour/generate.ts`
+  // writes `tour/data.js`; the build only copies it.
+  writeFileSync(
+    join(dist, "tour.html"),
+    page({
+      title: "Follow the code through thicket",
+      description: "An animated walk through one thicket run, from source files to the finished report.",
+      body: readFileSync(join(here, "tour/tour.html.part"), "utf8"),
+      head: [
+        '<link rel="preconnect" href="https://fonts.googleapis.com">',
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
+        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,600..800&family=JetBrains+Mono:wght@400;600;700&display=swap">',
+        '<link rel="stylesheet" href="tour.css">',
+      ].join("\n"),
+      scripts: ["tour-data.js", "tour.js"],
+      active: "tour.html",
+    }),
+  );
+  cpSync(join(here, "tour/tour.css"), join(dist, "tour.css"));
+  cpSync(join(here, "tour/tour.js"), join(dist, "tour.js"));
+  cpSync(join(here, "tour/data.js"), join(dist, "tour-data.js"));
+
   cpSync(join(here, "icon.svg"), join(dist, "icon.svg"));
 
   // A .nojekyll file stops GitHub Pages running the output through Jekyll,
@@ -320,6 +344,10 @@ ${markdownToHtml(exampleMarkdown)}
     "example.html",
     "how-it-works.html",
     "how-it-works.js",
+    "tour.html",
+    "tour.css",
+    "tour.js",
+    "tour-data.js",
     "icon.svg",
   ];
 }
