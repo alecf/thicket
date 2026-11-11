@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_BIN, SKETCH_BINS, isNear, similarity, sketchOf } from "../src/fingerprint/sketch.js";
+import { EMPTY_BIN, SKETCH_BINS, isNear, shinglesOf, similarity, sketchOf } from "../src/fingerprint/sketch.js";
 
 /** A token stream that looks like an L1 stream: kinds, markers, named leaves. */
 function stream(n: number, seed: number, name = "x"): string[] {
@@ -51,6 +51,19 @@ describe("sketchOf", () => {
       const filled = [...s].filter((v) => v !== EMPTY_BIN).length;
       expect(filled).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("shinglesOf", () => {
+  it("lists one shingle per window, and the sketch keeps each bin's smallest", () => {
+    // The tour page draws a sketch filling from this list, so it must
+    // rebuild exactly the sketch thicket compares.
+    const tokens = stream(60, 7);
+    const shingles = shinglesOf(tokens);
+    expect(shingles.map((s) => s.start)).toEqual([...Array(56).keys()]);
+    const rebuilt = new Uint16Array(SKETCH_BINS).fill(EMPTY_BIN);
+    for (const s of shingles) if (s.value < rebuilt[s.bin]!) rebuilt[s.bin] = s.value;
+    expect([...rebuilt]).toEqual([...sketchOf(tokens)!]);
   });
 });
 

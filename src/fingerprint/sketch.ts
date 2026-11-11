@@ -46,15 +46,38 @@ export function sketchOf(tokensL1: readonly string[]): Sketch | undefined {
   for (let i = 0; i < tokensL1.length; i++) tokens[i] = tokenHash(tokensL1[i]!);
   const bins = new Uint16Array(SKETCH_BINS).fill(EMPTY_BIN);
   for (let i = 0; i + SHINGLE <= tokens.length; i++) {
-    let h = 0x811c9dc5;
-    for (let t = i; t < i + SHINGLE; t++) h = Math.imul(h ^ tokens[t]!, 0x01000193);
-    h = mix(h);
+    const h = shingleHash(tokens, i);
     const bin = h & (SKETCH_BINS - 1);
-    // The top 16 bits, kept clear of the empty marker.
-    const value = Math.min(h >>> 16, EMPTY_BIN - 1);
+    const value = binValue(h);
     if (value < bins[bin]!) bins[bin] = value;
   }
   return bins;
+}
+
+/**
+ * Where each shingle lands, in stream order. `sketchOf` keeps the smallest
+ * value per bin from this list. The tour page uses it to draw a sketch filling.
+ */
+export function shinglesOf(tokensL1: readonly string[]): { start: number; bin: number; value: number }[] {
+  const tokens = Uint32Array.from(tokensL1, tokenHash);
+  const out: { start: number; bin: number; value: number }[] = [];
+  for (let i = 0; i + SHINGLE <= tokens.length; i++) {
+    const h = shingleHash(tokens, i);
+    out.push({ start: i, bin: h & (SKETCH_BINS - 1), value: binValue(h) });
+  }
+  return out;
+}
+
+/** Combines the five token hashes that start at `i`. */
+function shingleHash(tokens: Uint32Array, i: number): number {
+  let h = 0x811c9dc5;
+  for (let t = i; t < i + SHINGLE; t++) h = Math.imul(h ^ tokens[t]!, 0x01000193);
+  return mix(h);
+}
+
+/** The top 16 bits, kept clear of the empty marker. */
+function binValue(h: number): number {
+  return Math.min(h >>> 16, EMPTY_BIN - 1);
 }
 
 /** Bins that agree, out of bins filled on at least one side. */
