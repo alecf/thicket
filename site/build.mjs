@@ -200,9 +200,10 @@ export function markdownToHtml(markdown) {
 const CSS = readFileSync(join(here, "style.css"), "utf8");
 
 /** Wrap rendered body HTML in the site chrome. */
-function page({ title, description, body, mermaid = false, active = "" }) {
+function page({ title, description, body, mermaid = false, script = "", active = "" }) {
   const nav = [
     ["", "Overview"],
+    ["how-it-works.html", "How it works"],
     ["report-guide.html", "Report guide"],
     ["example.html", "Example report"],
   ]
@@ -235,6 +236,7 @@ ${body}
   <p>thicket is a CLI that reports candidates. Something else does the judging and the editing.</p>
   <p><a href="https://github.com/alecf/thicket">Source on GitHub</a> · <a href="report-guide.md">Report guide as raw Markdown</a></p>
 </footer>
+${script ? `<script src="${script}" defer></script>` : ""}
 ${mermaid ? '<script type="module">import m from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";m.initialize({startOnLoad:true,theme:"neutral"});</script>' : ""}
 </body>
 </html>
@@ -289,6 +291,21 @@ ${markdownToHtml(exampleMarkdown)}
     }),
   );
 
+  // The demos are plain browser JS, served beside the page rather than inlined
+  // so the file stays readable and testable on its own.
+  writeFileSync(
+    join(dist, "how-it-works.html"),
+    page({
+      title: "How thicket works",
+      description:
+        "How thicket finds repeated code, groups it, and ranks it, with interactive demos.",
+      body: readFileSync(join(here, "how-it-works.html.part"), "utf8"),
+      script: "how-it-works.js",
+      active: "how-it-works.html",
+    }),
+  );
+  cpSync(join(here, "how-it-works.js"), join(dist, "how-it-works.js"));
+
   cpSync(join(here, "icon.svg"), join(dist, "icon.svg"));
 
   // A .nojekyll file stops GitHub Pages running the output through Jekyll,
@@ -296,7 +313,15 @@ ${markdownToHtml(exampleMarkdown)}
   // underscore.
   writeFileSync(join(dist, ".nojekyll"), "");
 
-  return ["index.html", "report-guide.html", "report-guide.md", "example.html", "icon.svg"];
+  return [
+    "index.html",
+    "report-guide.html",
+    "report-guide.md",
+    "example.html",
+    "how-it-works.html",
+    "how-it-works.js",
+    "icon.svg",
+  ];
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

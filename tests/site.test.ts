@@ -19,6 +19,8 @@ describe("the site build", () => {
       "report-guide.html",
       "report-guide.md",
       "example.html",
+      "how-it-works.html",
+      "how-it-works.js",
       "icon.svg",
     ]);
   });
