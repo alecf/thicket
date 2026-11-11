@@ -1,0 +1,487 @@
+<article class="prose hiw">
+  <h1 id="how-it-works">How thicket works</h1>
+  <p class="lede">
+    thicket looks for two things. One is code that got written more than once. The other is
+    modules that import each other in a circle.
+  </p>
+  <p>
+    Finding repeats is easy. A mid-sized repo has hundreds of them. What matters is picking the
+    20 to 50 worth fixing, because the report goes to a coding agent, and its attention is
+    limited. So most of this page is about how thicket picks.
+  </p>
+  <p>
+    The demos run a simplified version of the real thing in your browser. Poke at them. Edit the
+    code and see what changes.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <a href="#pieces">1. Cut the code into pieces</a>
+    <a href="#fingerprints">2. Fingerprint each piece</a>
+    <a href="#near">3. Catch the near copies</a>
+    <a href="#nesting">4. Drop the nested repeats</a>
+    <a href="#ranking">5. Rank what is left</a>
+    <a href="#drift">6. Ask if merging buys anything</a>
+    <a href="#not-duplication">7. Skip what only looks duplicated</a>
+    <a href="#lanes">8. Give tests and types their own lanes</a>
+    <a href="#varies">9. Say what changes between copies</a>
+    <a href="#tangles">10. Untangle the imports</a>
+  </nav>
+
+  <!-- 1 ------------------------------------------------------------------ -->
+  <h2 id="pieces">1. Cut the code into pieces</h2>
+  <p>
+    thicket parses every file with the TypeScript compiler and walks the syntax tree. Every node
+    that is big enough becomes a <strong>fragment</strong>. That can be a function, a block, a
+    loop, an <code>if</code>, or an object literal.
+  </p>
+  <p>
+    Fragments nest. The function is one fragment, and the loop inside it is another. Hover over
+    the code to see them.
+  </p>
+
+  <figure class="demo" id="frag-demo">
+    <pre class="frag-code"><code><span class="frag" data-kind="FunctionDeclaration">export function normalize(points: Point[]): Point[] <span class="frag" data-kind="Block">{
+  const result: Point[] = [];
+  <span class="frag" data-kind="ForOfStatement">for (const p of points) <span class="frag" data-kind="Block">{
+    const dx = p.x - ORIGIN.x;
+    const dy = p.y - ORIGIN.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    <span class="frag" data-kind="IfStatement">if (len === 0) <span class="frag" data-kind="Block">{
+      result.push({ x: 0, y: 0 });
+      continue;
+    }</span></span>
+    result.push({ x: dx / len, y: dy / len });
+  }</span></span>
+  return result;
+}</span></span></code></pre>
+    <figcaption id="frag-label">Hover over the code. Each outline is one fragment.</figcaption>
+  </figure>
+
+  <p>
+    "Big enough" means at least 15 syntax nodes and 4 lines by default. You can raise or
+    lower both with <code>--depth</code>. Imports, exports and parameter lists never become fragments. They look alike in
+    every file, and you cannot extract them into anything.
+  </p>
+
+  <!-- 2 ------------------------------------------------------------------ -->
+  <h2 id="fingerprints">2. Fingerprint each piece</h2>
+  <p>
+    thicket turns each fragment into a stream of tokens, dropping whitespace and comments. Then
+    it hashes that stream at two levels, which it calls L0 and L1.
+  </p>
+  <ul>
+    <li>
+      <strong>L0</strong> keeps everything, every name and every value. Two fragments match at L0
+      when they are the same code, give or take formatting.
+    </li>
+    <li>
+      <strong>L1</strong> renames things. The first name in the fragment becomes
+      <code>v0</code>, the next new one becomes <code>v1</code>, and so on. Strings and numbers
+      lose their values and keep only their kind. Two fragments match at L1 when they are the
+      same code with different names.
+    </li>
+  </ul>
+  <p>
+    Fragments that match form a <strong>finding</strong>. That's one entry in the report. Try it
+    below. Edit either side, or pick an example.
+  </p>
+
+  <figure class="demo" id="fp-demo">
+    <div class="presets" role="group" aria-label="Examples">
+      <button type="button" data-preset="format">Reformatted</button>
+      <button type="button" data-preset="renamed">Renamed</button>
+      <button type="button" data-preset="constant">Changed a number</button>
+      <button type="button" data-preset="labels">Label maps</button>
+      <button type="button" data-preset="extra">Added a line</button>
+      <button type="button" data-preset="different">Different code</button>
+    </div>
+    <div class="fp-sides">
+      <div class="fp-side">
+        <label for="fp-a">Copy A</label>
+        <textarea id="fp-a" spellcheck="false" rows="7"></textarea>
+        <div class="fp-stream" id="fp-a-stream" aria-live="polite"></div>
+      </div>
+      <div class="fp-side">
+        <label for="fp-b">Copy B</label>
+        <textarea id="fp-b" spellcheck="false" rows="7"></textarea>
+        <div class="fp-stream" id="fp-b-stream" aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="fp-mode" role="group" aria-label="Show tokens as">
+      <span>Show tokens as</span>
+      <button type="button" data-mode="l0">L0</button>
+      <button type="button" data-mode="l1" aria-pressed="true">L1</button>
+      <button type="button" data-mode="l2">near-copy sketch</button>
+    </div>
+    <div class="verdict" id="fp-verdict" aria-live="polite"></div>
+    <figcaption>
+      Simplified. The real thing walks the syntax tree, so its stream has structure markers this
+      one skips. It also estimates the near-copy score (section 3) instead of computing it
+      exactly. For code this size, you get the same answer either way.
+    </figcaption>
+  </figure>
+
+  <ul>
+    <li>
+      <strong>Property names get renamed too.</strong> To the syntax tree, <code>p.x</code> is
+      two names. So <code>p.x</code> and <code>q.y</code> match at L1.
+    </li>
+    <li>
+      <strong>Every fragment starts counting at <code>v0</code>.</strong> If the numbering ran
+      across the whole file, a function's names would depend on whatever came before it. Two
+      identical functions in different files would get different numbers and never match.
+    </li>
+    <li>
+      <strong>Data-heavy fragments sit out L1.</strong> Try the <em>Label maps</em> example. At L1,
+      two lookup tables of strings look identical, but they're really two different tables that
+      happen to share a format. So if more than 35% of a fragment's names and values are
+      literals, it can only match at L0. On one real app, this one rule kept a 5-entry label map
+      from matching 428 other little string maps and ranking first.
+    </li>
+  </ul>
+
+  <!-- 3 ------------------------------------------------------------------ -->
+  <h2 id="near">3. Catch the near copies</h2>
+  <p>
+    Exact hashes have a blind spot. Add one line to one copy, and that copy stops matching the
+    rest. A template pasted 24 times, with an extra field on five of them, shows up as two
+    unrelated findings: 19 copies and 5 copies.
+  </p>
+  <p>
+    So thicket also does a looser comparison. It ignores names completely and slices each
+    fragment into overlapping runs of five tokens. If at least 80% of those runs show up in both
+    fragments, they're <strong>near copies</strong>.
+  </p>
+  <p>
+    Comparing every run against every other fragment's runs would be slow. So thicket squeezes
+    each fragment's runs down to 128 numbers and compares those instead. The estimate comes out
+    within a few percent of the real answer. (The trick is called MinHash, if you want to look
+    it up.)
+  </p>
+  <p>
+    Switch the demo above to <em>near-copy sketch</em> and try <em>Added a line</em>.
+  </p>
+  <p>
+    Why 80%? I had LLM judges rate near copies from two real codebases. They never saw thicket's
+    scores. At 80% and up, they said 70% of the near copies were worth folding into the same fix.
+    Between 70% and 80%, only 30% were.
+  </p>
+
+  <h3 id="no-chains">Near is not transitive</h3>
+  <p>
+    A is near B, and B is near C, but C may look nothing like A. Group every near pair together
+    and the groups chain across the whole codebase. When I tried that on one real repo, 26,318 of
+    its 65,150 distinct fragments landed in a single group.
+  </p>
+  <p>
+    So thicket never chains. It starts with the best-ranked finding and lets it claim only the
+    fragments near <em>it</em>. Then the next-best finding claims from what's left, and so on. Each dot below is a finding, and bigger
+    means higher-ranked. Lines connect pairs that are near each other.
+  </p>
+
+  <figure class="demo" id="chain-demo">
+    <div class="presets" role="group" aria-label="Grouping rule">
+      <button type="button" data-chain="union" aria-pressed="true">Group every near pair</button>
+      <button type="button" data-chain="center">thicket: fixed centers</button>
+    </div>
+    <svg viewBox="0 0 640 220" role="img" aria-labelledby="chain-caption"></svg>
+    <figcaption id="chain-caption"></figcaption>
+  </figure>
+
+  <p>
+    A finding that gets folded into a bigger one doesn't vanish. Its copies are listed under the
+    bigger finding as near copies. Near copies show up in the report, but they don't change the
+    score. When the judges compared rankings with and without near copies counted, they
+    preferred each about half the time. So the score ignores them.
+  </p>
+
+  <!-- 4 ------------------------------------------------------------------ -->
+  <h2 id="nesting">4. Drop the nested repeats</h2>
+  <p>
+    Fragments with the same hash form a finding. Right away there's a pile of overlap. If three
+    functions are copies, so are their bodies, and their loops, and the blocks inside the loops.
+    That's one finding reported four times.
+  </p>
+  <p>
+    thicket keeps the biggest one and drops what sits inside it. The same goes for L0 and L1. If
+    an L1 finding just repeats an L0 finding, thicket drops it. It only keeps an L1 finding when
+    the renaming joins copies that L0 saw as different.
+  </p>
+  <p>
+    Before thicket throws away an inner piece, it checks whether that piece also shows up
+    somewhere <em>outside</em> the copies. The report lists those spots as
+    <strong>same shape in other surroundings</strong>. That is often where someone already wrote
+    the shared version.
+  </p>
+
+  <figure class="demo" id="nest-demo">
+    <div class="presets" role="group" aria-label="Step">
+      <button type="button" data-nest="before" aria-pressed="true">Every match</button>
+      <button type="button" data-nest="after">After dropping nested repeats</button>
+    </div>
+    <div class="nest-files"></div>
+    <div class="nest-report"></div>
+  </figure>
+
+  <p>
+    On one real report, 115 test files carried the same browser stub. The leftover pointed at
+    the project's test setup file, which already had it. So the fix was just deleting 115
+    blocks, not extracting a new helper.
+  </p>
+
+  <!-- 5 ------------------------------------------------------------------ -->
+  <h2 id="ranking">5. Rank what is left</h2>
+  <p>
+    A 48-file repo produced about 495 duplication findings. The report shows 20 to 50. So the
+    ranking matters more than anything else on this page.
+  </p>
+  <p>
+    The obvious score is "lines you would delete". That ranks 50 copies of a 4-line snippet
+    above 2 copies of a 100-line function. That's backwards. Every copy you replace still costs
+    an import and a call. A tiny snippet saves almost nothing per copy.
+  </p>
+  <p>Here's what thicket uses instead:</p>
+  <p class="formula">score = size<sup>1.5</sup> × (copies − 1)<sup>k</sup></p>
+  <p>
+    <em>Size</em> is the syntax node count of one copy. <em>k</em> is 0.9 for exact copies and
+    0.6 for renamed ones, because a renamed copy needs parameters and an exact one doesn't.
+    Last, thicket multiplies by how far apart the copies are. Copies in different modules get
+    2.5, since merging them also removes a dependency between modules. Copies in different files
+    of one module get 1.4, and copies in a single file get 0.8.
+  </p>
+
+  <figure class="demo" id="rank-demo">
+    <div class="presets" role="group" aria-label="Examples">
+      <button type="button" data-rank="tiny">50 tiny copies vs 2 big ones</button>
+      <button type="button" data-rank="rename">Exact vs renamed</button>
+      <button type="button" data-rank="spread">One file vs across modules</button>
+    </div>
+    <div class="rank-cards"></div>
+    <div class="rank-bars" aria-live="polite"></div>
+  </figure>
+
+  <p>
+    Those exponents weren't picked by feel. The same judges rated 243 findings from two large
+    codebases, from "leave it" to "definitely merge". I scored how well each formula's top 40
+    matched their ratings, using nDCG, a standard ranking metric. Lines saved got 0.48, and this
+    formula gets 0.73. Anything from 1.5 to 2 for size scored about the same, so the exact number
+    doesn't matter much.
+  </p>
+
+  <!-- 6 ------------------------------------------------------------------ -->
+  <h2 id="drift">6. Ask if merging buys anything</h2>
+  <p>
+    Size and count don't tell you everything. Two findings can have the same size and the same
+    count, and one is worth a lot more than the other. The difference is in the
+    <strong>field names</strong>: object keys, class properties, methods, enum members and JSX
+    attributes.
+  </p>
+  <ul>
+    <li>
+      If the field names are the same in every copy and only the values change, it's one idea
+      with a few settings. A base class or a table absorbs it.
+    </li>
+    <li>
+      If the field names change from copy to copy, these are different things that happen to
+      share a pattern. The only thing you could extract is a generic "copy these keys"
+      helper, and nobody wants that.
+    </li>
+  </ul>
+  <p>
+    thicket counts how many field names change between copies, and calls that
+    <strong>drift</strong>. More drift means a lower score, down to a quarter of the original. Local variable names don't count, since L1 already ignores those.
+  </p>
+
+  <figure class="demo" id="drift-demo">
+    <div class="presets" role="group" aria-label="Examples">
+      <button type="button" data-drift="values" aria-pressed="true">Same fields, new values</button>
+      <button type="button" data-drift="keys">Different fields</button>
+      <button type="button" data-drift="jsx">JSX</button>
+    </div>
+    <div class="drift-copies"></div>
+    <div class="drift-meter" aria-live="polite"></div>
+  </figure>
+
+  <p>
+    JSX attributes count as field names too, and it matters. If thicket ignored them,
+    <code>&lt;p role className&gt;</code> would match <code>&lt;Badge variant className&gt;</code>
+    with zero drift. But that zero would only mean nothing was measured. On one app, ten of the
+    top findings looked like that, and a reader threw out every one by hand.
+  </p>
+  <p>
+    Tag names don't count, on purpose. Four dialog headers that wrap the same title and
+    description are real duplication. A finding that matches a <code>&lt;div&gt;</code>, a
+    <code>&lt;TabsList&gt;</code> and a <code>&lt;SelectContent&gt;</code> just because they share
+    a layout is not. Both kinds have four or five different tag names, so counting tag names
+    can't tell them apart.
+  </p>
+
+  <!-- 7 ------------------------------------------------------------------ -->
+  <h2 id="not-duplication">7. Skip what only looks duplicated</h2>
+  <p>
+    Some repetition is fine. It's the right way to write the code, or it's code nobody wrote by
+    hand. These rules catch the common ones. Each rule has its own flag to turn it off.
+  </p>
+
+  <div class="rule-cards">
+    <div class="card">
+      <h3>It's already shared</h3>
+      <pre><code>export async function GET(req) {
+  return handle(req, { auth: true });
+}</code></pre>
+      <p>
+        43 route handlers that each call one shared helper look exactly like copy-paste. But
+        each one is already a single call, and you can't replace a call with anything shorter.
+        So thicket skips an exact match that's just one call, with no body and no values to pull
+        out. Twenty copies of
+        <code>useEffect(() =&gt; { … })</code> still count. The body is what you'd extract.
+      </p>
+    </div>
+    <div class="card">
+      <h3>It's a data table</h3>
+      <pre><code>const ROUTES = {
+  home:  { path: "/",  auth: false },
+  inbox: { path: "/i", auth: true },
+  …
+};</code></pre>
+      <p>
+        Entries side by side in one object are the content, not a missing function. When every
+        copy sits in the same object, the score drops to a fifth. And thicket never counts more
+        than 10 copies of one pattern from a single file.
+      </p>
+    </div>
+    <div class="card">
+      <h3>The framework asked for it</h3>
+      <pre><code>// Button.stories.tsx, Card.stories.tsx, …
+const meta = { component: Button,
+  parameters: { layout: "centered" } };</code></pre>
+      <p>
+        Storybook wants one <code>meta</code> per story file. When each file of one type, like
+        <code>.stories.tsx</code>, holds exactly one copy, the score drops to a quarter. Compare
+        a database column definition repeated seven times inside one <code>.schema.ts</code>
+        file. That's not one per file, so it's real duplication and keeps its full score.
+      </p>
+    </div>
+    <div class="card">
+      <h3>A machine wrote it</h3>
+      <pre><code>// @generated by codegen. Do not edit.</code></pre>
+      <p>
+        thicket checks the top of each file for a generator banner and skips files that have
+        one. In one monorepo, half the files had a banner. One generated route table was holding
+        a 701-file import cycle together. Without it, the real cycle was 14 files.
+      </p>
+    </div>
+  </div>
+
+  <!-- 8 ------------------------------------------------------------------ -->
+  <h2 id="lanes">8. Give tests and types their own lanes</h2>
+  <p>
+    Some kinds of duplication can't be ranked fairly against the rest. So they get their own
+    section of the report, with their own slots.
+  </p>
+  <div class="lanes">
+    <div class="lane">
+      <div class="lane-head">Duplication</div>
+      <div class="lane-body">Production code. Most of the slots.</div>
+    </div>
+    <div class="lane">
+      <div class="lane-head">Duplication in tests</div>
+      <div class="lane-body">Half or more of the copies are in test files.</div>
+    </div>
+    <div class="lane">
+      <div class="lane-head">Duplicated types</div>
+      <div class="lane-body">Interfaces and type aliases declared more than once.</div>
+    </div>
+  </div>
+  <p>
+    <strong>Tests</strong> repeat themselves on purpose. Four parallel arrange-act-assert blocks
+    often read better than a helper. When tests were ranked with everything else, test
+    scaffolding took 10 of the top 40 spots. I tried scoring test findings lower, but no setting
+    was obviously right. The count just slid toward zero. A separate section avoids the
+    question.
+  </p>
+  <p>
+    <strong>Types</strong> are small by nature. Measured in lines saved, a five-line interface
+    pasted four times scores 13, and a typical duplicated function scores 43. Types lose every
+    contest decided by size. One app had 33 groups of identical type declarations, and the
+    report showed none of them. Three of those were separate logger interfaces that should have
+    been one. That's real complexity. Merging them removes an
+    idea, even if it barely removes lines.
+  </p>
+
+  <!-- 9 ------------------------------------------------------------------ -->
+  <h2 id="varies">9. Say what changes between copies</h2>
+  <p>
+    "19 classes are the same shape" leaves the real work to the reader. Every agent handed that
+    finding went and rebuilt the list of what differed by hand. So thicket lists it.
+  </p>
+  <pre><code>### THK-DUP-… · 19 copies × ~14 lines · ~220 lines recoverable
+
+L1 · `ClassDeclaration`
+
+- **varies across copies:** `code` (18), `unit` (4), `label` (19)</code></pre>
+  <p>
+    The numbers count distinct values. Read that way, it's a table with 19 rows and three
+    columns, and that table is the abstraction. It also caught a real bug. 19 copies but only 18
+    distinct codes meant two classes declared the same code.
+  </p>
+  <p>
+    thicket compares up to 20 copies. If every one of those differs, it prints
+    <code>≥20</code>, not <code>20</code>. On one real 103-copy finding, a bare 20 would have
+    said "small, fixed set of values, build a table". In fact there were 101 different values,
+    which means the opposite.
+  </p>
+
+  <!-- 10 ----------------------------------------------------------------- -->
+  <h2 id="tangles">10. Untangle the imports</h2>
+  <p>
+    thicket also builds a graph of which modules import which. A module is a directory by
+    default. It finds the groups of modules that can all reach each other, which are the
+    strongly connected components. Those are your tangles.
+  </p>
+  <p>
+    Then it suggests a fix, cheapest first. Sometimes an import only goes through a module
+    because that module re-exports something from somewhere else. Point the import at the real
+    source, and the link is gone. Nothing about the program changes. If that doesn't break the
+    tangle, thicket suggests a <strong>cut</strong>: the imports you'd have to remove.
+  </p>
+
+  <figure class="demo" id="tangle-demo">
+    <div class="presets" role="group" aria-label="Step">
+      <button type="button" data-tangle="before" aria-pressed="true">Before</button>
+      <button type="button" data-tangle="after">Repoint the import</button>
+    </div>
+    <svg viewBox="0 0 560 230" role="img" aria-labelledby="tangle-caption"></svg>
+    <figcaption id="tangle-caption"></figcaption>
+  </figure>
+
+  <p>A few more rules keep the suggestions honest.</p>
+  <ul>
+    <li>
+      <strong>Type-only imports are counted separately.</strong> <code>import type</code>
+      disappears at compile time. A runtime cycle can crash at startup. A type cycle can't, but
+      you still can't read one module without the other. When ignoring type imports
+      changes the size of a tangle, the report gives both sizes.
+    </li>
+    <li>
+      <strong>A cut has to matter.</strong> If the best cut still leaves more than two thirds of
+      the tangle tied together, thicket says so and proposes nothing. It also tells you what the
+      best cut would have removed, so you can see why.
+    </li>
+    <li>
+      <strong>Folders can fake a cycle.</strong> Two directories can import each other while no
+      file is in a loop. thicket checks the files underneath and says which kind you have.
+    </li>
+  </ul>
+
+  <h2 id="same-report">Same code, same report</h2>
+  <p>
+    Run thicket twice on the same code and you get the same bytes. Every list is sorted, ties
+    included. Finding IDs come from the code itself, not from where it sits. So you
+    can diff the report before and after a refactor and see exactly what went away.
+  </p>
+  <p>
+    Want to see it on real output? Here's <a href="example.html">an example report</a> and
+    <a href="report-guide.html">the guide to every field</a>.
+  </p>
+</article>
