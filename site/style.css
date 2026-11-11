@@ -916,3 +916,160 @@ th {
     transition: none;
   }
 }
+
+/* AST */
+
+.ast-tree {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ast-edge {
+  stroke: var(--rule);
+  stroke-width: 2;
+}
+
+.ast-node rect {
+  fill: var(--paper);
+  stroke: var(--g3);
+  stroke-width: 1.5;
+  transition: fill 0.15s;
+}
+
+.ast-node.leaf rect {
+  stroke: var(--g2);
+}
+
+.ast-node text {
+  fill: var(--ink);
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.ast-node {
+  cursor: pointer;
+}
+
+.ast-node.hot rect {
+  fill: var(--miss);
+  stroke: var(--amber);
+  stroke-width: 2.5;
+}
+
+.ast-stream {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.chip.kind {
+  color: var(--g3);
+}
+
+.chip.hot {
+  background: var(--miss);
+  border-color: var(--amber);
+}
+
+/* a concrete chain */
+
+.dchain-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.7rem;
+}
+
+.dchain-card {
+  border: 2px solid var(--g0);
+  border-radius: 9px;
+  padding: 0.5rem 0.6rem 0.4rem;
+  min-width: 0;
+  transition: border-color 0.2s;
+}
+
+.dchain-card.grp1 {
+  border-color: var(--g1);
+}
+
+.dchain-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.dchain-sim {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.dchain-card pre {
+  font-size: 0.7rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.dchain-card .added {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.removed {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin-top: 0.3rem;
+}
+
+/* cuts */
+
+#cut-demo svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.cedge {
+  cursor: pointer;
+}
+
+.cedge .hit {
+  stroke: transparent;
+  stroke-width: 18;
+}
+
+.cedge:hover .arr.live {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+.arr.cut {
+  stroke: var(--bad);
+  stroke-dasharray: 5 5;
+  opacity: 0.8;
+}
+
+.head.cut {
+  fill: var(--bad);
+}
+
+.clabel {
+  font: 600 12px ui-sans-serif, -apple-system, sans-serif;
+  text-anchor: middle;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--paper-raised);
+  stroke-width: 4px;
+}

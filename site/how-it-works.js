@@ -52,6 +52,95 @@ function fragDemo() {
   root.addEventListener("click", (e) => set(e.target.closest(".frag")));
 }
 
+/* ---- 2a. the AST and its flattened list -------------------------------- */
+
+function astDemo() {
+  const root = $("#ast-demo");
+  if (!root) return;
+  // item.price * item.qty, as the TypeScript AST has it.
+  const tree = {
+    kind: "BinaryExpression", x: 350, y: 25,
+    kids: [
+      { kind: "PropertyAccessExpression", x: 125, y: 95,
+        kids: [{ leaf: "item", x: 70, y: 165 }, { leaf: "price", x: 180, y: 165 }] },
+      { kind: "AsteriskToken", x: 350, y: 95, kids: [] },
+      { kind: "PropertyAccessExpression", x: 575, y: 95,
+        kids: [{ leaf: "item", x: 520, y: 165 }, { leaf: "qty", x: 630, y: 165 }] },
+    ],
+  };
+  let id = 0;
+  const all = [];
+  const number = (n, parent) => {
+    n.id = id++;
+    n.parent = parent;
+    all.push(n);
+    for (const k of n.kids ?? []) number(k, n);
+  };
+  number(tree, null);
+
+  // One token per node, wrapped in parentheses per child, as fragments.ts does.
+  const flatten = (n, level, names, owners) => {
+    const own = [...owners, n.id];
+    let text;
+    if (n.leaf === undefined) text = n.kind;
+    else if (level === "l0") text = n.leaf;
+    else {
+      if (!names.has(n.leaf)) names.set(n.leaf, `v${names.size}`);
+      text = names.get(n.leaf);
+    }
+    const out = [{ text, owners: own, t: n.leaf === undefined ? "kind" : "id" }];
+    for (const k of n.kids ?? []) {
+      out.push({ text: "(", owners: own, t: "p" });
+      out.push(...flatten(k, level, names, own));
+      out.push({ text: ")", owners: own, t: "p" });
+    }
+    return out;
+  };
+
+  const svg = $("svg", root);
+  const label = (n) => n.leaf ?? n.kind;
+  const width = (n) => Math.max(44, label(n).length * 7 + 18);
+  svg.innerHTML =
+    all
+      .filter((n) => n.parent)
+      .map((n) => `<line class="ast-edge" x1="${n.parent.x}" y1="${n.parent.y + 13}" x2="${n.x}" y2="${n.y - 13}"/>`)
+      .join("") +
+    all
+      .map(
+        (n) =>
+          `<g class="ast-node${n.leaf ? " leaf" : ""}" data-n="${n.id}"><rect x="${n.x - width(n) / 2}" y="${n.y - 13}" width="${width(n)}" height="26" rx="6"/><text x="${n.x}" y="${n.y + 4}">${esc(label(n))}</text></g>`,
+      )
+      .join("");
+
+  let level = "l0";
+  let hot = null;
+  const render = () => {
+    const tokens = flatten(tree, level, new Map(), []);
+    $(".ast-stream", root).innerHTML = tokens
+      .map(
+        (tok) =>
+          `<span class="chip ${tok.t}${hot !== null && tok.owners.includes(hot) ? " hot" : ""}">${esc(tok.text)}</span>`,
+      )
+      .join("");
+    for (const g of $$(".ast-node", svg)) g.classList.toggle("hot", Number(g.dataset.n) === hot);
+  };
+  const point = (e) => {
+    const g = e.target.closest(".ast-node");
+    hot = g ? Number(g.dataset.n) : null;
+    render();
+  };
+  svg.addEventListener("mouseover", point);
+  svg.addEventListener("click", point);
+  svg.addEventListener("mouseleave", () => {
+    hot = null;
+    render();
+  });
+  buttonGroup(root, "ast", (key) => {
+    level = key;
+    render();
+  })("l0");
+}
+
 /* ---- 2. fingerprints --------------------------------------------------- */
 
 const KEYWORDS = new Set(
@@ -319,6 +408,87 @@ function fpDemo() {
   });
   a.addEventListener("input", render);
   b.addEventListener("input", render);
+}
+
+/* ---- 3a. a concrete chain --------------------------------------------- */
+
+const TO_ROW_COMMON = [
+  "    url: \"/users/\" + user.id,",
+  "    avatar: avatarUrl(user.id, 64),",
+  "    plan: PLANS[user.planId].label,",
+  "    lastSeen: user.sessions[0]?.at ?? null,",
+  "    joined: formatDate(user.createdAt),",
+];
+const TO_ROW = (() => {
+  const id = "    id: user.id,";
+  const name = "    name: user.name.trim(),";
+  const email = "    email: user.email.toLowerCase(),";
+  const admin = "    isAdmin: user.role === \"admin\",";
+  const seats = "    seats: user.seats.filter(isActive).length,";
+  const tags = "    tags: user.tags.map(String),";
+  return [
+    [id, name, email, ...TO_ROW_COMMON],
+    [id, name, ...TO_ROW_COMMON, admin],
+    [id, name, ...TO_ROW_COMMON, admin, seats],
+    [id, ...TO_ROW_COMMON, admin, seats, tags],
+  ];
+})();
+const toRowSource = (fields) =>
+  ["function toRow(user) {", "  if (!user.active) return null;", "  return {", ...fields, "  };", "}"].join("\n");
+
+function driftChainDemo() {
+  const root = $("#drift-chain-demo");
+  if (!root) return;
+  const names = ["A", "B", "C", "D"];
+  const sketches = TO_ROW.map((f) => streams(tokenize(toRowSource(f))).l2);
+  const sim = (i, j) => jaccard(sketches[i], sketches[j]);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+
+  const groupsFor = (rule) => {
+    const group = [-1, -1, -1, -1];
+    const centers = new Set();
+    if (rule === "union") return { group: [0, 0, 0, 0], centers };
+    let next = 0;
+    // A ranks highest, then B, C, D.
+    for (let c = 0; c < 4; c++) {
+      if (group[c] !== -1) continue;
+      group[c] = next;
+      centers.add(c);
+      for (let m = 0; m < 4; m++) if (group[m] === -1 && sim(c, m) >= NEAR) group[m] = next;
+      next++;
+    }
+    return { group, centers };
+  };
+
+  const draw = (rule) => {
+    const { group, centers } = groupsFor(rule);
+    $(".dchain-cards", root).innerHTML = TO_ROW.map((fields, i) => {
+      const prev = i === 0 ? null : new Set(TO_ROW[i - 1]);
+      const removed = i === 0 ? [] : TO_ROW[i - 1].filter((l) => !fields.includes(l));
+      const added = i === 0 ? [] : fields.filter((l) => !TO_ROW[i - 1].includes(l));
+      const key = (l) => `<code>${esc(l.trim().split(":")[0])}</code>`;
+      const lines = toRowSource(fields)
+        .split("\n")
+        .map((l) => (prev && fields.includes(l) && !prev.has(l) ? `<span class="added">${esc(l)}</span>` : esc(l)))
+        .join("\n");
+      const changes = [
+        added.length ? `added ${added.map(key).join(", ")}` : "",
+        removed.length ? `removed ${removed.map(key).join(", ")}` : "",
+      ].filter(Boolean);
+      const gone = `<div class="removed">${i === 0 ? "the original" : `vs ${names[i - 1]}: ${changes.join(" · ")}`}</div>`;
+      const link = i === 0 ? "" : `<span class="dchain-sim">${pct(sim(i - 1, i))} like ${names[i - 1]}</span>`;
+      return `<div class="dchain-card grp${group[i]}">
+        <div class="dchain-head"><strong>${names[i]}</strong>${centers.has(i) ? '<span class="badge">center</span>' : ""}${link}</div>
+        <pre><code>${lines}</code></pre>${gone}</div>`;
+    }).join("");
+    const ad = pct(sim(0, 3));
+    const ac = pct(sim(0, 2));
+    $(".dchain-caption", root).innerHTML =
+      rule === "union"
+        ? `One group. A and D are only ${ad} alike, but B and C link them, so they end up together anyway.`
+        : `Two groups. Say A ranks highest, so A is the first center. It claims B. C is only ${ac} like A, so C starts its own group and claims D.`;
+  };
+  buttonGroup(root, "dchain", draw)("union");
 }
 
 /* ---- 3. near copies don't chain --------------------------------------- */
@@ -666,10 +836,175 @@ function tangleDemo() {
   buttonGroup(root, "tangle", draw)("before");
 }
 
+/* ---- 10a. choosing a cut ---------------------------------------------- */
+
+const CUT_NODES = {
+  ui: [270, 40], api: [410, 125], auth: [355, 255], db: [185, 255], util: [130, 125], jobs: [510, 40],
+};
+const CUT_EDGES = [
+  ["ui", "api", 12], ["api", "auth", 5], ["auth", "db", 8], ["db", "util", 4], ["util", "ui", 3],
+  ["jobs", "api", 4], ["api", "jobs", 1],
+];
+const MAX_RESIDUAL_SHARE = 2 / 3;
+
+/** Strongly connected components with two or more members. Tarjan. */
+function tangles(nodes, edges) {
+  const index = new Map();
+  const low = new Map();
+  const stack = [];
+  const on = new Set();
+  const out = [];
+  let i = 0;
+  const visit = (v) => {
+    index.set(v, i);
+    low.set(v, i++);
+    stack.push(v);
+    on.add(v);
+    for (const [from, to] of edges) {
+      if (from !== v) continue;
+      if (!index.has(to)) {
+        visit(to);
+        low.set(v, Math.min(low.get(v), low.get(to)));
+      } else if (on.has(to)) low.set(v, Math.min(low.get(v), index.get(to)));
+    }
+    if (low.get(v) === index.get(v)) {
+      const comp = [];
+      let w;
+      do {
+        w = stack.pop();
+        on.delete(w);
+        comp.push(w);
+      } while (w !== v);
+      if (comp.length > 1) out.push(comp.sort());
+    }
+  };
+  for (const v of nodes) if (!index.has(v)) visit(v);
+  return out;
+}
+
+function cutDemo() {
+  const root = $("#cut-demo");
+  if (!root) return;
+  const svg = $("svg", root);
+  const nodes = Object.keys(CUT_NODES);
+  const name = (e) => `${e[0]} → ${e[1]}`;
+  const largest = (cut) => {
+    const left = CUT_EDGES.filter((_, k) => !cut.has(k));
+    const comps = tangles(nodes, left);
+    return { comps, size: Math.max(0, ...comps.map((c) => c.length)) };
+  };
+  // thicket's rule: smallest tangle left, then cheapest, then name.
+  const scored = CUT_EDGES.map((e, k) => ({ k, e, left: largest(new Set([k])).size }));
+  const best = [...scored].sort(
+    (a, b) => a.left - b.left || a.e[2] - b.e[2] || (name(a.e) < name(b.e) ? -1 : 1),
+  )[0];
+  const cheapest = [...scored].sort((a, b) => a.e[2] - b.e[2])[0];
+  let cut = new Set();
+
+  const draw = () => {
+    const { comps, size } = largest(cut);
+    const tangled = new Set(comps.flat());
+    const edges = CUT_EDGES.map((e, k) => {
+      let [x1, y1] = CUT_NODES[e[0]];
+      let [x2, y2] = CUT_NODES[e[1]];
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // Two edges between one pair sit side by side.
+      const pair = CUT_EDGES.some((f) => f[0] === e[1] && f[1] === e[0]);
+      const ox = pair ? -uy * 8 : 0;
+      const oy = pair ? ux * 8 : 0;
+      const pad = (ux2, uy2) => Math.min(44 / Math.abs(ux2 || 1e-9), 22 / Math.abs(uy2 || 1e-9)) + 4;
+      const p = pad(ux, uy);
+      x1 += ux * p + ox;
+      y1 += uy * p + oy;
+      x2 -= ux * p - ox;
+      y2 -= uy * p - oy;
+      const mx = (x1 + x2) / 2 - uy * (pair ? 14 : 12);
+      const my = (y1 + y2) / 2 + ux * (pair ? 14 : 12);
+      const cls = cut.has(k) ? "cut" : "live";
+      return `<g class="cedge ${cls}" data-e="${k}">
+        <line class="hit" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+        <line class="arr ${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#chead-${cls})"/>
+        <text class="clabel" x="${mx}" y="${my + 4}">${cut.has(k) ? "✂ " : ""}${e[2]}</text></g>`;
+    }).join("");
+    const defs = `<defs>${["live", "cut"]
+      .map((c) => `<marker id="chead-${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head ${c}" d="M0,0 L10,5 L0,10 z"/></marker>`)
+      .join("")}</defs>`;
+    const boxes = nodes
+      .map((n) => {
+        const [x, y] = CUT_NODES[n];
+        return `<g class="mod${tangled.has(n) ? " in-cycle" : ""}"><rect x="${x - 40}" y="${y - 18}" width="80" height="36" rx="8"/><text x="${x}" y="${y + 5}">${n}/</text></g>`;
+      })
+      .join("");
+    svg.innerHTML = defs + edges + boxes;
+
+    const verdict = $("#cut-verdict", root);
+    const total = nodes.length;
+    const listed = (c) =>
+      c
+        .map((m) => `${m}/`)
+        .join(", ")
+        .replace(/, ([^,]+)$/, " and $1");
+    const biggest = comps.find((c) => c.length === size);
+    let cls = "none";
+    let head;
+    let body;
+    if (cut.size === 0) {
+      head = `All ${total} modules are tangled`;
+      body = "Every module can reach every other one through some chain of imports.";
+    } else if (cut.size > 1) {
+      const cost = [...cut].reduce((n, k) => n + CUT_EDGES[k][2], 0);
+      head = size === 0 ? "No tangle left" : `Largest tangle left: ${size} of ${total}`;
+      body = `You've cut ${cut.size} edges, ${cost} imports in all. thicket only suggests one cut at a time, so try a single edge.`;
+    } else {
+      const k = [...cut][0];
+      const e = CUT_EDGES[k];
+      const isBest = k === best.k;
+      head = size === 0 ? `Cut ${name(e)}: no tangle left` : `Cut ${name(e)}: ${size} of ${total} still tangled`;
+      if (size / total > MAX_RESIDUAL_SHARE) {
+        cls = "none";
+        body = `That leaves ${listed(biggest)} tangled. That's more than two thirds of the tangle, so thicket won't suggest it, however cheap it is.`;
+      } else if (isBest) {
+        cls = "l1";
+        body =
+          (size === 0 ? "It breaks the cycle outright. " : `Only ${listed(biggest)} are still tangled, which is a much smaller job. `) +
+          `Other edges leave the same, but this one moves the fewest imports (${e[2]}). This is thicket's pick.`;
+      } else {
+        cls = "data";
+        body = `That's good enough to suggest. But ${name(best.e)} leaves the same and moves only ${best.e[2]} imports, so thicket picks that one.`;
+      }
+    }
+    verdict.className = `verdict ${cls}`;
+    verdict.innerHTML = `<strong>${head}</strong><span>${body}</span>`;
+  };
+
+  svg.addEventListener("click", (e) => {
+    const g = e.target.closest(".cedge");
+    if (!g) return;
+    const k = Number(g.dataset.e);
+    if (cut.has(k)) cut.delete(k);
+    else cut.add(k);
+    draw();
+  });
+  for (const b of $$("[data-cut]", root))
+    b.addEventListener("click", () => {
+      const act = b.dataset.cut;
+      cut = act === "reset" ? new Set() : new Set([act === "pick" ? best.k : cheapest.k]);
+      draw();
+    });
+  draw();
+}
+
 fragDemo();
+astDemo();
 fpDemo();
+driftChainDemo();
 chainDemo();
 nestDemo();
 rankDemo();
 driftDemo();
 tangleDemo();
+cutDemo();

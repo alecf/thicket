@@ -30,8 +30,14 @@
   <!-- 1 ------------------------------------------------------------------ -->
   <h2 id="pieces">1. Cut the code into pieces</h2>
   <p>
-    thicket parses every file with the TypeScript compiler and walks the syntax tree. Every node
-    that is big enough becomes a <strong>fragment</strong>. That can be a function, a block, a
+    thicket parses every file with the TypeScript compiler. That gives it an
+    <strong>AST</strong>, or abstract syntax tree: the code as a tree of nodes, one for each
+    piece of syntax. A function is a node. So is a loop, a variable name, and the
+    <code>*</code> in <code>a * b</code>.
+  </p>
+  <p>
+    thicket walks that tree. Every node that is big enough becomes a <strong>fragment</strong>.
+    A fragment is that node plus everything underneath it. That can be a function, a block, a
     loop, an <code>if</code>, or an object literal.
   </p>
   <p>
@@ -58,16 +64,35 @@
   </figure>
 
   <p>
-    "Big enough" means at least 15 syntax nodes and 4 lines by default. You can raise or
-    lower both with <code>--depth</code>. Imports, exports and parameter lists never become fragments. They look alike in
-    every file, and you cannot extract them into anything.
+    "Big enough" means at least 15 AST nodes and 4 lines by default. You can raise or lower
+    both with <code>--depth</code>. Imports, exports and parameter lists never become
+    fragments. They look alike in every file, and you can't extract them into anything.
   </p>
 
   <!-- 2 ------------------------------------------------------------------ -->
   <h2 id="fingerprints">2. Fingerprint each piece</h2>
   <p>
-    thicket turns each fragment into a stream of tokens, dropping whitespace and comments. Then
-    it hashes that stream at two levels, which it calls L0 and L1.
+    To compare fragments, thicket flattens each one into a list. It walks the fragment's part of
+    the tree, top to bottom, and writes down each node's kind. Parentheses mark where a node's
+    children start and end. At the leaves of the tree it writes the actual name or value.
+    Whitespace and comments aren't in the tree, so they never show up.
+  </p>
+  <p>Here's <code>item.price * item.qty</code>. Hover over a node to find it in the list.</p>
+
+  <figure class="demo" id="ast-demo">
+    <div class="ast-wrap">
+      <svg class="ast-tree" viewBox="0 0 700 190" role="img" aria-label="The syntax tree of item.price * item.qty"></svg>
+      <div class="fp-mode" role="group" aria-label="Show list as">
+        <span>Show the list as</span>
+        <button type="button" data-ast="l0" aria-pressed="true">L0</button>
+        <button type="button" data-ast="l1">L1</button>
+      </div>
+      <div class="ast-stream"></div>
+    </div>
+  </figure>
+
+  <p>
+    Then thicket hashes that list at two levels, which it calls L0 and L1.
   </p>
   <ul>
     <li>
@@ -82,8 +107,12 @@
     </li>
   </ul>
   <p>
-    Fragments that match form a <strong>finding</strong>. That's one entry in the report. Try it
-    below. Edit either side, or pick an example.
+    Fragments that match form a <strong>finding</strong>. That's one entry in the report.
+  </p>
+  <p>
+    Try it below. Edit either side, or pick an example. This demo lists source tokens rather
+    than AST nodes, so that you can type into it. It's a simplified version of the real list,
+    but the matching works the same way.
   </p>
 
   <figure class="demo" id="fp-demo">
@@ -167,16 +196,41 @@
     Between 70% and 80%, only 30% were.
   </p>
 
-  <h3 id="no-chains">Near is not transitive</h3>
+  <h3 id="no-chains">Near copies can drift apart</h3>
   <p>
-    A is near B, and B is near C, but C may look nothing like A. Group every near pair together
-    and the groups chain across the whole codebase. When I tried that on one real repo, 26,318 of
-    its 65,150 distinct fragments landed in a single group.
+    Here's a problem with "near". Code gets copied, tweaked, and then copied again. Each version
+    is near the one before it. The first and last versions may not be near each other at all.
   </p>
   <p>
-    So thicket never chains. It starts with the best-ranked finding and lets it claim only the
-    fragments near <em>it</em>. Then the next-best finding claims from what's left, and so on. Each dot below is a finding, and bigger
-    means higher-ranked. Lines connect pairs that are near each other.
+    Below are four versions of a <code>toRow</code> function. Each one changes a line or two.
+    Every version is near the one before it. But A and D are below the 80% bar.
+  </p>
+
+  <figure class="demo" id="drift-chain-demo">
+    <div class="presets" role="group" aria-label="Grouping rule">
+      <button type="button" data-dchain="union" aria-pressed="true">Link every near pair</button>
+      <button type="button" data-dchain="center">thicket: fixed centers</button>
+    </div>
+    <div class="dchain-cards"></div>
+    <figcaption class="dchain-caption" aria-live="polite"></figcaption>
+  </figure>
+
+  <p>
+    Grouping near copies is a clustering problem. The simplest way links every near pair, and
+    puts anything linked into one group, even if it's only linked through other fragments.
+    That's called single-linkage clustering. Here it puts A and D in one group, because B and C
+    connect them. That's a <strong>chain</strong>. On a real repo, chains ran across the whole
+    codebase. 26,318 of its 65,150 distinct fragments landed in a single group.
+  </p>
+  <p>
+    thicket breaks chains by clustering around fixed centers. The best-ranked finding becomes
+    the first center. It claims only the fragments that are near it directly. Then the
+    best-ranked finding that's still unclaimed becomes the next center, and so on. Every member
+    of a group is near its center, so a group can't stretch.
+  </p>
+  <p>
+    Here's the same idea with nine findings. Each dot is a finding, and bigger means
+    higher-ranked. Lines connect pairs that are near each other.
   </p>
 
   <figure class="demo" id="chain-demo">
@@ -455,6 +509,31 @@ L1 · `ClassDeclaration`
     <figcaption id="tangle-caption"></figcaption>
   </figure>
 
+  <h3 id="cuts">Finding a good cut</h3>
+  <p>
+    When there's nothing to repoint, thicket looks for a cut. It tries removing each edge in the
+    tangle, one at a time, and measures the biggest tangle left over. The best cut leaves the
+    smallest tangle. Cost only breaks ties. Then thicket prefers fewer files to edit and fewer
+    imports to move.
+  </p>
+  <p>
+    So the cheapest edge isn't always the best one. Click edges below to cut them. The numbers
+    count imports along each edge.
+  </p>
+
+  <figure class="demo" id="cut-demo">
+    <div class="presets" role="group" aria-label="Actions">
+      <button type="button" data-cut="cheapest">Cut the cheapest edge</button>
+      <button type="button" data-cut="pick">Show thicket's pick</button>
+      <button type="button" data-cut="reset">Reset</button>
+    </div>
+    <svg viewBox="0 0 560 290" role="img" aria-labelledby="cut-caption"></svg>
+    <div class="verdict" id="cut-verdict" aria-live="polite"></div>
+    <figcaption id="cut-caption">
+      Six modules, all tangled. Click an edge to cut it, and click again to put it back.
+    </figcaption>
+  </figure>
+
   <p>A few more rules keep the suggestions honest.</p>
   <ul>
     <li>
@@ -464,9 +543,9 @@ L1 · `ClassDeclaration`
       changes the size of a tangle, the report gives both sizes.
     </li>
     <li>
-      <strong>A cut has to matter.</strong> If the best cut still leaves more than two thirds of
-      the tangle tied together, thicket says so and proposes nothing. It also tells you what the
-      best cut would have removed, so you can see why.
+      <strong>A cut has to matter.</strong> If the best single cut still leaves more than two
+      thirds of the tangle, thicket says so and proposes nothing. It also tells you what the best
+      cut would have removed, so you can see why.
     </li>
     <li>
       <strong>Folders can fake a cycle.</strong> Two directories can import each other while no
