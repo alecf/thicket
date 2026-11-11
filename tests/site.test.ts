@@ -21,6 +21,10 @@ describe("the site build", () => {
       "example.html",
       "how-it-works.html",
       "how-it-works.js",
+      "tour.html",
+      "tour.css",
+      "tour.js",
+      "tour-data.js",
       "icon.svg",
     ]);
   });

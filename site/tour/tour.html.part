@@ -1,0 +1,48 @@
+<div class="tour-page">
+<section class="tour-intro">
+  <h1>Follow the code through thicket</h1>
+  <p class="lede">Watch thicket read a small codebase and write its report, one stage at a time. Every fingerprint, group and score here comes from one real run.</p>
+  <p class="howto">Press <b>Next</b> or <kbd>→</kbd> to play one step. Each step stops when its animation ends, so you can read the caption. <kbd>←</kbd> goes back one step, and <kbd>Space</kbd> plays every step in order. You can also scroll. Click any fragment to follow it to the end. <a href="how-it-works.html">How it works</a> covers the same steps in prose.</p>
+</section>
+
+<section id="tour" class="tour" aria-label="Animated walk through one thicket run">
+  <div class="stage" id="stage">
+    <div class="map" id="map" aria-hidden="true"><span class="map-view" id="map-view"></span></div>
+    <div class="scene" id="scene">
+      <svg id="world" role="img" aria-label="The sample codebase moving through thicket's pipeline. The caption beside it describes each step." preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="hud" aria-hidden="true"><span class="hud-n" id="hud-n"></span><span class="hud-l" id="hud-l"></span></div>
+      <div class="part" id="part" aria-hidden="true"></div>
+      <div class="part-big" id="part-big" aria-hidden="true" hidden></div>
+    </div>
+    <aside class="rail">
+      <ol class="chapters" id="chapters" aria-label="Steps"></ol>
+      <div class="caption" id="caption" aria-live="polite"></div>
+      <div class="inspector" id="inspector" hidden></div>
+      <div class="stepnav">
+        <button type="button" class="back" id="back">Back</button>
+        <span class="steps" id="steps"></span>
+        <button type="button" class="next" id="next"><span class="next-fill" aria-hidden="true"></span><span class="next-l">Next</span></button>
+      </div>
+    </aside>
+    <div class="transport">
+      <button type="button" class="play" id="play" aria-pressed="false" title="Play every step in order"><span class="icon" aria-hidden="true"></span><span class="label">Play</span></button>
+      <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Position in the run" aria-valuemin="0" aria-valuemax="150" aria-valuenow="0">
+        <span class="scrub-track"><span class="scrub-fill" id="scrub-fill"></span></span>
+        <span class="scrub-ticks" id="scrub-ticks"></span>
+      </div>
+      <span class="now" id="now"></span>
+      <button type="button" class="speed" id="speed" aria-label="Playback speed 1×">1×</button>
+      <label class="follow"><span>Follow</span>
+        <select id="follow"></select>
+      </label>
+    </div>
+  </div>
+</section>
+
+<section class="tour-after">
+  <h2>The report thicket printed</h2>
+  <p>This is the complete output of thicket on the sample, exactly as it printed it. The tour's data comes from the same run. The sample's eight files are in <a href="https://github.com/alecf/thicket/tree/main/site/tour/sample"><code>site/tour/sample</code></a>, and <a href="https://github.com/alecf/thicket/blob/main/site/tour/generate.ts"><code>generate.ts</code></a> records each stage for this page.</p>
+  <pre class="full-report" id="full-report"></pre>
+  <p><a href="how-it-works.html">Read how each step works</a>, or <a href="report-guide.html">learn to read a report</a>.</p>
+</section>
+</div>
