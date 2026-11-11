@@ -1291,10 +1291,10 @@
   const runsA = D.near.shinglesA.length;
   const filledA = D.near.binsA.filter((v) => v >= 0).length;
   const CAPTIONS = [
-    [0, "This is a small shop codebase: 8 files and 100 lines. A few functions add up totals, and they look a lot alike. Press Next to watch thicket read it."],
+    [0, "This is a small shop codebase: 8 files and 100 lines. A few functions add up totals, and they look a lot alike. Press Next to start."],
     [1.4, "Every fingerprint, group and score on this page comes from one real run of thicket over these files. The finished report is at the bottom of the page."],
     [8, "thicket starts by parsing each file. Here is <code>orderTotal</code> in <code>src/orders/total.ts</code>."],
-    [11, "The parser turns the text into a syntax tree. Each part of the code becomes a node. Watch each piece drop into its place."],
+    [11, "The parser turns the text into a syntax tree. Each part of the code becomes a node, and a node's children are the parts inside it."],
     [15, `thicket counts the nodes under each node. The whole function holds ${D.tree.nodes}.`],
     [17.4, `A subtree is worth comparing when it has at least ${D.minNodes} nodes and spans at least ${D.minLines} lines. Three subtrees have enough nodes. The <code>for…of</code> loop spans only 3 lines, so it drops out.`],
     [20, "That leaves 2 fragments in this function: the function itself and its body."],
@@ -1305,9 +1305,9 @@
     [32.8, `Now the two rows are identical, so both L1 fingerprints are <code>${hashOf(featuredPath, "l1")}</code>. These two functions are one shape with renamed parts.`],
     [36, "thicket does the same for every file. Each bracket in a margin is one fragment."],
     [40, `The sample has ${frags.length} fragments, and each one has both fingerprints. Most of them are nested inside each other.`],
-    [T(44), "thicket files each fragment under its L0 fingerprint. Watch each fragment leave its bracket for a slot in the index on the right. Each slot holds one fingerprint."],
+    [T(44), "thicket files each fragment under its L0 fingerprint. The index has one slot per fingerprint. So copies end up together without thicket comparing every pair."],
     [T(50.8), "Fragments with the same fingerprint land in the same slot. Three slots hold more than one fragment: the pasted <code>orderTotal</code>, its body, and a test fixture array."],
-    [T(52.25), "Each slot that holds copies becomes a group. The groups line up to the right of the index."],
+    [T(52.25), "Each slot that holds copies becomes a group. A group is a candidate finding for the report."],
     [T(54.25), `Then thicket files every fragment again, under L1. A fragment that is mostly values sits this pass out, because ignoring its values would match unrelated data. The test array is ${Math.round(testArray.literalShare * 100)}% values, over the 35% limit.`],
     [T(58.45), "Three more slots hold copies: the renamed function, its body, and two interfaces that differ only in their names. They become groups too, so there are 6."],
     [T(61.8), "Some groups are copies inside copies. Each copy of the body sits inside a copy of the function."],
@@ -1323,7 +1323,7 @@
     [T(82.4), "The renamed group pays two discounts. Renamed copies count a little less than exact ones. And its field names differ: <code>items</code> in one copy, <code>lines</code> in another. When copies use different field names, they may hold different ideas. So the score keeps only 25%."],
     [T(86.2), "Types and tests are scored too, but each goes into a section of its own. A test fixture never takes a slot from production code."],
     [P2, "That finishes the search for duplication. thicket's second job is to find import cycles. For that it goes back to the same 8 files and reads only their import lines."],
-    [P2 + 5.5, "Each file becomes one node of a graph. The nodes carry the file names across to the import graph."],
+    [P2 + 5.5, "Each file becomes one node of the import graph. From here on, only a file's imports matter, not its code."],
     [Te(91.9), "thicket draws an arrow from each file to every file it imports. A dashed arrow imports only types, which disappear at compile time."],
     [T(97.8), "Three files import each other in a ring: <code>orders/total.ts</code> needs <code>invoice/total.ts</code>, which needs <code>reports/rows.ts</code>, which needs <code>orders/total.ts</code>. A ring like this can fail at startup, when one file runs before another has finished loading."],
     [T(101), `thicket looks for the cheapest import to remove. Each import here carries one symbol. Moving <code>formatMoney</code> out of <code>reports/rows.ts</code> breaks the ring completely.`],
