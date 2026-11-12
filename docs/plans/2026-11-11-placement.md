@@ -109,6 +109,108 @@ Now it picks `fingerprint/cluster.ts`, which is safe by the graph. A person
 would likely write a small utility file instead. That is the main open question
 below.
 
+### Four public repositories
+
+The prototype ran on four large public TypeScript repositories. They range
+from mostly agent-written to 13 years of human history. They are Public 1 to
+Public 4 here, with 3,119 to 15,883 TypeScript files each. They gave 195
+duplication findings and 1 cut.
+
+#### Measurements without judges
+
+| | Public 1 | Public 2 | Public 3 | Public 4 | All |
+|---|---|---|---|---|---|
+| Findings | 50 | 49 | 51 | 45 | 195 |
+| Naive home creates or grows a cycle | 5 | 0 | 8 | 17 | 30 (15%) |
+| Best home is unsafe too | 1 | 0 | 2 | 4 | 7 |
+| Best home frees a cycle | 0 | 0 | 0 | 0 | 0 |
+| A copy uses a helper declared beside it | 18 | 20 | 29 | 22 | 89 (46%) |
+| A copy needs two parallel files of one name | 4 | 3 | 5 | 4 | 16 |
+
+- **The cycle check matters for 15% of findings.** The rate ranges from 0% to
+  38% by repository.
+- **PRD §7.4's join did not occur.** No extraction freed a cycle.
+- **Helpers are common.** Nearly half the extractions are larger than the
+  finding says. The report should name the helpers.
+- **Cuts are rare.** The four reports proposed 1 cut in total. These
+  repositories cannot judge idea 2.
+
+The first run grouped modules with one depth for the whole tree. The report
+picks a depth per workspace. That hid 13 of the 30 unsafe naive homes. The
+prototype now groups modules exactly as the report does.
+
+#### Blind judging
+
+80 findings were judged, 20 per repository. Each was a finding whose
+suggestion differed from at least one control. Each Sonnet judge saw two or
+three candidate homes, labelled in a hashed order, and rated each one. A
+second judge re-rated 16 findings. 35 of 35 ratings agreed within one point,
+and 28 agreed exactly.
+
+| Arm | Rated yes or acceptable |
+|---|---|
+| Suggestion | 44 of 80 (55%) |
+| First copy | 20 of 79 (25%) |
+| First shared import | 25 of 44 (57%) |
+
+Against the bar:
+
+- **70% yes or acceptable: missed.** 55%. It is 59% on the 37 findings the
+  judges would extract.
+- **15 points over the first copy: met.** 30 points.
+- **15 points over the first shared import: missed.** On the 10 findings
+  where the two differ, the suggestion won 4, tied 5 and lost 1.
+
+#### Why suggestions failed
+
+By kind of home:
+
+| Suggested home | Yes or acceptable |
+|---|---|
+| New file at a workspace root, such as `packages/shared.ts` | 3 of 14 |
+| A file the copies import | 25 of 38 |
+| A copy's own file | 10 of 12 |
+| A dependency | 2 of 8 |
+| Another new file | 4 of 8 |
+
+The reasons judges gave fall into five groups.
+
+1. **A package is a boundary.** When copies sit in different packages, the
+   common directory is the workspace root. A file there belongs to no package
+   and nothing can import it. A copy's file in one package makes another
+   package depend on it. Judges wanted an existing shared package that every
+   user's package already depends on. Twice, that package already held a
+   canonical copy.
+2. **A shared import can be unrelated.** The copies import a file for other
+   reasons, and the code does not use it. Judges rated those homes no.
+3. **An edge already in a cycle.** Two copies already import `Connections.tsx`,
+   and it imports them back. The prototype counts no new edge, so it calls the
+   home safe. Judges called it a cycle. Moving more code across a cyclic edge
+   entrenches the cycle.
+4. **Generated files.** Twice the home was a `*.gen.ts` file that the banner
+   scan did not mark.
+5. **A common base class.** Copies that are methods on sibling services belong
+   on their shared base class. The prototype never proposes it.
+
+Separately, judges would leave 23 of the 80 findings alone. Examples are
+extensions that are bundled on their own, fixtures for two schema versions,
+and per-version generated clients. That is a ranking problem for duplication
+findings, not a placement problem.
+
+#### Next prototype changes
+
+1. Treat a workspace package as a boundary. A home must be in a package that
+   every user's package can already import. When none exists, say so and name
+   no file.
+2. Offer a shared import only when the code uses something from it.
+3. Count an existing edge from a user into its own cycle as an edge inside a
+   cycle.
+4. Never place code in a generated file. Match `*.gen.ts` as well as banners.
+5. Offer the copies' common base class when they are methods.
+
+Then judge again on the same 80 findings, and on 20 new findings per
+repository.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
