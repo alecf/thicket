@@ -12,7 +12,7 @@
  * one line per finding or cut, with the suggestion, the naive controls and
  * the code, for blind judging.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/ast";
 import { scanSourceFiles } from "../src/extract/scope.js";
@@ -244,20 +244,80 @@ try {
   const knownModules = new Set(Object.values(moduleGraph.moduleOf));
   for (const [from, tos] of fileEdges) for (const to of tos) moduleDeps.add(`${moduleOf(from)}\u0000${moduleOf(to)}`);
 
+  // ------------------------------------------------------------- packages --
+
+  // A package is the nearest directory above a file that holds a
+  // package.json. Code in one package can import another only when its
+  // package.json depends on it, or when its files already import it.
+  const pkgCache = new Map<string, string>();
+  const parentDir = (d: string) => d.split("/").slice(0, -1).join("/");
+  function pkgOf(path: string): string {
+    let d = parentDir(path);
+    const seen: string[] = [];
+    let found: string | undefined;
+    for (;;) {
+      found = pkgCache.get(d);
+      if (found !== undefined) break;
+      seen.push(d);
+      if (existsSync(join(dir, d, "package.json"))) {
+        found = d;
+        break;
+      }
+      if (d === "") {
+        found = "";
+        break;
+      }
+      d = parentDir(d);
+    }
+    for (const s of seen) pkgCache.set(s, found);
+    return found;
+  }
+  const pkgInfoCache = new Map<string, { name?: string; deps: Set<string> }>();
+  function pkgInfo(p: string) {
+    let info = pkgInfoCache.get(p);
+    if (info) return info;
+    try {
+      const j = JSON.parse(readFileSync(join(dir, p, "package.json"), "utf8"));
+      const deps = [j.dependencies, j.devDependencies, j.peerDependencies].flatMap((o) => Object.keys(o ?? {}));
+      info = { name: typeof j.name === "string" ? j.name : undefined, deps: new Set(deps) };
+    } catch {
+      info = { deps: new Set() };
+    }
+    pkgInfoCache.set(p, info);
+    return info;
+  }
+  const pkgImports = new Set<string>();
+  for (const [from, tos] of fileEdges) for (const to of tos) pkgImports.add(`${pkgOf(from)}\u0000${pkgOf(to)}`);
+  const allPkgs = [...new Set(files.map((f) => pkgOf(f.path)))].sort(compareStrings);
+  const canImport = (from: string, to: string) => {
+    if (from === to || pkgImports.has(`${from}\u0000${to}`)) return true;
+    const name = pkgInfo(to).name;
+    return name !== undefined && pkgInfo(from).deps.has(name);
+  };
+
+  // Never place code in generated output. The banner scan misses some
+  // generators, so the name is checked too.
+  const generated = (p: string) => /\.gen\.[cm]?tsx?$|\.generated\.|(^|\/)(__)?generated(__)?\//.test(p);
+
   // ------------------------------------------------------------- placement --
 
-  type Kind = "shared" | "dependency" | "user" | "new";
-  const KIND_ORDER: Kind[] = ["shared", "dependency", "user", "new"];
+  type Kind = "base" | "shared" | "dependency" | "user" | "new";
+  const KIND_ORDER: Kind[] = ["base", "shared", "dependency", "user", "new"];
 
   interface Verdict {
     home: string;
     kind: Kind;
+    /** Every user's package can import the home, and the home can import every dependency. */
+    reachable: boolean;
     /** Runtime code in a types-only file, or a type in a file of runtime code. */
     misfit: boolean;
     addedEdges: number;
     removedEdges: number;
-    /** Added edges that land inside a cycle: the tangle gets one more strand. */
-    addedInCycle: number;
+    /**
+     * Edges the moved code relies on that sit inside a cycle, new or already
+     * there. Moving more code across a cyclic edge entrenches the cycle.
+     */
+    edgesInCycle: number;
     /** Added edges between two existing modules that did not depend on each other. */
     newModuleDeps: number;
     /** Files newly in a cycle, or whose cycle grew. Empty means safe. */
@@ -298,10 +358,17 @@ try {
     const worse = (b: Components, a: Components) =>
       [...a].filter(([n, c]) => c.size > (b.get(n)?.size ?? 0)).map(([n]) => n).sort(compareStrings);
     const freed = (b: Components, a: Components) => [...b.keys()].filter((n) => !a.has(n)).length;
-    const addedInCycle = added.filter(([x, y]) => {
+    const relied: [string, string][] = [
+      ...users.filter((u) => u !== home).map((u): [string, string] => [u, home]),
+      ...deps.filter((d) => d !== home).map((d): [string, string] => [home, d]),
+    ];
+    const edgesInCycle = relied.filter(([x, y]) => {
       const cx = after.file.get(x);
       return cx !== undefined && cx.id === after.file.get(y)?.id;
     }).length;
+    const homePkg = pkgOf(home);
+    const reachable =
+      users.every((u) => canImport(pkgOf(u), homePkg)) && deps.every((d) => canImport(homePkg, pkgOf(d)));
     const newModuleDeps = added.filter(([x, y]) => {
       const mx = moduleOf(x);
       const my = moduleOf(y);
@@ -312,10 +379,11 @@ try {
     return {
       home,
       kind,
+      reachable,
       misfit: isType ? false : misfit,
       addedEdges,
       removedEdges,
-      addedInCycle,
+      edgesInCycle,
       newModuleDeps,
       worsens: { file: worse(before.file, after.file), module: worse(before.module, after.module) },
       frees: { file: freed(before.file, after.file), module: freed(before.module, after.module) },
@@ -326,11 +394,12 @@ try {
   function rank(vs: Verdict[]): Verdict[] {
     return [...vs].sort(
       (a, b) =>
+        Number(b.reachable) - Number(a.reachable) ||
         Number(safe(b)) - Number(safe(a)) ||
         Number(a.misfit) - Number(b.misfit) ||
         b.frees.module - a.frees.module ||
         b.frees.file - a.frees.file ||
-        a.addedInCycle - b.addedInCycle ||
+        a.edgesInCycle - b.edgesInCycle ||
         a.newModuleDeps - b.newModuleDeps ||
         KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
         a.addedEdges - b.addedEdges ||
@@ -349,26 +418,95 @@ try {
     return common.join("/");
   }
 
-  /** Every candidate home for code used by `users` and needing `deps`. */
-  function place(users: string[], deps: string[], dropped: [string, string][], newName: string, isType: boolean) {
+  /** Where a new file would go in package `p`: its `src/` when it has one. */
+  function newFileIn(p: string, newName: string): string {
+    const prefix = p === "" ? "" : `${p}/`;
+    const hasSrc = files.some((f) => f.path.startsWith(`${prefix}src/`));
+    return `${prefix}${hasSrc ? "src/" : ""}${newName}.ts`;
+  }
+
+  /**
+   * Every candidate home for code used by `users` and needing `deps`. `base`
+   * is the file of a class every copy's class extends, when there is one.
+   */
+  function place(
+    users: string[],
+    deps: string[],
+    dropped: [string, string][],
+    newName: string,
+    isType: boolean,
+    base?: string,
+  ) {
     // What the report already prints as "every copy imports": shared, and
     // distinctive to these files. A shim is followed to what it forwards.
     const shared = findingContext(users, importIndex, files.length).sharedImports.map((s) => s.forwardsTo ?? s.path);
     const candidates = new Map<string, Kind>();
-    for (const s of shared) candidates.set(s, "shared");
+    if (base !== undefined) candidates.set(base, "base");
+    // A shared import is a home only when the code uses something from it.
+    // The copies may import it for unrelated reasons.
+    for (const s of shared) if (deps.includes(s) && !candidates.has(s)) candidates.set(s, "shared");
     for (const d of deps) if (!candidates.has(d) && !users.includes(d)) candidates.set(d, "dependency");
     for (const u of users) if (!candidates.has(u)) candidates.set(u, "user");
-    const fresh = `${commonDir(users) || "."}/${newName}.ts`.replace(/^\.\//, "");
-    candidates.set(fresh, "new");
-    const verdicts = [...candidates].map(([home, kind]) =>
-      judge(home, kind, users.filter((u) => u !== home), deps.filter((d) => d !== home), dropped, isType),
-    );
+    const userPkgs = [...new Set(users.map(pkgOf))];
+    if (userPkgs.length === 1) {
+      candidates.set(`${commonDir(users) || "."}/${newName}.ts`.replace(/^\.\//, ""), "new");
+    } else {
+      // Copies in several packages: a new file goes in a package that every
+      // one of them can import. The common directory is often a workspace
+      // root, which belongs to no package and which nothing can import.
+      // Prefer packages the users' packages already import over ones they
+      // only list in package.json. Then the path, so the order is fixed.
+      const imported = (p: string) => userPkgs.filter((u) => u === p || pkgImports.has(`${u}\u0000${p}`)).length;
+      const hosts = allPkgs
+        .filter((p) => userPkgs.every((u) => canImport(u, p)) && deps.every((d) => canImport(p, pkgOf(d))))
+        .sort((a, b) => imported(b) - imported(a) || compareStrings(a, b));
+      for (const p of hosts.slice(0, 3)) candidates.set(newFileIn(p, newName), "new");
+    }
+    for (const home of [...candidates.keys()]) if (generated(home)) candidates.delete(home);
+    const verdicts = [...candidates].map(([home, kind]) => verdictFor(home, kind, users, deps, dropped, isType));
     return { shared: shared.sort(compareStrings), verdicts: rank(verdicts) };
+  }
+
+  function verdictFor(
+    home: string,
+    kind: Kind,
+    users: string[],
+    deps: string[],
+    dropped: [string, string][],
+    isType: boolean,
+  ): Verdict {
+    return judge(home, kind, users.filter((u) => u !== home), deps.filter((d) => d !== home), dropped, isType);
+  }
+
+  /**
+   * The file and name of the class that the class around [start, end)
+   * extends, as "path#Name". Undefined when the code is not in a class.
+   */
+  function baseOf(file: FileHandle, start: number, end: number): string | undefined {
+    let cls: Node | undefined;
+    walk(file.sourceFile, (n) => {
+      if (n.kind === SyntaxKind.ClassDeclaration && n.getStart() <= start && n.getEnd() >= end) cls = n;
+    });
+    if (!cls) return undefined;
+    let heritage: Node | undefined;
+    forEachChildSafe(cls, (c) => {
+      if (c.kind === SyntaxKind.HeritageClause && safeText(c).startsWith("extends")) heritage = c;
+    });
+    if (!heritage) return undefined;
+    let name: string | undefined;
+    walk(heritage, (n) => {
+      if (name === undefined && n.kind === SyntaxKind.Identifier) name = safeText(n);
+    });
+    if (name === undefined) return undefined;
+    const binding = facts(file).bindings.find((b) => b.local === name);
+    if (binding) return `${binding.target}#${binding.exported}`;
+    return facts(file).decls.has(name) ? `${file.path}#${name}` : undefined;
   }
 
   const describe = (v: Verdict) => {
     const bits = [`${v.home} (${v.kind}${v.misfit ? ", types-only file" : ""}, +${v.addedEdges}/-${v.removedEdges} edges)`];
-    if (v.addedInCycle) bits.push(`${v.addedInCycle} edges inside a cycle`);
+    if (!v.reachable) bits.push("UNREACHABLE across packages");
+    if (v.edgesInCycle) bits.push(`${v.edgesInCycle} edges inside a cycle`);
     if (v.newModuleDeps) bits.push(`${v.newModuleDeps} new module dependencies`);
     if (v.frees.module || v.frees.file) bits.push(`frees ${v.frees.module} modules, ${v.frees.file} files from cycles`);
     if (!safe(v)) {
@@ -386,12 +524,28 @@ try {
   // ------------------------------------------------------ extracted copies --
 
   let shownDup = 0;
-  const tally = { findings: 0, safeBest: 0, naiveUnsafe: 0, sharedBest: 0, newBest: 0, freesCycles: 0, drags: 0 };
+  const tally = {
+    findings: 0,
+    generated: 0,
+    noHome: 0,
+    safeBest: 0,
+    naiveUnsafe: 0,
+    baseBest: 0,
+    sharedBest: 0,
+    newBest: 0,
+    freesCycles: 0,
+    drags: 0,
+  };
   for (const finding of [...json.duplication, ...json.typeDuplication]) {
     if (finding.tag === "test") continue;
     const copies = finding.occurrences.filter((o) => byPath.has(o.filePath));
     const users = [...new Set(copies.map((o) => o.filePath))].sort(compareStrings);
     if (users.length < 2) continue; // all copies in one file: no import to place
+    if (users.every(generated)) {
+      // Generated output is regenerated, not refactored.
+      tally.generated++;
+      continue;
+    }
     tally.findings++;
     const deps = new Set<string>();
     const locals = new Set<string>();
@@ -411,9 +565,45 @@ try {
       }
     }
     const isType = json.typeDuplication.includes(finding);
-    const { shared, verdicts } = place(users, [...deps].sort(compareStrings), dropped, "shared", isType);
-    const best = verdicts[0]!;
-    const naive = verdicts.find((v) => v.home === users[0])!;
+    // Copies that sit in classes sharing one base class can move onto it.
+    const bases = new Set(copies.map((o) => baseOf(byPath.get(o.filePath)!, o.start, o.end)));
+    const baseKey = bases.size === 1 ? [...bases][0] : undefined;
+    const baseFile = baseKey?.split("#")[0];
+    const base = baseFile !== undefined && byPath.has(baseFile) ? baseFile : undefined;
+    const depList = [...deps].sort(compareStrings);
+    const { shared, verdicts } = place(users, depList, dropped, "shared", isType, base);
+    const best = verdicts[0];
+    const naive = verdictFor(users[0]!, "user", users, depList, dropped, isType);
+    if (!best || !best.reachable) {
+      // No file every copy's package can import. The report would say a
+      // shared package is needed, and name no file.
+      tally.noHome++;
+      if (!safe(naive)) tally.naiveUnsafe++;
+      if (locals.size > 0) tally.drags++;
+      if (shownDup < 25) {
+        shownDup++;
+        console.log(`\n${finding.id}  ${finding.kind}, ${copies.length} copies in ${users.length} files`);
+        console.log(`  best:  none. The copies' packages share no package they can all import.`);
+      }
+      const first = copies[0]!;
+      samples.push({
+        type: "extract",
+        id: finding.id,
+        kind: finding.kind,
+        copies: copies.map((o) => `${o.filePath}:${o.line}`),
+        code: excerpt(byPath.get(first.filePath)!, first.start, first.end),
+        needs: depList,
+        localHelpers: [...locals].sort(compareStrings),
+        suggestion: { home: null, kind: "none", packages: [...new Set(users.map(pkgOf))].sort(compareStrings) },
+        controls: {
+          firstCopy: naive,
+          firstShared: shared[0] ? verdictFor(shared[0], "shared", users, depList, dropped, isType) : undefined,
+        },
+        alternatives: verdicts.slice(0, 5),
+      });
+      continue;
+    }
+    if (best.kind === "base") tally.baseBest++;
     if (safe(best)) tally.safeBest++;
     if (!safe(naive)) tally.naiveUnsafe++;
     if (best.kind === "shared") tally.sharedBest++;
@@ -436,12 +626,12 @@ try {
       kind: finding.kind,
       copies: copies.map((o) => `${o.filePath}:${o.line}`),
       code: excerpt(byPath.get(first.filePath)!, first.start, first.end),
-      needs: [...deps].sort(compareStrings),
+      needs: depList,
       localHelpers: [...locals].sort(compareStrings),
       suggestion: best,
       controls: {
         firstCopy: naive,
-        firstShared: shared[0] ? verdicts.find((v) => v.home === shared[0]) : undefined,
+        firstShared: shared[0] ? verdictFor(shared[0], "shared", users, depList, dropped, isType) : undefined,
       },
       alternatives: verdicts.slice(1, 6),
     });
@@ -517,8 +707,10 @@ try {
       const name = symbols.length === 1 ? symbols[0]!.exported : "moved";
       const isType = symbols.every((m) => facts(byPath.get(m.target)!).typesOnly);
       const userList = [...users].sort(compareStrings);
-      const { verdicts } = place(userList, [...deps].sort(compareStrings), dropped, name, isType);
+      const depList = [...deps].sort(compareStrings);
+      const { verdicts } = place(userList, depList, dropped, name, isType);
       const best = verdicts[0]!;
+      const importer = userList.find((u) => !symbols.some((m) => m.target === u));
       if (safe(best)) tallyCut.safeBest++;
       if (best.frees.module > 0 || best.frees.file > 0) tallyCut.freesBest++;
       console.log(`  used by: ${userList.join(", ")}`);
@@ -533,7 +725,9 @@ try {
         users: userList,
         code: code.join("\n\n"),
         suggestion: best,
-        controls: { importer: verdicts.find((v) => v.home === userList.find((u) => !symbols.some((m) => m.target === u))) },
+        controls: {
+          importer: importer ? verdictFor(importer, "user", userList, depList, dropped, isType) : undefined,
+        },
         alternatives: verdicts.slice(1, 6),
       });
     }
