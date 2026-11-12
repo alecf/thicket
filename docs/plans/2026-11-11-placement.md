@@ -534,6 +534,41 @@ the same home.
 If all hold, the core's cut search becomes a move search, and the report
 gains a `move to:` line. If bar 1 misses, keep the edge search.
 
+### Round 5 results
+
+All three bars are met. Two are met by a few points.
+
+**Pairwise**, 30 tangles where the two searches move different code:
+
+| | Count |
+|---|---|
+| Judge prefers the move search | 19 |
+| Judge prefers the edge cut | 8 |
+| Equal | 3 |
+| Search preferred, of decided | 19/27 (70%), against a bar of 67% |
+| Second judge agrees on the preferred fix | 8 of 8 |
+
+Judges said the search's move breaks the cycle in 18 of 30, and the edge
+cut's in 13 of 30. Of the 10 search moves judged not to break it, 8 leave a
+2- to 6-file cycle. The search allows that under the same two-thirds rule as
+the cut search, and it reports the cycle left. The judges read "breaks the
+cycle" as breaking all of it. One was a prototype bug: a `const` and an
+`interface` shared a name, and only the `const` moved. That is fixed.
+
+**Destinations**, 114 search moves (63 rated in round 4, 51 in round 5):
+
+| Line | Rated good | Rated yes |
+|---|---|---|
+| computed | 81/114 (71%) | 32/114 (28%) |
+| vague | 114/114 (100%) | 8/114 (7%) |
+| importer | 12/76 (16%) | 2/76 (3%) |
+
+A second judge matched 41 of 44 round 5 ratings exactly.
+
+**Refusals.** On round 4 items whose tangle the search leaves unfixed, the
+computed home was rated good 7 of 16 times (44%). On the rest it was rated
+good 71 of 95 times (75%). The search refuses mostly the weak fixes.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
