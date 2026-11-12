@@ -506,3 +506,12 @@ export function nestedWorkspacesRoot(): string {
 export function filterWorkspacesRoot(): string {
   return resolve(here, "fixtures/workspaces-filter");
 }
+
+/**
+ * Copies whose files must not hold the shared version: `cart` reaches
+ * `invoice`, so `invoice` importing `cart` closes a cycle, and two sibling
+ * packages that do not depend on each other repeat one helper.
+ */
+export function placementConfig(): string {
+  return resolve(here, "fixtures/placement/tsconfig.json");
+}

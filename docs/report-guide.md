@@ -214,6 +214,28 @@ the whole codebase imports. This is usually where the abstraction already lives.
 An `a → b` arrow means `a` is a re-export shim and `b` is the real thing; look
 at `b`.
 
+**`do not extract into:`** — copies' own files that must not hold the shared
+version. Each comes with the reason:
+
+- `closes a cycle with x` means the file already imports `x`, directly or
+  through other files. If `x` then imported it, the two would form an import
+  cycle.
+- `closes a cycle between modules a and b` is the same problem one level up,
+  between the modules the report's tangle section counts.
+- `p cannot import its package` means package `p` holds another copy, and its
+  `package.json` does not depend on the file's package.
+
+A file that is not named is not a recommendation. thicket cannot tell which
+home fits the code's meaning. Blind judges rated its own picks right only 55%
+of the time, but they rated 88% of the homes this line names as wrong.
+`--no-placement` turns the line off.
+
+**`across packages:`** — every copy sits in a package the others cannot
+import, so no copy's file can hold the shared version. A shared version needs
+a package they all depend on. Check first whether the copies are separate on
+purpose. Judges would leave most of these findings alone, for example helpers
+in extensions that are bundled on their own.
+
 **`same shape in other surroundings:`** — the same fragment nested differently
 somewhere else. **This is the most under-rated line in the report.** It is where
 a deduplicated version tends to already exist. On one real report, 115 copies of

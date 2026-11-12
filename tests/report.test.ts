@@ -337,6 +337,116 @@ describe("renderMarkdown", () => {
     expect(out.indexOf("every copy imports")).toBeLessThan(out.indexOf("src/alpha.ts"));
   });
 
+  it("names the copies' files that must not hold the shared version, and why", () => {
+    // Judges rated 88% of the homes this check flags as wrong. The first
+    // copy's file is the obvious home and is flagged for half of all findings.
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [],
+            dependents: deps(1),
+            placement: {
+              avoid: [
+                { file: "src/cart.ts", reason: { kind: "cycle", with: "src/invoice.ts" } },
+                { file: "src/x/a.ts", reason: { kind: "module-cycle", from: "src/y", to: "src/x" } },
+                { file: "pkgs/b/c.ts", reason: { kind: "package", from: "pkgs/a" } },
+              ],
+              packages: ["pkgs/a", "pkgs/b"],
+              checked: 5,
+              files: 5,
+            },
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **do not extract into:** `src/cart.ts` (closes a cycle with `src/invoice.ts`)," +
+        " `src/x/a.ts` (closes a cycle between modules `src/y` and `src/x`)," +
+        " `pkgs/b/c.ts` (`pkgs/a` cannot import its package)",
+    );
+    expect(out.indexOf("do not extract into")).toBeLessThan(out.indexOf("src/alpha.ts"));
+  });
+
+  it("says once that no copy's file can hold it when every one is across a package boundary", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [],
+            dependents: deps(1),
+            placement: {
+              avoid: [
+                { file: "extensions/css/a.ts", reason: { kind: "package", from: "extensions/html" } },
+                { file: "extensions/html/b.ts", reason: { kind: "package", from: "extensions/css" } },
+              ],
+              packages: ["extensions/css", "extensions/html"],
+              checked: 2,
+              files: 2,
+            },
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **across packages:** the copies are in `extensions/css` and `extensions/html`," +
+        " and no copy's file is in a package all the others can import." +
+        " A shared version needs a package they all depend on",
+    );
+    expect(out).not.toContain("do not extract into");
+  });
+
+  it("names the repository root package in words, and says when it checked only some files", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [],
+            dependents: deps(1),
+            placement: {
+              avoid: [{ file: "pkgs/a/x.ts", reason: { kind: "package", from: "" } }],
+              packages: ["", "pkgs/a"],
+              checked: 24,
+              files: 30,
+            },
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain(
+      "- **do not extract into:** `pkgs/a/x.ts` (the repository root package cannot import its package)." +
+        " Checked 24 of 30 files",
+    );
+  });
+
+  it("says nothing about homes when every copy's file is safe", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [],
+            dependents: deps(1),
+            placement: { avoid: [], packages: [""], checked: 2, files: 2 },
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).not.toContain("do not extract into");
+    expect(out).not.toContain("across packages");
+  });
+
   it("says nothing about shared imports when the copies share none", () => {
     const out = renderMarkdown({
       ...base,

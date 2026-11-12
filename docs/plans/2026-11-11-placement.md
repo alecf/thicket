@@ -355,6 +355,17 @@ Round 2 changed the scope. The suggestion did not clear the bar, and the
 warning did. So steps 3 and 4 print what to avoid, as the round 2 decision
 says. They do not print a home. Steps 1, 2, 5, 6 and 7 stand as written.
 
+**Built.** The check needs no bindings, because each copy's file already
+imports what its own copy uses. `src/graph/packages.ts` finds packages.
+`src/graph/placement.ts` checks each copy's file, at most 24 per finding. The
+report prints `do not extract into:` or `across packages:`. The JSON gets an
+`avoid` field. `--no-placement` turns it off and joins the config hash. On
+Public 3, the 21,279-file repository, the check adds about 5 seconds of setup
+and 45 ms of checks. That is inside the run-to-run noise. Step 7, judging the
+shipped output, is still to do.
+
+Cuts (`move to:`) are not built. The four repositories gave 1 cut in total.
+
 1. **Adapter.** Add `bindingsOf(file)`, which returns each import binding's
    local name, exported name, target and type-only flag. The data already
    exists in `bindingCountsBySpecifier`. Keep it inside `src/extract/`

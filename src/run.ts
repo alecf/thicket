@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
-import { manifestProblems, workspaceGlobs } from "./extract/manifest.js";
+import { manifestProblems, readJson, workspaceGlobs } from "./extract/manifest.js";
 import { analysisScope, scanSourceFiles, type ScanOptions, type Scope } from "./extract/scope.js";
 import { openProject, type ExcludedCounts } from "./extract/ts-adapter.js";
 import {
@@ -15,6 +15,8 @@ import { attachNear } from "./fingerprint/near.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
+import { buildPackages } from "./graph/packages.js";
+import { placementGraph, placementOf, type Placement, type PlacementGraph } from "./graph/placement.js";
 import { hash, initHash } from "./hash.js";
 import { tsgoVersion } from "./extract/tsgo-path.js";
 import { compareStrings } from "./order.js";
@@ -123,6 +125,12 @@ export interface RunOptions {
    */
   fileConventions?: boolean;
   /**
+   * Name the copies' files that must not hold a finding's shared version,
+   * because the import would close a cycle or cross a package boundary. On by
+   * default. See `placementOf`.
+   */
+  placement?: boolean;
+  /**
    * Which half of the codebase to analyze.
    *
    * `include` (default) reports both: a duplicated interface and a duplicated
@@ -182,6 +190,11 @@ export interface ReportJson {
     occurrences: { filePath: string; line: number; start: number; end: number }[];
     /** Near copies, when there are any. See `attachNear`. */
     near?: { filePath: string; line: number; start: number; end: number; similarity: number }[];
+    /**
+     * Copies' files that must not hold the shared version, when any must not.
+     * See `placementOf`. Absent with `--no-placement`.
+     */
+    avoid?: Placement["avoid"];
   }[];
   cycles: CycleFinding[];
   /** Candidates found, before the per-section cap or the token budget. */
@@ -556,6 +569,7 @@ export async function runReport(
   const includeCallSites = opts.includeCallSites ?? false;
   const near = opts.near ?? true;
   const fileConventions = opts.fileConventions ?? true;
+  const placement = opts.placement ?? true;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
@@ -579,6 +593,7 @@ export async function runReport(
       includeCallSites,
       near,
       fileConventions,
+      placement,
       exclude,
       types,
     }),
@@ -818,14 +833,39 @@ export async function runReport(
       importsOfPath,
       reexportsOfPath,
     );
+    // Built on first use: it reads every package.json above an analyzed file
+    // and indexes the cycles, which a report with no findings never needs.
+    let homes: PlacementGraph | undefined;
+    const homeGraph = (): PlacementGraph => {
+      if (homes !== undefined) return homes;
+      const paths = files.map((f) => f.path);
+      homes = placementGraph({
+        files: paths,
+        importsOf: importsOfPath,
+        moduleOf: (p) => graph.moduleOf[p],
+        modules: graph.modules,
+        moduleAdjacency: graph.adjacency,
+        packages: buildPackages(paths, importsOfPath, (d) => {
+          const json = readJson(join(project.root, d, "package.json"));
+          if (typeof json !== "object" || json === null) return undefined;
+          const j = json as Record<string, unknown>;
+          const keys = (o: unknown) => (typeof o === "object" && o !== null ? Object.keys(o) : []);
+          return {
+            ...(typeof j.name === "string" ? { name: j.name } : {}),
+            deps: [...keys(j.dependencies), ...keys(j.devDependencies), ...keys(j.peerDependencies)],
+          };
+        }),
+      });
+      return homes;
+    };
     const decorate = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;
       const text = byPath.get(first.filePath);
-      const context = findingContext(
-        [...new Set(r.cluster.occurrences.map((o) => o.filePath))],
-        importIndex,
-        files.length,
-      );
+      const copyFiles = [...new Set(r.cluster.occurrences.map((o) => o.filePath))];
+      const context = {
+        ...findingContext(copyFiles, importIndex, files.length),
+        ...(placement && copyFiles.length > 1 ? { placement: placementOf(copyFiles, homeGraph()) } : {}),
+      };
       if (text === undefined) return { ...r, context };
       return {
         ...r,
@@ -976,6 +1016,9 @@ export async function runReport(
               similarity: o.similarity,
             })),
           }),
+      ...(r.context?.placement && r.context.placement.avoid.length > 0
+        ? { avoid: r.context.placement.avoid }
+        : {}),
     });
 
     return {
