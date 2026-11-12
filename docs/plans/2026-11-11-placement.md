@@ -290,6 +290,39 @@ Phase 1 ships the warning, not the suggestion.
 
 Cuts are still untested. The four repositories proposed 1 cut in total.
 
+### Round 3: a directory for a new file
+
+Judges in round 2 wanted a new, purpose-named file. thicket cannot name it,
+but it can say which directory the file belongs in. Round 3 asks whether
+that directory is worth printing:
+
+```
+- **extract into:** a new file under `src/features/x/` (name of your choosing)
+```
+
+The directory is the deepest one that holds every copy, inside a package
+every copy's package can import. A new file there must close no cycle.
+
+A line that is always true scores well for being vague. So two controls
+stand beside it, and each judge sees all three in a hashed order:
+
+- **Vague:** "a new file in a shared location of your choosing".
+- **Unrelated directory:** a new file in a directory of the same package that
+  no copy sits under. It is just as safe, and it is picked by a hash of the
+  finding id.
+
+The judge rates each line yes, acceptable or no. `yes` means the line is right
+and narrows the choice beyond what the judge would do anyway.
+
+The bar, set before judging:
+
+1. The computed directory is rated yes or acceptable at least 70% of the time.
+2. Its `yes` rate beats the vague control's by at least 15 points.
+3. Its yes-or-acceptable rate beats the unrelated directory's by at least 15
+   points.
+
+If it misses any of the three, the report keeps only `do not extract into:`.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:

@@ -12,6 +12,7 @@
  * one line per finding or cut, with the suggestion, the naive controls and
  * the code, for blind judging.
  */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/ast";
@@ -517,6 +518,39 @@ try {
     return bits.join("; ");
   };
 
+  /** True when directory `d` is `ancestor` or sits below it. "" is the root. */
+  const within = (d: string, ancestor: string) => ancestor === "" || d === ancestor || d.startsWith(`${ancestor}/`);
+
+  /**
+   * Round 3 arms: the directory a new file would go in, and a control
+   * directory that is just as safe but unrelated to the copies. The control
+   * sits in the same package, outside every directory on the path to a copy,
+   * and is picked by a hash of the finding id so the choice is fixed.
+   */
+  function newDirArms(
+    id: string,
+    users: string[],
+    deps: string[],
+    dropped: [string, string][],
+    isType: boolean,
+    verdicts: Verdict[],
+  ) {
+    const fresh = verdicts.find((v) => v.kind === "new" && v.reachable && safe(v));
+    if (!fresh) return {};
+    const homeDir = parentDir(fresh.home);
+    const pkg = pkgOf(fresh.home);
+    const onPath = (d: string) => users.some((u) => within(parentDir(u), d)) || within(d, homeDir);
+    const dirs = [...new Set(files.map((f) => f.path).filter((p) => pkgOf(p) === pkg && !generated(p)).map(parentDir))]
+      .filter((d) => d !== "" && !onPath(d))
+      .sort((a, b) => compareStrings(sha(id + a), sha(id + b)));
+    for (const d of dirs.slice(0, 12)) {
+      const v = verdictFor(`${d}/shared.ts`, "new", users, deps, dropped, isType);
+      if (v.reachable && safe(v)) return { newDir: { dir: homeDir, verdict: fresh }, wrongDir: { dir: d, verdict: v } };
+    }
+    return { newDir: { dir: homeDir, verdict: fresh } };
+  }
+  const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+
   const samples: unknown[] = [];
   const excerpt = (file: FileHandle, start: number, end: number) =>
     file.sourceFile.text.slice(start, end).split("\n").slice(0, 30).join("\n");
@@ -634,6 +668,7 @@ try {
         firstShared: shared[0] ? verdictFor(shared[0], "shared", users, depList, dropped, isType) : undefined,
       },
       alternatives: verdicts.slice(1, 6),
+      ...newDirArms(finding.id, users, depList, dropped, isType, verdicts),
     });
   }
 
