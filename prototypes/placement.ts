@@ -524,8 +524,9 @@ try {
   /**
    * Round 3 arms: the directory a new file would go in, and a control
    * directory that is just as safe but unrelated to the copies. The control
-   * sits in the same package, outside every directory on the path to a copy,
-   * and is picked by a hash of the finding id so the choice is fixed.
+   * sits in any package every copy can import, outside every directory on
+   * the path to a copy, and is picked by a hash of the finding id so the
+   * choice is fixed.
    */
   function newDirArms(
     id: string,
@@ -538,12 +539,13 @@ try {
     const fresh = verdicts.find((v) => v.kind === "new" && v.reachable && safe(v));
     if (!fresh) return {};
     const homeDir = parentDir(fresh.home);
-    const pkg = pkgOf(fresh.home);
-    const onPath = (d: string) => users.some((u) => within(parentDir(u), d)) || within(d, homeDir);
-    const dirs = [...new Set(files.map((f) => f.path).filter((p) => pkgOf(p) === pkg && !generated(p)).map(parentDir))]
+    // Not above a copy, not above the computed directory, and not inside it.
+    const onPath = (d: string) =>
+      users.some((u) => within(parentDir(u), d)) || within(d, homeDir) || within(homeDir, d);
+    const dirs = [...new Set(files.map((f) => f.path).filter((p) => !generated(p)).map(parentDir))]
       .filter((d) => d !== "" && !onPath(d))
       .sort((a, b) => compareStrings(sha(id + a), sha(id + b)));
-    for (const d of dirs.slice(0, 12)) {
+    for (const d of dirs.slice(0, 40)) {
       const v = verdictFor(`${d}/shared.ts`, "new", users, deps, dropped, isType);
       if (v.reachable && safe(v)) return { newDir: { dir: homeDir, verdict: fresh }, wrongDir: { dir: d, verdict: v } };
     }
