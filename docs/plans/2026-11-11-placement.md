@@ -403,6 +403,36 @@ For a cut, the helpers must move too, unless something else in the old file
 uses them. That is the next prototype change. Judging the move lines waits
 for it. Most cuts that cannot be placed go through a barrel `index.ts`.
 
+### Round 4: judging the move lines, preregistered
+
+This section was committed before any judge saw a packet.
+
+**Items.** Every placed file-level cut from the four repositories, after the
+prototype moved helpers: 111 cuts. Each item shows the cycle's cut edge, the
+declarations that move, the helpers that move with them, and the code.
+
+**Guidance lines.** Each item has up to three lines, in a hashed order. Each
+line names only a destination.
+
+- **computed**: the prototype's best home.
+- **importer**: the file on the `from` side of the cut. This is the plan's
+  control. It is left out when it is the same file as the computed home.
+- **vague**: "a file of your choosing that does not import" the old file.
+  This is true for every cut and names nothing.
+
+**Judges.** Sonnet, blind, with hashed labels. Eight items per packet. A second
+judge rates a fifth of the packets again.
+
+**Bar.** All three must hold.
+
+1. The computed home is rated yes or acceptable at least 70% of the time.
+2. Its yes rate beats the vague line's yes rate by at least 15 points.
+3. On items with an importer line, its yes-or-acceptable rate beats the
+   importer's by at least 15 points.
+
+If the bar is met, the report gains a `move to:` line under each cut. If it is
+missed, the report names the helpers that must move and does not name a home.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
