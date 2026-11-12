@@ -1,3 +1,4 @@
+import type { Placement } from "../graph/placement.js";
 import { compareStrings } from "../order.js";
 
 /**
@@ -24,6 +25,11 @@ export interface FindingContext {
   sharedImports: SharedImport[];
   /** What reaches into the cluster from outside it. */
   dependents: Dependents;
+  /**
+   * Which copies' files must not hold the shared version. Absent when the
+   * check is off (`--no-placement`).
+   */
+  placement?: Placement;
 }
 
 export interface SharedImport {

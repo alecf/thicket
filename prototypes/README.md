@@ -25,14 +25,16 @@ They require `typescript@next` resolvable from the working directory.
 | `granularity.mjs` | Exact module resolution, adaptive granularity data, Tarjan SCC | §2.6, §7 |
 | `near-miss.ts` | All-pairs near-miss census: MinHash, SimHash and embedding candidates, and the union-find chaining that ruled out §5.3 step 6 | §5.3 |
 | `near-centers.ts` | Near copies of a report's printed findings, written as blind judging samples | §5.3, §11.4 |
+| `placement.ts` | Where extracted code, or the symbols on a cut, can live without a new import cycle | §7.4 |
 
-`near-miss.ts` and `near-centers.ts` run under Bun against the real extraction
+`near-miss.ts`, `near-centers.ts` and `placement.ts` run under Bun against the real extraction
 code, and take a repository directory rather than tsconfig paths:
 
 ```bash
 bun prototypes/near-miss.ts /path/to/repo /tmp/out --no-embed
 bun run thicket /path/to/repo --json /tmp/repo.json > /dev/null
 bun prototypes/near-centers.ts /path/to/repo /tmp/repo.json /tmp/out
+bun prototypes/placement.ts /path/to/repo /tmp/out
 ```
 
 The embedding source needs Ollama on `localhost:11434` with an embedding model,

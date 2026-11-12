@@ -204,6 +204,7 @@ bun run thicket diff before.json after.json
 | `--no-near` | Stop adding near copies to a finding. By default a finding also lists fragments of nearly the same shape, and a smaller finding of nearly the same shape is folded into the larger one. |
 | `--include-call-sites` | Also report clusters that are only repeated calls to shared code. thicket leaves these out by default: when the whole fragment is one call, nothing shorter can replace it, so the extraction removes no line. |
 | `--no-file-conventions` | Stop ranking down a shape that is declared once per file across files of one role, such as one `meta` per `*.stories.tsx`. thicket reads those as a framework's API rather than as duplication, because deleting a copy deletes a story. |
+| `--no-placement` | Stop saying where a finding's shared version should go. By default thicket names a copy's file when the other copies importing it would close an import cycle, or when another copy's package cannot import it. When every copy is in one package, it also names the directory for a new file. |
 | `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
 | `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
 | `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`, and a budget too small to hold it is refused. |
@@ -239,7 +240,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config 6962b4ae · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config 7434eb66 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -262,6 +263,7 @@ thicket 0.1.0 · config 6962b4ae · 4 files / 56 LOC · granularity: file (4 mod
 
 L1 · `FunctionDeclaration`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts
@@ -281,6 +283,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 
 L0 · `Block`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts
@@ -466,9 +469,9 @@ On a real 12-module tangle this found five edges: `lib → app` (72 of 81 import
 
 **No cut for a tangle with no file cycle under it.** A module SCC is a claim about directories. If no file in those modules imports its way back to itself across a boundary, then cutting an edge removes no cycle, because there is no cycle. A real 7-module tangle was exactly this, and the cut thicket used to propose removed nothing.
 
-**A type-only edge is demoted, not banned.** Those edges are erased at compile time, so cutting one changes nothing that runs, and a runtime edge wins any tie. thicket once *preferred* them, on the grounds that moving a types file is the cheapest fix. On a real 12-module tangle that produced exactly the wrong recommendation: a two-symbol `types → models` cut that an agent did in ten minutes and correctly reported as a no-op. Banning them outright over-corrected. What made that cut worthless was that it shaved one module off the tangle and left the rest, and the rule below catches that on its own. A cycle in the type system is still real complexity, because a reader cannot understand either module without the other. So a type-only cut that breaks a cycle completely is proposed, and the report labels it `type-only`.
+**A type-only edge is demoted, not banned.** Those edges are erased at compile time, so cutting one changes nothing that runs. When the tangle has a runtime cycle, a runtime edge wins any tie. thicket once *preferred* them, on the grounds that moving a types file is the cheapest fix. On a real 12-module tangle that produced exactly the wrong recommendation: a two-symbol `types → models` cut that an agent did in ten minutes and correctly reported as a no-op. Banning them outright over-corrected. What made that cut worthless was that it shaved one module off the tangle and left the rest, and the rule below catches that on its own. A cycle in the type system is still real complexity, because a reader cannot understand either module without the other. So a type-only cut that breaks a cycle completely is proposed, and the report labels it `type-only`.
 
-**The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a runtime edge over a type-only one, then the fewest files to edit, then the fewest symbols.
+**The cut is chosen by how much of the tangle it dissolves**, not by what it costs. Picking the cheapest edge that works reliably finds the least interesting cut. On a real 7-module tangle it proposed a one-symbol edge that detached a leaf and left the other six knotted together. Cost only breaks ties between cuts that dissolve the same amount. Among those, thicket prefers a runtime edge over a type-only one if a runtime cycle exists. If none exists, it prefers the type-only edge, because moving a type is the cheaper fix. Then it prefers the fewest files to edit, then the fewest symbols.
 
 **A cut has to remove enough to be worth doing.** It must leave at most two thirds of the tangle standing, or remove the cycle outright. Otherwise thicket suggests nothing and says what it rejected: "the best available leaves 8 of 9" and "nothing helps" are different answers, and an agent given only the second recomputed the first by hand before it would believe the tangle was irreducible.
 

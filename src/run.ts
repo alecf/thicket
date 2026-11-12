@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { cachePathFor, openCache, type Cache } from "./cache/db.js";
-import { manifestProblems, workspaceGlobs } from "./extract/manifest.js";
+import { manifestProblems, readJson, workspaceGlobs } from "./extract/manifest.js";
 import { analysisScope, scanSourceFiles, type ScanOptions, type Scope } from "./extract/scope.js";
 import { openProject, type ExcludedCounts } from "./extract/ts-adapter.js";
 import {
@@ -15,6 +15,8 @@ import { attachNear } from "./fingerprint/near.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
+import { buildPackages } from "./graph/packages.js";
+import { placementGraph, placementOf, type Placement, type PlacementGraph } from "./graph/placement.js";
 import { hash, initHash } from "./hash.js";
 import { tsgoVersion } from "./extract/tsgo-path.js";
 import { compareStrings } from "./order.js";
@@ -123,6 +125,12 @@ export interface RunOptions {
    */
   fileConventions?: boolean;
   /**
+   * Name the copies' files that must not hold a finding's shared version,
+   * because the import would close a cycle or cross a package boundary. On by
+   * default. See `placementOf`.
+   */
+  placement?: boolean;
+  /**
    * Which half of the codebase to analyze.
    *
    * `include` (default) reports both: a duplicated interface and a duplicated
@@ -182,6 +190,13 @@ export interface ReportJson {
     occurrences: { filePath: string; line: number; start: number; end: number }[];
     /** Near copies, when there are any. See `attachNear`. */
     near?: { filePath: string; line: number; start: number; end: number; similarity: number }[];
+    /**
+     * Copies' files that must not hold the shared version, when any must not.
+     * See `placementOf`. Absent with `--no-placement`.
+     */
+    avoid?: Placement["avoid"];
+    /** Where a new file for the shared version belongs, when the copies share one package. */
+    newFileDir?: string;
   }[];
   cycles: CycleFinding[];
   /** Candidates found, before the per-section cap or the token budget. */
@@ -556,6 +571,7 @@ export async function runReport(
   const includeCallSites = opts.includeCallSites ?? false;
   const near = opts.near ?? true;
   const fileConventions = opts.fileConventions ?? true;
+  const placement = opts.placement ?? true;
   const types: TypesMode = opts.types ?? "include";
   // Sorted so that two runs passing the same patterns in a different order
   // share a cache rather than silently invalidating each other (AGENTS.md §1).
@@ -579,6 +595,7 @@ export async function runReport(
       includeCallSites,
       near,
       fileConventions,
+      placement,
       exclude,
       types,
     }),
@@ -818,14 +835,43 @@ export async function runReport(
       importsOfPath,
       reexportsOfPath,
     );
+    // Built on first use: it reads every package.json above an analyzed file
+    // and indexes the cycles, which a report with no findings never needs.
+    let homes: PlacementGraph | undefined;
+    const homeGraph = (): PlacementGraph => {
+      if (homes !== undefined) return homes;
+      const paths = files.map((f) => f.path);
+      homes = placementGraph({
+        files: paths,
+        importsOf: importsOfPath,
+        moduleOf: (p) => graph.moduleOf[p],
+        modules: graph.modules,
+        moduleAdjacency: graph.adjacency,
+        packages: buildPackages(paths, importsOfPath, (d) => {
+          const json = readJson(join(project.root, d, "package.json"));
+          if (typeof json !== "object" || json === null) return undefined;
+          const j = json as Record<string, unknown>;
+          const keys = (o: unknown) => (typeof o === "object" && o !== null ? Object.keys(o) : []);
+          return {
+            ...(typeof j.name === "string" ? { name: j.name } : {}),
+            deps: [...keys(j.dependencies), ...keys(j.devDependencies), ...keys(j.peerDependencies)],
+          };
+        }),
+      });
+      return homes;
+    };
     const decorate = <T extends (typeof ranked)[number]>(r: T): T => {
       const first = r.cluster.occurrences[0]!;
       const text = byPath.get(first.filePath);
-      const context = findingContext(
-        [...new Set(r.cluster.occurrences.map((o) => o.filePath))],
-        importIndex,
-        files.length,
-      );
+      const copyFiles = [...new Set(r.cluster.occurrences.map((o) => o.filePath))];
+      const context = {
+        ...findingContext(copyFiles, importIndex, files.length),
+        // Not for tests: nothing imports a test file, and the judged runs
+        // covered production and type findings only.
+        ...(placement && copyFiles.length > 1 && !isTestMajority(r.cluster)
+          ? { placement: placementOf(copyFiles, homeGraph()) }
+          : {}),
+      };
       if (text === undefined) return { ...r, context };
       return {
         ...r,
@@ -976,6 +1022,10 @@ export async function runReport(
               similarity: o.similarity,
             })),
           }),
+      ...(r.context?.placement && r.context.placement.avoid.length > 0
+        ? { avoid: r.context.placement.avoid }
+        : {}),
+      ...(r.context?.placement?.newFileDir === undefined ? {} : { newFileDir: r.context.placement.newFileDir }),
     });
 
     return {
@@ -1107,10 +1157,11 @@ function reweight<T extends Ranked>(
  * tie-break, not the objective — the objective is how much tangle the cut
  * dissolves, so every inner edge is scored by the largest SCC that survives it.
  *
- * Ties go to the cut a human would rather make: a type-only edge first, since
- * it is erased at compile time and breaking it usually means moving a types
- * file; then fewest files to edit, which is the real unit of work; then fewest
- * symbols; then name, so the result never depends on iteration order.
+ * Ties go to the cut a human would rather make. A runtime edge wins when the
+ * tangle has a runtime cycle, and a type-only edge wins when it has none (see
+ * the comment on the sort). Then fewest files to edit, which is the real unit
+ * of work; then fewest symbols; then name, so the result never depends on
+ * iteration order.
  *
  * Returns no cut when no single edge helps. A suggestion that does not shrink
  * the component costs the reader a refactor and buys nothing, and `residual`
@@ -1188,6 +1239,9 @@ function suggestCuts(
   // proposed cut removed zero of them.
   if (crossingFileCycles === 0) return unchanged;
 
+  // Erase the type-only edges. A tangle that is still circular has a runtime
+  // cycle, and only that kind of cycle can fail at module-init time.
+  const runtimeCycle = largestScc(component, inner.filter((e) => !e.typeOnly)) > 1;
   const candidates = [...inner]
     // Type-only edges are DEMOTED, not excluded. They were once preferred, on
     // the reasoning that moving a types file is the cheapest fix, and that
@@ -1200,9 +1254,17 @@ function suggestCuts(
     // -- and breaking one completely is worth proposing, labelled for what it
     // is. The demotion stays because only a runtime cycle can fail at
     // module-init time, so a runtime edge wins any tie.
+    //
+    // The demotion applies only when a runtime cycle exists. Without one, the
+    // runtime edge fixes nothing at module init either. The type edge is then
+    // the cheaper move, because a type goes to a types file. The common case
+    // is a parent that imports a child component, and a child that imports a
+    // props type back. On four public repositories, 51 of 129 file-level cuts
+    // had this shape. The demotion told each reader to move the child
+    // component out of its own file.
     .sort(
       (a, b) =>
-        Number(a.typeOnly) - Number(b.typeOnly) ||
+        (runtimeCycle ? 1 : -1) * (Number(a.typeOnly) - Number(b.typeOnly)) ||
         a.files.length - b.files.length ||
         a.weight - b.weight ||
         compareStrings(a.from, b.from) ||

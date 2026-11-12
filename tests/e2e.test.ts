@@ -567,15 +567,34 @@ describe("cutting a cycle that exists only in the type system", () => {
     expect(markdown).toMatch(/suggested cut:.*type-only symbol/);
   });
 
-  it("still prefers a runtime edge when one breaks the cycle just as well", async () => {
-    // `ra -> rb` runs; `rb -> ra` is erased. Both cuts break the cycle
-    // completely, so the tie goes to the real one: only a runtime cycle can
-    // fail at module-init time.
+  it("cuts the type-only edge when no runtime cycle exists", async () => {
+    // `ra -> rb` runs, and `rb -> ra` is erased. Both cuts break the cycle
+    // completely. Nothing here can fail at module init, because erasing the
+    // types leaves no cycle. So the runtime edge buys nothing extra, and the
+    // type edge is the cheaper move: a type goes to a types file. On four
+    // public repositories, 51 of 129 file-level cuts had this shape. Each one
+    // told the reader to move a child component out of its own file.
     const { json } = await load();
     const cycle = find(json, "ra");
+    expect(cycle.runtimeModules).toBe(1);
     expect(cycle.cuts).toHaveLength(1);
-    expect([cycle.cuts[0]!.from, cycle.cuts[0]!.to]).toEqual(["ra", "rb"]);
+    expect([cycle.cuts[0]!.from, cycle.cuts[0]!.to]).toEqual(["rb", "ra"]);
+    expect(cycle.cuts[0]!.typeOnly).toBe(true);
+    expect(cycle.residual).toBe(1);
+  });
+
+  it("still prefers a runtime edge when a runtime cycle exists", async () => {
+    // `ka` and `kb` import each other at runtime. `kb -> kc`, `kc -> kd` and
+    // the erased `kd -> ka` each leave that pair and nothing else. The tie
+    // goes to a runtime edge, because a runtime cycle is still there.
+    const { json } = await load();
+    const cycle = find(json, "ka");
+    expect(cycle.modules.sort()).toEqual(["ka", "kb", "kc", "kd"]);
+    expect(cycle.runtimeModules).toBe(2);
+    expect(cycle.cuts).toHaveLength(1);
     expect(cycle.cuts[0]!.typeOnly).toBe(false);
+    expect([cycle.cuts[0]!.from, cycle.cuts[0]!.to]).toEqual(["kb", "kc"]);
+    expect(cycle.residual).toBe(2);
   });
 });
 

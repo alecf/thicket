@@ -3,6 +3,7 @@ import type { Scope } from "../extract/scope.js";
 import { compareStrings } from "../order.js";
 import type { Census } from "./census.js";
 import type { Dependents } from "./context.js";
+import type { AvoidHome, Placement } from "../graph/placement.js";
 import { FEEDBACK_HEADING, guideText } from "./guide.js";
 import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
@@ -819,6 +820,16 @@ function contextLines(r: Ranked): string[] {
     lines.push(`- **every copy imports:** ${named.join(", ")}`);
   }
 
+  const placement = placementLine(context.placement);
+  if (placement !== undefined) lines.push(placement);
+  // The directory for a new file. Judged right 56 times in 56 when the copies
+  // share one package, which is the only case `placementOf` sets it for.
+  if (context.placement?.newFileDir !== undefined) {
+    lines.push(
+      `- **extract into:** a new file under \`${context.placement.newFileDir}/\`, with a name of your choosing`,
+    );
+  }
+
   // Before the near-variant links: what varies inside THIS finding decides
   // the shape of the abstraction, and the links decide its scope.
   if (r.varies !== undefined && r.varies.length > 0) {
@@ -1425,4 +1436,49 @@ function memberFallback(cycle: CycleFinding): string[] {
     `- **chart omitted:** ${cycle.modules.length} modules, ${cycle.edges.length} edges` +
       ` is past what a flowchart shows usefully`,
   ];
+}
+
+/** Homes one `do not extract into` line names before it counts the rest. */
+const MAX_AVOID_NAMED = 4;
+
+const packageName = (p: string) => (p === "" ? "the repository root package" : `\`${p}\``);
+
+/**
+ * Which copies' files must not hold the shared version, and why. See
+ * `placementOf`: this names wrong homes and never suggests one, because a
+ * suggested home was rated right only 55% of the time.
+ */
+function placementLine(p: Placement | undefined): string | undefined {
+  if (p === undefined || p.avoid.length === 0) return undefined;
+  // Every copy's file is behind a package boundary: one sentence about the
+  // packages says more than a list of files that all fail the same way.
+  const allBlocked =
+    p.checked === p.files &&
+    p.avoid.length === p.files &&
+    p.avoid.every((a) => a.reason.kind === "package");
+  if (allBlocked && p.packages.length > 1) {
+    const names = p.packages.map(packageName);
+    const list =
+      names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
+    return (
+      `- **across packages:** the copies are in ${list},` +
+      ` and no copy's file is in a package all the others can import.` +
+      ` A shared version needs a package they all depend on`
+    );
+  }
+  const why = (a: AvoidHome): string => {
+    switch (a.reason.kind) {
+      case "cycle":
+        return `closes a cycle with \`${a.reason.with}\``;
+      case "module-cycle":
+        return `closes a cycle between modules \`${a.reason.from}\` and \`${a.reason.to}\``;
+      case "package":
+        return `${packageName(a.reason.from)} cannot import its package`;
+    }
+  };
+  const shown = p.avoid.slice(0, MAX_AVOID_NAMED).map((a) => `\`${a.file}\` (${why(a)})`);
+  const rest = p.avoid.length - shown.length;
+  const more = rest > 0 ? `, and ${rest} more file${rest === 1 ? "" : "s"}` : "";
+  const partial = p.checked < p.files ? `. Checked ${p.checked} of ${p.files} files` : "";
+  return `- **do not extract into:** ${shown.join(", ")}${more}${partial}`;
 }

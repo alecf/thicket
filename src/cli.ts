@@ -56,6 +56,8 @@ Usage: thicket [dir] [options]
                          into a larger one of nearly the same shape
   --no-file-conventions  do not rank down a shape declared once per file across
                          files of one role, such as *.stories.tsx
+  --no-placement         do not name the copies' files where shared code would
+                         close an import cycle or cross a package boundary
   --types <mode>         include | exclude | only (default include) — whether
                          type declarations and type-only imports are analyzed
   --embed                put the field guide in the report instead of a link
@@ -93,6 +95,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         "include-call-sites": { type: "boolean" },
         near: { type: "boolean", default: true },
         "file-conventions": { type: "boolean", default: true },
+        placement: { type: "boolean", default: true },
         types: { type: "string" },
         embed: { type: "boolean" },
         private: { type: "boolean" },
@@ -238,6 +241,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       includeCallSites: values["include-call-sites"] ?? false,
       near: values.near ?? true,
       fileConventions: values["file-conventions"] ?? true,
+      placement: values.placement ?? true,
       types,
       exclude: values.exclude ?? [],
       cache: values.cache ?? true,

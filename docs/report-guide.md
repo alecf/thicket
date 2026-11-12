@@ -214,6 +214,35 @@ the whole codebase imports. This is usually where the abstraction already lives.
 An `a → b` arrow means `a` is a re-export shim and `b` is the real thing; look
 at `b`.
 
+**`do not extract into:`** — copies' own files that must not hold the shared
+version. Each comes with the reason:
+
+- `closes a cycle with x` means the file already imports `x`, directly or
+  through other files. If `x` then imported it, the two would form an import
+  cycle.
+- `closes a cycle between modules a and b` is the same problem one level up,
+  between the modules the report's tangle section counts.
+- `p cannot import its package` means package `p` holds another copy, and its
+  `package.json` does not depend on the file's package.
+
+A file that is not named is not a recommendation. thicket cannot tell which
+existing file fits the code's meaning. Blind judges rated its own picks right
+only 55% of the time, but they rated 88% of the homes this line names as wrong.
+`--no-placement` turns the line off.
+
+**`extract into:`** — the directory where a new file for the shared version
+belongs, with the name left to you. It is the deepest directory that holds
+every copy. It appears only when every copy is in one package, and never for
+the repository root. Blind judges rated it right 56 times in 56 in that case.
+Judges also preferred it to a vague "a shared location of your choosing" and
+to an unrelated directory. Pick a name for what the code does.
+
+**`across packages:`** — every copy sits in a package the others cannot
+import, so no copy's file can hold the shared version. A shared version needs
+a package they all depend on. Check first whether the copies are separate on
+purpose. Judges would leave most of these findings alone, for example helpers
+in extensions that are bundled on their own.
+
 **`same shape in other surroundings:`** — the same fragment nested differently
 somewhere else. **This is the most under-rated line in the report.** It is where
 a deduplicated version tends to already exist. On one real report, 115 copies of
@@ -395,11 +424,11 @@ it, because there is nothing to break. It will not suggest one that leaves more
 than two thirds of the tangle standing either. When every option fails that
 test, it says so and names the best it rejected.
 
-A type-only cut is **demoted, not banned**. A runtime edge wins any tie, because
-only a runtime cycle can fail at module-init time. But a type-only edge that
-breaks the cycle completely is still proposed, labelled `type-only`. Nothing
-changes at runtime when you take it. What changes is that a reader no longer
-has to understand both modules to understand either one.
+A type-only cut is **demoted, not banned**. If the tangle has a runtime cycle,
+a runtime edge wins any tie, because only a runtime cycle can fail at
+module-init time. If it has none, the type-only edge wins, because moving a
+props type is cheaper than moving a component. A type-only cut is labelled
+`type-only`.
 
 ### `leaves:`
 
