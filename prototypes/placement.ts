@@ -29,10 +29,14 @@ import { discoverConfigs, runReport } from "../src/run.js";
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 const dir = toPosix(resolve(process.argv[2] ?? "."));
 const outDir = process.argv[3];
+// THICKET_GRANULARITY=file places the cuts of file-level tangles. The default
+// module report proposes few cuts on large repositories.
+const granArg = process.env.THICKET_GRANULARITY ?? "auto";
+const granularity: "auto" | "file" | "dir" | number = /^\d+$/.test(granArg) ? Number(granArg) : (granArg as "auto" | "file" | "dir");
 
 // ---------------------------------------------------------------- inputs --
 
-const { json } = await runReport({ dir, cache: false });
+const { json } = await runReport({ dir, cache: false, granularity });
 const scan = { includeGenerated: false, bannerScan: true, exclude: [] as string[] };
 const discovery = await discoverConfigs(dir, { filter: [], workspaces: true, scan, warn: () => {} });
 const project = await openProject(discovery.configs, { ...scan, root: dir });
@@ -47,7 +51,7 @@ try {
     .map((abs) => toPosix(relative(project.root, abs)))
     .filter((d) => d !== ".." && !d.startsWith("../"));
   const moduleGraph = buildModuleGraph(project, {
-    granularity: "auto",
+    granularity,
     ...(wsDirs.length === 0
       ? {}
       : { workspaces: { dirs: wsDirs, repoFileCount: scanSourceFiles(project.root, scan).length } }),
