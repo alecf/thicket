@@ -480,6 +480,60 @@ Two smaller findings:
 - **The placeholder name `moved.ts`** drew complaints. Name the new file after
   the first declaration, or leave the name to the reader as extraction does.
 
+### The move search
+
+The prototype now searches moves, not edges. A candidate is one declaration
+that a tangle file imports from another, or every declaration on one edge,
+with its helpers. The second kind is what an edge cut moves. A move removes
+every edge whose imports all move. Candidates rank by the largest cycle left,
+then the largest runtime cycle left, then the lines moved. An import is
+erased when it says `import type`, or when it names an interface or a type
+alias. A re-export edge is kept unless the file only re-exports, because the
+adapter reports re-exports only for such files.
+
+| | Public 1 | Public 2 | Public 3 | Public 4 | All |
+|---|---|---|---|---|---|
+| File tangles | 40 | 40 | 40 | 40 | 160 |
+| Fixed by an edge cut | 30 | 37 | 28 | 34 | 129 |
+| Fixed by a move | 17 | 34 | 31 | 32 | 114 |
+| Only a move | 2 | 2 | 6 | 3 | 13 |
+| Only an edge cut | 15 | 5 | 3 | 5 | 28 |
+
+Where both have a placed move, they pick the same one 65 times in 95. On the
+cases round 4 judges flagged, the search picks the move the judge asked for:
+`GatewayClientLogger` (6 lines) where the edge cut moved 371, and
+`WorkflowContext` (5 lines) where it moved 40. It also refuses two cycles
+through recursive components, where judges said no move helps and the edge
+search proposed one. Most edge-only fixes cut through a barrel, which has no
+declaration to move.
+
+### Round 5: judging the move search, preregistered
+
+This section was committed before any judge saw a packet.
+
+**Pairwise.** The 30 tangles where the two searches move different code. A
+judge sees both fixes, in a hashed order, each with what moves and where.
+The judge picks the better fix, or says they are equal.
+
+**Destinations.** Every search move whose symbols differ from a round 4
+item, judged as in round 4 with the computed, vague and importer lines. The
+65 identical moves keep their round 4 ratings, because the same symbols get
+the same home.
+
+**Bar.** All must hold.
+
+1. Pairwise: judges prefer the search's fix in at least two thirds of the
+   items where they state a preference.
+2. Destinations, round 4 and round 5 ratings together: the computed home is
+   rated yes or acceptable at least 70% of the time, its yes rate beats the
+   vague line's by 15 points, and its good rate beats the importer's by 15.
+3. Refusals: on the round 4 items whose tangle the search leaves unfixed, the
+   computed home's good rate is below its rate on the rest. This checks that
+   the search refuses the weak fixes and not the strong ones.
+
+If all hold, the core's cut search becomes a move search, and the report
+gains a `move to:` line. If bar 1 misses, keep the edge search.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
