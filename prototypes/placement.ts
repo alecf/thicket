@@ -13,8 +13,9 @@
  * the code, for blind judging.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { SyntaxKind } from "typescript/ast";
+import { scanSourceFiles } from "../src/extract/scope.js";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { forEachChildSafe, safeText, walk } from "../src/extract/traverse.js";
 import type { FileHandle, Node } from "../src/extract/types.js";
@@ -38,7 +39,18 @@ const project = await openProject(discovery.configs, { ...scan, root: dir });
 try {
   const files = project.files();
   const byPath = new Map(files.map((f) => [f.path, f]));
-  const moduleGraph = buildModuleGraph(project, { granularity: "auto" });
+  // Group modules exactly as the report does: per workspace, sized by the
+  // files on disk. Without this, module-level cycle checks run on a different
+  // grouping from the one the report prints.
+  const wsDirs = discovery.workspaceDirs
+    .map((abs) => toPosix(relative(project.root, abs)))
+    .filter((d) => d !== ".." && !d.startsWith("../"));
+  const moduleGraph = buildModuleGraph(project, {
+    granularity: "auto",
+    ...(wsDirs.length === 0
+      ? {}
+      : { workspaces: { dirs: wsDirs, repoFileCount: scanSourceFiles(project.root, scan).length } }),
+  });
   if (moduleGraph.granularity !== json.granularity) {
     console.warn(`module granularity ${moduleGraph.granularity} differs from the report's ${json.granularity}`);
   }
@@ -454,6 +466,12 @@ try {
       const symbols = [...moved].sort(([a], [b]) => compareStrings(a, b)).map(([, v]) => v);
       const missing = symbols.filter((m) => !byPath.get(m.target) || !facts(byPath.get(m.target)!).decls.has(m.exported));
       console.log(`\n${cycle.id} cut ${cut.from} -> ${cut.to}: move ${symbols.map((m) => m.exported).join(", ")}`);
+      if (symbols.length === 0) {
+        // A side-effect import binds nothing, so there is nothing to move.
+        tallyCut.unresolved++;
+        console.log("  cannot place: the cut edge binds no symbols");
+        continue;
+      }
       if (missing.length > 0) {
         // A namespace import or a re-export: no one declaration to move.
         tallyCut.unresolved++;
