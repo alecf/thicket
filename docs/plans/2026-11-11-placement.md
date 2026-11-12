@@ -433,6 +433,53 @@ judge rates a fifth of the packets again.
 If the bar is met, the report gains a `move to:` line under each cut. If it is
 missed, the report names the helpers that must move and does not name a home.
 
+### Round 4 results
+
+Sonnet judges rated all 111 items. A second judge re-rated 3 packets: 54 of
+61 ratings matched exactly, and all 61 were within one point.
+
+| Line | Rated good | Rated yes |
+|---|---|---|
+| computed | 78/111 (70%) | 33/111 (30%) |
+| vague | 97/111 (87%) | 0/111 (0%) |
+| importer | 11/70 (16%) | 1/70 (1%) |
+
+All three bars are met. Bar 1 is met by 0.3 points, which is inside the noise.
+
+Split after the fact:
+
+| Items | Computed rated good |
+|---|---|
+| No helpers move | 54/64 (84%) |
+| Helpers move too | 24/47 (51%) |
+| Home is a user of the code | 66/83 (80%) |
+| Home is a file the code depends on | 6/18 (33%) |
+| Home is a new file | 3/6 (50%) |
+| Judge says the fix is worth doing | 48/56 (86%) |
+
+Most misses share one cause. The judge names a different, smaller move that
+breaks the cycle. Examples:
+
+- Two type-only edges point at `client.ts`. Both import one logger interface.
+  No single edge breaks the cycle, so thicket cuts the runtime edge and moves
+  a 400-line class. Moving the interface removes both type edges at once.
+- A 674-line model class moves to break an edge that one `Pick<>` crosses.
+- A component moves where one constant on another edge would do.
+
+The cut search scores edges one at a time, and a tie goes to the fewest
+files. It never asks how much code a cut moves. A move can remove several
+edges into one file at once, when they all import the same declaration. So
+the unit to search is a move: a declaration and its helpers. Its cost is the
+code it moves. The same search can break the large module tangles, where no
+single edge helps (option 2).
+
+Two smaller findings:
+
+- **Dependency homes are weak.** Judges rejected a vendored file, a generic
+  utility, and a file on another layer.
+- **The placeholder name `moved.ts`** drew complaints. Name the new file after
+  the first declaration, or leave the name to the reader as extraction does.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
