@@ -1,7 +1,7 @@
 // `ra` and `rb` are mutually dependent both ways: one edge is erased, the
-// other runs. Either cut breaks the cycle, so the tie is broken on which one
-// is real -- a crash at module init is a worse problem than a knot in the
-// type graph.
+// other runs. Either cut breaks the cycle. Erasing the types leaves no cycle,
+// so nothing can fail at module init, and the cheaper move wins: the type
+// goes, and the runtime import stays.
 import type { RbShape } from "../rb/index.js";
 import { rbValue } from "../rb/index.js";
 

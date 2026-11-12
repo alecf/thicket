@@ -424,11 +424,11 @@ it, because there is nothing to break. It will not suggest one that leaves more
 than two thirds of the tangle standing either. When every option fails that
 test, it says so and names the best it rejected.
 
-A type-only cut is **demoted, not banned**. A runtime edge wins any tie, because
-only a runtime cycle can fail at module-init time. But a type-only edge that
-breaks the cycle completely is still proposed, labelled `type-only`. Nothing
-changes at runtime when you take it. What changes is that a reader no longer
-has to understand both modules to understand either one.
+A type-only cut is **demoted, not banned**. If the tangle has a runtime cycle,
+a runtime edge wins any tie, because only a runtime cycle can fail at
+module-init time. If it has none, the type-only edge wins, because moving a
+props type is cheaper than moving a component. A type-only cut is labelled
+`type-only`.
 
 ### `leaves:`
 
