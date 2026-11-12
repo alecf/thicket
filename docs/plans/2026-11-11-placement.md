@@ -84,7 +84,7 @@ The prototype is `prototypes/placement.ts`. It works in four steps.
 
 | Item | Suggested home | Why |
 |---|---|---|
-| `orderTotal`, exact copies | `src/invoice/total.ts` | `orders/total.ts` already imports it. No new edge. |
+| `orderTotal`, exact copies | `src/invoice/total.ts` in round 1, new `src/shared.ts` in round 2 | The copies use nothing from `invoice/total.ts`, and the edge into it is in the 3-file ring. |
 | `orderTotal` and its renamed copies | new `src/shared.ts` | Every existing file would add a new module dependency, such as `cart → invoice`. |
 | `LineItem` and `CartLine` | new `src/shared.ts` | Either types file would make the other domain depend on it. |
 | Cut `invoice/total.ts → reports/rows.ts` | `formatMoney` moves to `src/invoice/total.ts`, its only user | The ring of 3 files is gone. |
@@ -211,6 +211,85 @@ findings, not a placement problem.
 Then judge again on the same 80 findings, and on 20 new findings per
 repository.
 
+### Round 2: after the five changes
+
+All five changes are in `prototypes/placement.ts`. A package is the nearest
+directory with a `package.json`. One package can import another when its
+`package.json` lists it or its files already import it. When copies span
+packages with no package they can all import, the suggestion is "a shared
+package is needed", and it names no file.
+
+The generated-file check found a gap in thicket itself. On Public 2, 1,355 of
+the 1,451 copies in printed findings were in `*.gen.ts` API clients. Those
+files carry no generator banner, so thicket analyzes them. The prototype now
+skips a finding when every copy is generated, which removed 24 of Public 2's
+49 findings. The report needs its own fix, which is outside this plan.
+
+143 findings were judged: 79 from round 1 and 64 new. A second judge re-rated
+29 of them, and 68 of 68 ratings agreed within one point.
+
+| Arm | Round 1 | Round 2 |
+|---|---|---|
+| Suggestion | 44 of 80 (55%) | 78 of 143 (55%) |
+| First copy | 20 of 79 (25%) | 33 of 143 (23%) |
+| First shared import | 25 of 44 (57%) | 36 of 69 (52%) |
+
+The suggestion still misses the 70% bar. It is 59% on the findings judges
+would extract. It ties the first shared import: 16 better, 10 tied, 15 worse.
+
+By kind of suggestion:
+
+| Suggested home | Yes or acceptable |
+|---|---|
+| A copy's own file | 14 of 32 |
+| A file the copies import and use | 22 of 36 |
+| A dependency | 4 of 13 |
+| A new file | 17 of 32, none rated yes |
+| No file: a shared package is needed | 20 of 29, none rated yes |
+| The common base class | 1 of 1 |
+
+The changes fixed what they targeted. New files went from 3 of 14 at a
+workspace root to 17 of 32 inside a package. What remains is not a graph
+problem. Judges want a new, purpose-named file beside the copies, in a
+directory such as `layouts-shared/` or `applied-filters/`. The prototype
+offers a file the code happens to import, such as `removable-chip.tsx` or a
+skeleton component, and judges call it unrelated. Choosing a home by meaning
+needs more than the import graph.
+
+#### The warning works where the suggestion does not
+
+The same judgments measure the opposite claim: that a home is wrong. Every
+rated home carries the prototype's verdict.
+
+| Home | Rated no |
+|---|---|
+| Flagged: it creates or grows a cycle | 35 of 38 (92%) |
+| Flagged: a user's package cannot import it | 63 of 72 (88%) |
+| Not flagged | 101 of 193 (52%) |
+
+The flag fires often. The first copy's own file, which is the obvious home, is
+flagged for 87 of 171 findings.
+
+Copies across packages with no shared package are also a ranking signal.
+Judges would leave 23 of the 29 findings that got "a shared package is
+needed". Often the copies are separate on purpose, such as extensions that are
+bundled on their own.
+
+#### Decision
+
+Phase 1 ships the warning, not the suggestion.
+
+- Under a finding, name the copies' own files that are unsafe, and say why:
+  `- **not in:** extensions/a/x.ts (creates a cycle with …)`.
+- When the copies span packages with no package they can all import, say
+  that, and name the packages.
+- Name a home only when it is the copies' common base class. That case was
+  rated yes once in one try, so it needs more data before it ships.
+- Test the package signal separately as a ranking input for duplication
+  findings. It belongs to the ranker's judged evaluation, not to this plan.
+
+Cuts are still untested. The four repositories proposed 1 cut in total.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
@@ -271,6 +350,10 @@ remove an edge.
 ## Phase 1: in the core
 
 Only if Phase 0 clears the bar.
+
+Round 2 changed the scope. The suggestion did not clear the bar, and the
+warning did. So steps 3 and 4 print what to avoid, as the round 2 decision
+says. They do not print a home. Steps 1, 2, 5, 6 and 7 stand as written.
 
 1. **Adapter.** Add `bindingsOf(file)`, which returns each import binding's
    local name, exported name, target and type-only flag. The data already
