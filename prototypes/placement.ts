@@ -155,11 +155,17 @@ try {
         return name ? [name] : [];
       }
       case SyntaxKind.VariableStatement: {
+        // Only the statement's own declarators. A walk also finds the locals
+        // inside a function body, and each one then looked like a top-level
+        // helper that the moved code needs.
         const names: string[] = [];
-        walk(stmt, (n) => {
-          if (n.kind !== SyntaxKind.VariableDeclaration) return;
-          const name = firstIdentifier(n);
-          if (name) names.push(name);
+        forEachChildSafe(stmt, (list) => {
+          if (list.kind !== SyntaxKind.VariableDeclarationList) return;
+          forEachChildSafe(list, (n) => {
+            if (n.kind !== SyntaxKind.VariableDeclaration) return;
+            const name = firstIdentifier(n);
+            if (name) names.push(name);
+          });
         });
         return names;
       }
@@ -682,7 +688,7 @@ try {
 
   // Every symbol crossing a cut moves together. Moving one of three leaves the
   // edge in place, and the edge is what the cut removes.
-  const tallyCut = { cuts: 0, safeBest: 0, freesBest: 0, unresolved: 0 };
+  const tallyCut = { cuts: 0, safeBest: 0, freesBest: 0, unresolved: 0, withHelpers: 0, withSharedHelpers: 0, maxHelpers: 0 };
   console.log("\n--- cuts ---");
   for (const cycle of json.cycles) {
     for (const cut of cycle.cuts) {
@@ -710,6 +716,47 @@ try {
         continue;
       }
       tallyCut.cuts++;
+      // A helper declared beside a moved symbol moves with it. Left behind,
+      // it makes the new home import the owner, and the cut edge comes back.
+      // When code that stays also uses the helper, the owner imports it from
+      // the new home. That adds no cycle, because the new home no longer
+      // imports the owner. Repeat until nothing changes, because a helper can
+      // have helpers of its own.
+      const helpers: string[] = [];
+      const sharedHelpers: string[] = [];
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const { target, exported } of [...symbols]) {
+          const owner = byPath.get(target)!;
+          const [s0, e0] = facts(owner).decls.get(exported)!;
+          for (const l of needs(owner, s0, e0).locals) {
+            if (symbols.some((m) => m.target === target && m.exported === l)) continue;
+            symbols.push({ target, exported: l });
+            helpers.push(`${target}#${l}`);
+            grew = true;
+          }
+        }
+      }
+      for (const h of helpers) {
+        const [target, l] = h.split("#") as [string, string];
+        const owner = byPath.get(target)!;
+        const [ls, le] = facts(owner).decls.get(l)!;
+        const usedByStayer = facts(owner).uses.some(
+          ([n, at]) =>
+            n === l &&
+            !(at >= ls && at < le) &&
+            !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
+        );
+        if (usedByStayer) sharedHelpers.push(h);
+      }
+      if (helpers.length) tallyCut.withHelpers++;
+      if (sharedHelpers.length) tallyCut.withSharedHelpers++;
+      symbols.sort((a, b) => compareStrings(a.target, b.target) || compareStrings(a.exported, b.exported));
+      helpers.sort(compareStrings);
+      sharedHelpers.sort(compareStrings);
+      tallyCut.maxHelpers = Math.max(tallyCut.maxHelpers, helpers.length);
+      if (helpers.length) console.log(`  helpers that move too: ${helpers.join(", ")}`);
+      if (sharedHelpers.length) console.log(`  of which code that stays also uses: ${sharedHelpers.join(", ")}`);
       const isMoved = (target: string, exported: string) =>
         symbols.some((m) => m.target === target && m.exported === exported);
       const users = new Set<string>();
@@ -763,6 +810,8 @@ try {
         id: cycle.id,
         cut: { from: cut.from, to: cut.to },
         symbols: symbols.map((m) => `${m.target}#${m.exported}`),
+        helpers,
+        sharedHelpers,
         users: userList,
         code: code.join("\n\n"),
         suggestion: best,
