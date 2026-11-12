@@ -362,6 +362,47 @@ repository root. When copies span packages, it prints `across packages:` or
 nothing. Neither line appears on findings in the test section, which no round
 judged.
 
+## Cuts at file granularity
+
+The module report proposed 1 cut across the four repositories. The tangles
+are there, but they are large. No single edge leaves less than two thirds of
+them standing. With `--granularity file`, each report reaches the 40-tangle
+cap, and 129 of those 160 tangles have a cut.
+`THICKET_GRANULARITY=file` runs the prototype on them.
+
+### The tie rule picked the wrong edge
+
+51 of the 129 cuts were on tangles with no runtime cycle. In each, the
+chooser cut a runtime edge, because a runtime edge won every tie. The usual
+shape is a parent that imports a child component, and a child that imports a
+props type back. So the move line said to move the child component. Its best
+home was the file it was already in.
+
+The fix is in `suggestCuts`. A runtime edge wins a tie only when the tangle
+has a runtime cycle. Otherwise the type-only edge wins. After the fix, 5 cuts
+on such tangles still cut a runtime edge. In each, several type-only edges
+close the cycle, so one runtime edge breaks more of it.
+
+### Helpers decide whether a move frees the cycle
+
+| | Public 1 | Public 2 | Public 3 | Public 4 | All |
+|---|---|---|---|---|---|
+| Cuts | 30 | 37 | 28 | 34 | 129 |
+| Cannot be placed | 13 | 1 | 4 | 0 | 18 |
+| Placed | 17 | 36 | 24 | 34 | 111 |
+| Best home frees the cycle, before the fix | | | | | 43 of 108 |
+| Best home frees the cycle, after the fix | 8 | 22 | 8 | 21 | 59 |
+| Does not free it, and needs a helper beside it | 9 | 14 | 16 | 13 | 52 |
+
+Every placed cut that does not free its cycle moves a symbol that uses a
+helper declared beside it. No cut that frees its cycle needs one. The
+prototype moves the named symbols and leaves the helpers. So the new home
+imports the old file, and the edge it was meant to remove comes back.
+
+For a cut, the helpers must move too, unless something else in the old file
+uses them. That is the next prototype change. Judging the move lines waits
+for it. Most cuts that cannot be placed go through a barrel `index.ts`.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
