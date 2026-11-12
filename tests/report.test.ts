@@ -445,6 +445,32 @@ describe("renderMarkdown", () => {
     });
     expect(out).not.toContain("do not extract into");
     expect(out).not.toContain("across packages");
+    expect(out).not.toContain("extract into:");
+  });
+
+  it("names the directory for a new file, after the homes to avoid", () => {
+    const out = renderMarkdown({
+      ...base,
+      duplication: [
+        {
+          ...ranked("THK-DUP-1"),
+          context: {
+            sharedImports: [],
+            dependents: deps(1),
+            placement: {
+              avoid: [{ file: "src/a/x.ts", reason: { kind: "cycle", with: "src/a/y.ts" } }],
+              packages: [""],
+              newFileDir: "src/a",
+              checked: 2,
+              files: 2,
+            },
+          },
+        },
+      ],
+      totalFindings: 1,
+    });
+    expect(out).toContain("- **extract into:** a new file under `src/a/`, with a name of your choosing");
+    expect(out.indexOf("do not extract into")).toBeLessThan(out.indexOf("- **extract into:**"));
   });
 
   it("says nothing about shared imports when the copies share none", () => {

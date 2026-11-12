@@ -195,6 +195,8 @@ export interface ReportJson {
      * See `placementOf`. Absent with `--no-placement`.
      */
     avoid?: Placement["avoid"];
+    /** Where a new file for the shared version belongs, when the copies share one package. */
+    newFileDir?: string;
   }[];
   cycles: CycleFinding[];
   /** Candidates found, before the per-section cap or the token budget. */
@@ -864,7 +866,11 @@ export async function runReport(
       const copyFiles = [...new Set(r.cluster.occurrences.map((o) => o.filePath))];
       const context = {
         ...findingContext(copyFiles, importIndex, files.length),
-        ...(placement && copyFiles.length > 1 ? { placement: placementOf(copyFiles, homeGraph()) } : {}),
+        // Not for tests: nothing imports a test file, and the judged runs
+        // covered production and type findings only.
+        ...(placement && copyFiles.length > 1 && !isTestMajority(r.cluster)
+          ? { placement: placementOf(copyFiles, homeGraph()) }
+          : {}),
       };
       if (text === undefined) return { ...r, context };
       return {
@@ -1019,6 +1025,7 @@ export async function runReport(
       ...(r.context?.placement && r.context.placement.avoid.length > 0
         ? { avoid: r.context.placement.avoid }
         : {}),
+      ...(r.context?.placement?.newFileDir === undefined ? {} : { newFileDir: r.context.placement.newFileDir }),
     });
 
     return {

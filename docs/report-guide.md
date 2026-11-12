@@ -226,9 +226,16 @@ version. Each comes with the reason:
   `package.json` does not depend on the file's package.
 
 A file that is not named is not a recommendation. thicket cannot tell which
-home fits the code's meaning. Blind judges rated its own picks right only 55%
-of the time, but they rated 88% of the homes this line names as wrong.
+existing file fits the code's meaning. Blind judges rated its own picks right
+only 55% of the time, but they rated 88% of the homes this line names as wrong.
 `--no-placement` turns the line off.
+
+**`extract into:`** — the directory where a new file for the shared version
+belongs, with the name left to you. It is the deepest directory that holds
+every copy. It appears only when every copy is in one package, and never for
+the repository root. Blind judges rated it right 56 times in 56 in that case.
+Judges also preferred it to a vague "a shared location of your choosing" and
+to an unrelated directory. Pick a name for what the code does.
 
 **`across packages:`** — every copy sits in a package the others cannot
 import, so no copy's file can hold the shared version. A shared version needs

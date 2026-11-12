@@ -822,6 +822,13 @@ function contextLines(r: Ranked): string[] {
 
   const placement = placementLine(context.placement);
   if (placement !== undefined) lines.push(placement);
+  // The directory for a new file. Judged right 56 times in 56 when the copies
+  // share one package, which is the only case `placementOf` sets it for.
+  if (context.placement?.newFileDir !== undefined) {
+    lines.push(
+      `- **extract into:** a new file under \`${context.placement.newFileDir}/\`, with a name of your choosing`,
+    );
+  }
 
   // Before the near-variant links: what varies inside THIS finding decides
   // the shape of the abstraction, and the links decide its scope.

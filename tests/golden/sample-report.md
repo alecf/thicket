@@ -23,6 +23,7 @@ thicket 0.1.0 · config 7434eb66 · 4 files / 56 LOC · granularity: file (4 mod
 
 L1 · `FunctionDeclaration`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts
@@ -42,6 +43,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 
 L0 · `Block`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts

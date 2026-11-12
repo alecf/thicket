@@ -117,4 +117,34 @@ describe("placementOf", () => {
     expect(p.avoid.map((a) => a.file)).toEqual(ORDERING_PROBE.slice(1));
     for (const a of p.avoid) expect(a.reason).toEqual({ kind: "cycle", with: ORDERING_PROBE[0] });
   });
+
+  it("names the copies' deepest common directory when they share one package", () => {
+    // Judged in round 3: when every copy sits in one package, a new file
+    // under this directory was rated right 56 times in 56.
+    const g = graphOf({
+      imports: { "src/a/x/one.ts": [], "src/a/y/two.ts": [], "src/a/three.ts": [] },
+    });
+    expect(placementOf(["src/a/x/one.ts", "src/a/y/two.ts", "src/a/three.ts"], g).newFileDir).toBe("src/a");
+  });
+
+  it("names no directory when the copies span packages", () => {
+    // A host package picked from the graph was rated right 38% of the time.
+    const g = graphOf({
+      imports: { "packages/app/a.ts": [], "packages/lib/b.ts": [] },
+      manifests: { "packages/app": { name: "app", deps: ["lib"] }, "packages/lib": { name: "lib", deps: [] } },
+    });
+    expect(placementOf(["packages/app/a.ts", "packages/lib/b.ts"], g).newFileDir).toBeUndefined();
+  });
+
+  it("names no directory when the only common one is the repository root", () => {
+    const g = graphOf({ imports: { "src/a.ts": [], "tools/b.ts": [] } });
+    expect(placementOf(["src/a.ts", "tools/b.ts"], g).newFileDir).toBeUndefined();
+  });
+
+  it("does not stop at a directory name that is only a common prefix", () => {
+    // `src/ab` and `src/ac` share the characters `src/a`, not a directory.
+    const g = graphOf({ imports: { "src/ab/x.ts": [], "src/ac/y.ts": [] } });
+    expect(placementOf(["src/ab/x.ts", "src/ac/y.ts"], g).newFileDir).toBe("src");
+  });
 });
+

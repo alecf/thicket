@@ -323,6 +323,45 @@ The bar, set before judging:
 
 If it misses any of the three, the report keeps only `do not extract into:`.
 
+#### Results
+
+101 findings were judged, with an unrelated control on 76 of them. A second
+judge re-rated 19 findings, and 56 of 57 ratings agreed exactly.
+
+| Line | Yes or acceptable | Yes |
+|---|---|---|
+| Computed directory | 73 of 101 (72%) | 45 of 101 (45%) |
+| Vague | 101 of 101 (100%) | 2 of 101 (2%) |
+| Unrelated directory | 1 of 76 (1%) | 1 of 76 (1%) |
+
+All three bars are met: 72% against 70, 43 points over the vague line on
+`yes`, and 70 points over the unrelated directory. The vague line scored
+exactly as a true but empty claim should: acceptable every time, and almost
+never `yes`.
+
+The failures share one cause. Split by where the directory came from:
+
+| Directory | Yes or acceptable | Yes |
+|---|---|---|
+| Copies in one package: their deepest common directory | 56 of 56 (100%) | 38 of 56 (68%) |
+| Copies across packages: a host package picked from the graph | 17 of 45 (38%) | 7 of 45 (16%) |
+
+A host package is often the wrong kind of package. Judges rejected a types
+package for runtime code, a constants package for functions, a data package
+for a React component, and a server app for a shared type.
+
+This split was found after the bar was set, so it is not preregistered. It
+only removes the weak case, so the line that ships is narrower than the line
+that passed.
+
+#### Decision
+
+The report prints `extract into: a new file under <dir>/, with a name of your
+choosing` only when every copy is in one package, and never for the
+repository root. When copies span packages, it prints `across packages:` or
+nothing. Neither line appears on findings in the test section, which no round
+judged.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:

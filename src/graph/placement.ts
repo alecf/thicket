@@ -38,6 +38,18 @@ export interface Placement {
   avoid: AvoidHome[];
   /** The distinct packages the copies sit in, sorted. */
   packages: string[];
+  /**
+   * Where a new file for the shared version belongs: the deepest directory
+   * holding every copy. Set only when the copies share one package and that
+   * directory is not the repository root.
+   *
+   * Round 3 judged this line against a vague "a shared location of your
+   * choosing" and a safe but unrelated directory. With the copies in one
+   * package it was rated right 56 times in 56, and `yes` 68% of the time.
+   * When the copies spanned packages, a host package picked from the graph
+   * was right 38% of the time, so none is named.
+   */
+  newFileDir?: string;
   /** How many copy files were checked, and how many there are. */
   checked: number;
   files: number;
@@ -215,5 +227,24 @@ export function placementOf(
     if (blocked !== undefined) avoid.push({ file: home, reason: { kind: "package", from: blocked } });
   }
 
-  return { avoid, packages, checked: homes.length, files: files.length };
+  const dir = packages.length === 1 ? commonDir(files) : "";
+  return {
+    avoid,
+    packages,
+    ...(dir === "" ? {} : { newFileDir: dir }),
+    checked: homes.length,
+    files: files.length,
+  };
+}
+
+/** The deepest directory holding every path, by whole segments. "" is the root. */
+function commonDir(paths: readonly string[]): string {
+  const dirs = paths.map((p) => p.split("/").slice(0, -1));
+  let common = dirs[0] ?? [];
+  for (const d of dirs.slice(1)) {
+    let i = 0;
+    while (i < common.length && i < d.length && common[i] === d[i]) i++;
+    common = common.slice(0, i);
+  }
+  return common.join("/");
 }

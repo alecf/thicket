@@ -204,7 +204,7 @@ bun run thicket diff before.json after.json
 | `--no-near` | Stop adding near copies to a finding. By default a finding also lists fragments of nearly the same shape, and a smaller finding of nearly the same shape is folded into the larger one. |
 | `--include-call-sites` | Also report clusters that are only repeated calls to shared code. thicket leaves these out by default: when the whole fragment is one call, nothing shorter can replace it, so the extraction removes no line. |
 | `--no-file-conventions` | Stop ranking down a shape that is declared once per file across files of one role, such as one `meta` per `*.stories.tsx`. thicket reads those as a framework's API rather than as duplication, because deleting a copy deletes a story. |
-| `--no-placement` | Stop naming the copies' files that must not hold a finding's shared version. By default thicket names a copy's file when the other copies importing it would close an import cycle, or when another copy's package cannot import it. |
+| `--no-placement` | Stop saying where a finding's shared version should go. By default thicket names a copy's file when the other copies importing it would close an import cycle, or when another copy's package cannot import it. When every copy is in one package, it also names the directory for a new file. |
 | `--exclude <glob>` | Skip files matching this glob. **Repeatable.** This is your instruction, not a guess, so `--include-generated` does not cancel it. |
 | `--types <mode>` | Whether to analyze type declarations and type-only imports: `include` (default), `exclude`, or `only`. |
 | `--embed` | Put the field guide at the end of the report instead of linking to it. The report then needs no network access. The guide counts against `--budget-tokens`, and a budget too small to hold it is refused. |
@@ -263,6 +263,7 @@ thicket 0.1.0 · config 7434eb66 · 4 files / 56 LOC · granularity: file (4 mod
 
 L1 · `FunctionDeclaration`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts
@@ -282,6 +283,7 @@ export function normalizeAlpha(points: Point[]): Point[] {
 
 L0 · `Block`
 
+- **extract into:** a new file under `src/`, with a name of your choosing
 - **directly imported by:** 1 file outside the cluster
 
 ```ts
