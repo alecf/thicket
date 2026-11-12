@@ -71,6 +71,8 @@ try {
   interface FileFacts {
     /** True when every top-level declaration is an interface or a type alias. */
     typesOnly: boolean;
+    /** Names declared by an interface or a type alias. Importing one is erased. */
+    typeNames: Set<string>;
     bindings: Binding[];
     /** Top-level declarations: name -> [start, end). */
     decls: Map<string, [number, number]>;
@@ -94,6 +96,7 @@ try {
     const bindings: Binding[] = [];
     const decls = new Map<string, [number, number]>();
     const uses: [string, number][] = [];
+    const typeNames = new Set<string>();
     let runtimeDecls = 0;
     let typeDecls = 0;
     const sf = file.sourceFile;
@@ -133,13 +136,16 @@ try {
         return;
       }
       for (const name of declaredNames(stmt)) decls.set(name, [stmt.getStart(), stmt.getEnd()]);
-      if (stmt.kind === SyntaxKind.InterfaceDeclaration || stmt.kind === SyntaxKind.TypeAliasDeclaration) typeDecls++;
+      if (stmt.kind === SyntaxKind.InterfaceDeclaration || stmt.kind === SyntaxKind.TypeAliasDeclaration) {
+        typeDecls++;
+        for (const name of declaredNames(stmt)) typeNames.add(name);
+      }
       else if (stmt.kind !== SyntaxKind.ExportDeclaration && stmt.kind !== SyntaxKind.EndOfFile) runtimeDecls++;
       walk(stmt, (n) => {
         if (n.kind === SyntaxKind.Identifier) uses.push([safeText(n), n.getStart()]);
       });
     });
-    const out = { typesOnly: typeDecls > 0 && runtimeDecls === 0, bindings, decls, uses };
+    const out = { typesOnly: typeDecls > 0 && runtimeDecls === 0, typeNames, bindings, decls, uses };
     factsCache.set(file.path, out);
     return out;
   }
@@ -684,6 +690,277 @@ try {
     });
   }
 
+  // ------------------------------------------------------------ moving code --
+
+  type Sym = { target: string; exported: string };
+
+  /**
+   * Add every helper the symbols use from beside them, until nothing changes.
+   * A helper left behind makes the new home import the owner, and the edge
+   * the move was meant to remove comes back. Returns the helpers added.
+   */
+  function closeOver(symbols: Sym[]): string[] {
+    const helpers: string[] = [];
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const { target, exported } of [...symbols]) {
+        const owner = byPath.get(target)!;
+        const [s0, e0] = facts(owner).decls.get(exported)!;
+        for (const l of needs(owner, s0, e0).locals) {
+          if (symbols.some((m) => m.target === target && m.exported === l)) continue;
+          symbols.push({ target, exported: l });
+          helpers.push(`${target}#${l}`);
+          grew = true;
+        }
+      }
+    }
+    symbols.sort((a, b) => compareStrings(a.target, b.target) || compareStrings(a.exported, b.exported));
+    return helpers.sort(compareStrings);
+  }
+
+  /** Lines of code the symbols span. */
+  function linesOf(symbols: Sym[]): number {
+    let n = 0;
+    for (const { target, exported } of symbols) {
+      const file = byPath.get(target)!;
+      const [a, b] = facts(file).decls.get(exported)!;
+      n += file.sourceFile.text.slice(a, b).split("\n").length;
+    }
+    return n;
+  }
+
+  /** Close over the helpers, find a home, print it, and record a sample. */
+  function placeMove(
+    symbols: Sym[],
+    meta: Record<string, unknown>,
+    tallyCut: { safeBest: number; freesBest: number; withHelpers: number; withSharedHelpers: number; maxHelpers: number },
+  ) {
+    const seedNames = symbols.map((m) => m.exported);
+    // When code that stays also uses a helper, the owner imports it from the
+    // new home. That adds no cycle, because the new home no longer imports
+    // the owner.
+    const helpers = closeOver(symbols);
+    const sharedHelpers: string[] = [];
+    for (const h of helpers) {
+      const [target, l] = h.split("#") as [string, string];
+      const owner = byPath.get(target)!;
+      const [ls, le] = facts(owner).decls.get(l)!;
+      const usedByStayer = facts(owner).uses.some(
+        ([n, at]) =>
+          n === l &&
+          !(at >= ls && at < le) &&
+          !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
+      );
+      if (usedByStayer) sharedHelpers.push(h);
+    }
+    if (helpers.length) tallyCut.withHelpers++;
+    if (sharedHelpers.length) tallyCut.withSharedHelpers++;
+    sharedHelpers.sort(compareStrings);
+    tallyCut.maxHelpers = Math.max(tallyCut.maxHelpers, helpers.length);
+    if (helpers.length) console.log(`  helpers that move too: ${helpers.join(", ")}`);
+    if (sharedHelpers.length) console.log(`  of which code that stays also uses: ${sharedHelpers.join(", ")}`);
+    const isMoved = (target: string, exported: string) =>
+      symbols.some((m) => m.target === target && m.exported === exported);
+    const users = new Set<string>();
+    const deps = new Set<string>();
+    const besides: string[] = [];
+    const code: string[] = [];
+    for (const { target, exported } of symbols) {
+      const owner = byPath.get(target)!;
+      const span = facts(owner).decls.get(exported)!;
+      for (const f of files) {
+        if (facts(f).bindings.some((b) => b.target === target && b.exported === exported)) users.add(f.path);
+      }
+      // The owner is a user too when it still calls the symbol after the move.
+      const elsewhere = facts(owner).uses.some(
+        ([n, at]) => n === exported && (at < span[0] || at >= span[1]) && !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
+      );
+      if (elsewhere) users.add(target);
+      const n = needs(owner, span[0], span[1]);
+      for (const b of n.imports) deps.add(b.target);
+      // A helper that stays beside the symbol means the new home imports the owner.
+      const stays = n.locals.filter((l) => !isMoved(target, l));
+      if (stays.length > 0) {
+        deps.add(target);
+        besides.push(...stays.map((l) => `${target}#${l}`));
+      }
+      code.push(excerpt(owner, span[0], span[1]));
+    }
+    const dropped: [string, string][] = [];
+    for (const u of users) {
+      for (const owner of new Set(symbols.map((m) => m.target))) {
+        if (u === owner) continue;
+        const all = facts(byPath.get(u)!).bindings.filter((b) => b.target === owner);
+        if (all.length > 0 && all.every((b) => isMoved(owner, b.exported))) dropped.push([u, owner]);
+      }
+    }
+    // Named after the first declaration the move was asked for.
+    const name = seedNames[0]!;
+    const isType = symbols.every((m) => facts(byPath.get(m.target)!).typesOnly);
+    const userList = [...users].sort(compareStrings);
+    const depList = [...deps].sort(compareStrings);
+    const { verdicts } = place(userList, depList, dropped, name, isType);
+    const best = verdicts[0]!;
+    const importer = userList.find((u) => !symbols.some((m) => m.target === u));
+    if (safe(best)) tallyCut.safeBest++;
+    if (best.frees.module > 0 || best.frees.file > 0) tallyCut.freesBest++;
+    console.log(`  used by: ${userList.join(", ")}`);
+    if (besides.length) console.log(`  needs beside it: ${besides.join(", ")}`);
+    console.log(`  best:  ${describe(best)}`);
+    for (const v of verdicts.slice(1, 3)) console.log(`  then:  ${describe(v)}`);
+    samples.push({
+      ...meta,
+      symbols: symbols.map((m) => `${m.target}#${m.exported}`),
+      helpers,
+      sharedHelpers,
+      users: userList,
+      code: code.join("\n\n"),
+      suggestion: best,
+      controls: {
+        importer: importer ? verdictFor(importer, "user", userList, depList, dropped, isType) : undefined,
+      },
+      alternatives: verdicts.slice(1, 6),
+    });
+    return best;
+  }
+
+
+  // ----------------------------------------------------------- move search --
+
+  // The cut search scores one edge at a time. A move can remove several
+  // edges into one file at once, when they all import the same declaration.
+  // So this search tries moves: a declaration that a file in the tangle
+  // imports, with its helpers. Its cost is the code it moves.
+
+  /** An import of a type is erased, whether or not it says `import type`. */
+  const erased = (b: Binding) => b.typeOnly || facts(byPath.get(b.target)!).typeNames.has(b.exported);
+
+  type Graph = Map<string, Map<string, boolean>>; // from -> to -> runtime
+  function largest(nodes: string[], g: Graph, runtimeOnly: boolean): number {
+    const adj = new Map<string, string[]>();
+    for (const [from, tos] of g) {
+      adj.set(from, [...tos].filter(([, rt]) => rt || !runtimeOnly).map(([t]) => t).sort(compareStrings));
+    }
+    return stronglyConnected([...nodes].sort(compareStrings), adj).reduce((m, c) => Math.max(m, c.length), 0);
+  }
+
+  function tangleGraph(tangle: string[]): Graph {
+    const inT = new Set(tangle);
+    const g: Graph = new Map();
+    for (const x of tangle) {
+      const tos = new Map<string, boolean>();
+      for (const to of fileEdges.get(x) ?? []) {
+        if (!inT.has(to) || to === x) continue;
+        const bs = facts(byPath.get(x)!).bindings.filter((b) => b.target === to);
+        // No bindings: a re-export or a side-effect import, which runs.
+        tos.set(to, bs.length === 0 || bs.some((b) => !erased(b)));
+      }
+      g.set(x, tos);
+    }
+    return g;
+  }
+
+  /** The tangle's graph after `symbols` leave `owner` for a new file. */
+  function afterMove(tangle: string[], base: Graph, owner: string, symbols: Sym[]): { g: Graph; nodes: string[] } {
+    const H = `${owner}#moved`;
+    const moved = new Set(symbols.map((m) => m.exported));
+    const g: Graph = new Map([...base].map(([k, v]) => [k, new Map(v)]));
+    const h = new Map<string, boolean>();
+    g.set(H, h);
+    for (const x of tangle) {
+      if (x === owner || !g.get(x)!.has(owner)) continue;
+      const bs = facts(byPath.get(x)!).bindings.filter((b) => b.target === owner);
+      const go = bs.filter((b) => moved.has(b.exported));
+      if (go.length === 0) continue;
+      const stay = bs.filter((b) => !moved.has(b.exported));
+      g.get(x)!.set(H, go.some((b) => !erased(b)));
+      // A re-export from the owner has no binding, so `bs` cannot see it.
+      // Keep the edge unless every import from the owner left.
+      const reexports = project.reexportsOf(byPath.get(x)!).some((r) => r === owner);
+      if (stay.length === 0 && !reexports) g.get(x)!.delete(owner);
+      else g.get(x)!.set(owner, stay.some((b) => !erased(b)) || reexports);
+    }
+    const ownerFile = byPath.get(owner)!;
+    const of = facts(ownerFile);
+    const spans = symbols.map((m) => of.decls.get(m.exported)!);
+    const inMoved = (at: number) => spans.some(([a, b]) => at >= a && at < b);
+    for (const [a, b] of spans) {
+      for (const bind of needs(ownerFile, a, b).imports) {
+        if (!g.has(bind.target) || bind.target === H) continue;
+        const rt = !erased(bind);
+        h.set(bind.target, (h.get(bind.target) ?? false) || rt);
+      }
+    }
+    // The owner imports the new file when code that stays uses what moved.
+    const stays = of.uses.filter(([n, at]) => moved.has(n) && !inMoved(at));
+    if (stays.length > 0) g.get(owner)!.set(H, stays.some(([n]) => !of.typeNames.has(n)));
+    return { g, nodes: [...tangle, H] };
+  }
+
+  interface MoveChoice {
+    owner: string;
+    seeds: string[];
+    symbols: Sym[];
+    lines: number;
+    residual: number;
+    runtimeResidual: number;
+  }
+
+  function searchMoves(tangle: string[]): { best?: MoveChoice; tried: number } {
+    const inT = new Set(tangle);
+    const base = tangleGraph(tangle);
+    const start = tangle.length;
+    // Seeds: each declaration a tangle file imports from another, alone, and
+    // every declaration on one edge together. The second is what a cut moves,
+    // so this search cannot do worse than the cut search.
+    const seeds = new Map<string, { owner: string; names: string[] }>();
+    const addSeed = (owner: string, names: string[]) => {
+      const of = facts(byPath.get(owner)!);
+      if (names.length === 0 || !names.every((n) => of.decls.has(n))) return;
+      const sorted = [...new Set(names)].sort(compareStrings);
+      seeds.set(`${owner}#${sorted.join(",")}`, { owner, names: sorted });
+    };
+    for (const x of [...tangle].sort(compareStrings)) {
+      const byTarget = new Map<string, string[]>();
+      for (const b of facts(byPath.get(x)!).bindings) {
+        if (!inT.has(b.target) || b.target === x) continue;
+        addSeed(b.target, [b.exported]);
+        byTarget.set(b.target, [...(byTarget.get(b.target) ?? []), b.exported]);
+      }
+      for (const [t, names] of byTarget) addSeed(t, names);
+    }
+    const seen = new Set<string>();
+    let best: MoveChoice | undefined;
+    let tried = 0;
+    for (const [, { owner, names }] of [...seeds].sort(([a], [b]) => compareStrings(a, b))) {
+      const symbols: Sym[] = names.map((n) => ({ target: owner, exported: n }));
+      closeOver(symbols);
+      const key = `${owner}#${symbols.map((m) => m.exported).join(",")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tried++;
+      const { g, nodes } = afterMove(tangle, base, owner, symbols);
+      const residual = largest(nodes, g, false);
+      if (residual >= start) continue;
+      if (residual > 1 && residual > start * (2 / 3)) continue;
+      const choice: MoveChoice = {
+        owner,
+        seeds: names,
+        symbols,
+        lines: linesOf(symbols),
+        residual,
+        runtimeResidual: largest(nodes, g, true),
+      };
+      const better =
+        best === undefined ||
+        choice.residual - best.residual ||
+        choice.runtimeResidual - best.runtimeResidual ||
+        choice.lines - best.lines;
+      if (best === undefined || (typeof better === "number" && better < 0)) best = choice;
+    }
+    return { best, tried };
+  }
+
   // ------------------------------------------------------------ moved cuts --
 
   // Every symbol crossing a cut moves together. Moving one of three leaves the
@@ -716,115 +993,71 @@ try {
         continue;
       }
       tallyCut.cuts++;
-      // A helper declared beside a moved symbol moves with it. Left behind,
-      // it makes the new home import the owner, and the cut edge comes back.
-      // When code that stays also uses the helper, the owner imports it from
-      // the new home. That adds no cycle, because the new home no longer
-      // imports the owner. Repeat until nothing changes, because a helper can
-      // have helpers of its own.
-      const helpers: string[] = [];
-      const sharedHelpers: string[] = [];
-      for (let grew = true; grew; ) {
-        grew = false;
-        for (const { target, exported } of [...symbols]) {
-          const owner = byPath.get(target)!;
-          const [s0, e0] = facts(owner).decls.get(exported)!;
-          for (const l of needs(owner, s0, e0).locals) {
-            if (symbols.some((m) => m.target === target && m.exported === l)) continue;
-            symbols.push({ target, exported: l });
-            helpers.push(`${target}#${l}`);
-            grew = true;
-          }
-        }
-      }
-      for (const h of helpers) {
-        const [target, l] = h.split("#") as [string, string];
-        const owner = byPath.get(target)!;
-        const [ls, le] = facts(owner).decls.get(l)!;
-        const usedByStayer = facts(owner).uses.some(
-          ([n, at]) =>
-            n === l &&
-            !(at >= ls && at < le) &&
-            !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
-        );
-        if (usedByStayer) sharedHelpers.push(h);
-      }
-      if (helpers.length) tallyCut.withHelpers++;
-      if (sharedHelpers.length) tallyCut.withSharedHelpers++;
-      symbols.sort((a, b) => compareStrings(a.target, b.target) || compareStrings(a.exported, b.exported));
-      helpers.sort(compareStrings);
-      sharedHelpers.sort(compareStrings);
-      tallyCut.maxHelpers = Math.max(tallyCut.maxHelpers, helpers.length);
-      if (helpers.length) console.log(`  helpers that move too: ${helpers.join(", ")}`);
-      if (sharedHelpers.length) console.log(`  of which code that stays also uses: ${sharedHelpers.join(", ")}`);
-      const isMoved = (target: string, exported: string) =>
-        symbols.some((m) => m.target === target && m.exported === exported);
-      const users = new Set<string>();
-      const deps = new Set<string>();
-      const besides: string[] = [];
-      const code: string[] = [];
-      for (const { target, exported } of symbols) {
-        const owner = byPath.get(target)!;
-        const span = facts(owner).decls.get(exported)!;
-        for (const f of files) {
-          if (facts(f).bindings.some((b) => b.target === target && b.exported === exported)) users.add(f.path);
-        }
-        // The owner is a user too when it still calls the symbol after the move.
-        const elsewhere = facts(owner).uses.some(
-          ([n, at]) => n === exported && (at < span[0] || at >= span[1]) && !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
-        );
-        if (elsewhere) users.add(target);
-        const n = needs(owner, span[0], span[1]);
-        for (const b of n.imports) deps.add(b.target);
-        // A helper that stays beside the symbol means the new home imports the owner.
-        const stays = n.locals.filter((l) => !isMoved(target, l));
-        if (stays.length > 0) {
-          deps.add(target);
-          besides.push(...stays.map((l) => `${target}#${l}`));
-        }
-        code.push(excerpt(owner, span[0], span[1]));
-      }
-      const dropped: [string, string][] = [];
-      for (const u of users) {
-        for (const owner of new Set(symbols.map((m) => m.target))) {
-          if (u === owner) continue;
-          const all = facts(byPath.get(u)!).bindings.filter((b) => b.target === owner);
-          if (all.length > 0 && all.every((b) => isMoved(owner, b.exported))) dropped.push([u, owner]);
-        }
-      }
-      const name = symbols.length === 1 ? symbols[0]!.exported : "moved";
-      const isType = symbols.every((m) => facts(byPath.get(m.target)!).typesOnly);
-      const userList = [...users].sort(compareStrings);
-      const depList = [...deps].sort(compareStrings);
-      const { verdicts } = place(userList, depList, dropped, name, isType);
-      const best = verdicts[0]!;
-      const importer = userList.find((u) => !symbols.some((m) => m.target === u));
-      if (safe(best)) tallyCut.safeBest++;
-      if (best.frees.module > 0 || best.frees.file > 0) tallyCut.freesBest++;
-      console.log(`  used by: ${userList.join(", ")}`);
-      if (besides.length) console.log(`  needs beside it: ${besides.join(", ")}`);
-      console.log(`  best:  ${describe(best)}`);
-      for (const v of verdicts.slice(1, 3)) console.log(`  then:  ${describe(v)}`);
-      samples.push({
-        type: "move",
-        id: cycle.id,
-        cut: { from: cut.from, to: cut.to },
-        symbols: symbols.map((m) => `${m.target}#${m.exported}`),
-        helpers,
-        sharedHelpers,
-        users: userList,
-        code: code.join("\n\n"),
-        suggestion: best,
-        controls: {
-          importer: importer ? verdictFor(importer, "user", userList, depList, dropped, isType) : undefined,
-        },
-        alternatives: verdicts.slice(1, 6),
-      });
+      placeMove(symbols, { type: "move", id: cycle.id, cut: { from: cut.from, to: cut.to } }, tallyCut);
     }
   }
 
+
+  // Run the move search on every tangle, beside the cut search.
+  const tallySearch = { tangles: 0, edgeCut: 0, moveFix: 0, onlyMove: 0, onlyEdge: 0, smallerResidual: 0, fewerLines: 0, safeBest: 0, freesBest: 0, withHelpers: 0, withSharedHelpers: 0, maxHelpers: 0 };
+  const searchRows: string[] = [];
+  console.log("\n--- move search ---");
+  for (const cycle of json.cycles) {
+    const tangle = cycle.modules.filter((p) => byPath.has(p));
+    if (tangle.length !== cycle.modules.length) continue; // module granularity: not handled yet
+    tallySearch.tangles++;
+    const { best, tried } = searchMoves(tangle);
+    const cut = cycle.cuts[0];
+    let cutLines: number | undefined;
+    if (cut) {
+      tallySearch.edgeCut++;
+      const syms: Sym[] = [];
+      for (const p of cut.files) {
+        for (const b of facts(byPath.get(p)!).bindings) {
+          if (b.target !== cut.to) continue;
+          if (!facts(byPath.get(b.target)!).decls.has(b.exported)) continue;
+          if (!syms.some((m) => m.exported === b.exported)) syms.push({ target: b.target, exported: b.exported });
+        }
+      }
+      if (syms.length) {
+        closeOver(syms);
+        cutLines = linesOf(syms);
+      }
+    }
+    if (best) tallySearch.moveFix++;
+    if (best && !cut) tallySearch.onlyMove++;
+    if (!best && cut) tallySearch.onlyEdge++;
+    if (best && cut && best.residual < cycle.residual) tallySearch.smallerResidual++;
+    if (best && cut && cutLines !== undefined && best.lines < cutLines) tallySearch.fewerLines++;
+    searchRows.push(
+      `${cycle.id}\t${tangle.length}\tedge:${cut ? `${cycle.residual}/${cutLines ?? "?"}l` : "-"}\tmove:${best ? `${best.residual}/${best.runtimeResidual}rt/${best.lines}l` : "-"}\ttried:${tried}`,
+    );
+    if (!best) continue;
+    console.log(
+      `\n${cycle.id} (${tangle.length} files): move ${best.seeds.join(", ")} out of ${best.owner}` +
+        ` -> leaves ${best.residual} (${best.runtimeResidual} at runtime), ${best.lines} lines` +
+        (cut ? `; the edge cut leaves ${cycle.residual}, ${cutLines ?? "?"} lines` : "; the edge search found no cut"),
+    );
+    placeMove(
+      best.seeds.map((n) => ({ target: best.owner, exported: n })),
+      {
+        type: "search",
+        id: cycle.id,
+        size: tangle.length,
+        owner: best.owner,
+        seeds: best.seeds,
+        lines: best.lines,
+        residual: best.residual,
+        runtimeResidual: best.runtimeResidual,
+        edgeCut: cut ? { from: cut.from, to: cut.to, residual: cycle.residual, lines: cutLines } : null,
+      },
+      tallySearch,
+    );
+  }
+  console.log("\n--- search table ---\n" + searchRows.join("\n"));
+
   console.log("\n--- summary ---");
-  console.log(JSON.stringify({ extract: tally, move: tallyCut }));
+  console.log(JSON.stringify({ extract: tally, move: tallyCut, search: tallySearch }));
   if (outDir) {
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, "placements.jsonl"), samples.map((s) => JSON.stringify(s)).join("\n") + "\n");
