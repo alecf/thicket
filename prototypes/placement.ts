@@ -75,7 +75,11 @@ try {
     typeNames: Set<string>;
     bindings: Binding[];
     /** Top-level declarations: name -> [start, end). */
-    decls: Map<string, [number, number]>;
+    /**
+     * Top-level declarations: name -> each [start, end) that declares it. A
+     * name can have several, as with a `const` and an `interface` of one name.
+     */
+    decls: Map<string, [number, number][]>;
     /** Every identifier use outside import declarations: [name, position]. */
     uses: [string, number][];
   }
@@ -94,7 +98,7 @@ try {
     const hit = factsCache.get(file.path);
     if (hit) return hit;
     const bindings: Binding[] = [];
-    const decls = new Map<string, [number, number]>();
+    const decls = new Map<string, [number, number][]>();
     const uses: [string, number][] = [];
     const typeNames = new Set<string>();
     let runtimeDecls = 0;
@@ -135,7 +139,7 @@ try {
         });
         return;
       }
-      for (const name of declaredNames(stmt)) decls.set(name, [stmt.getStart(), stmt.getEnd()]);
+      for (const name of declaredNames(stmt)) decls.set(name, [...(decls.get(name) ?? []), [stmt.getStart(), stmt.getEnd()]]);
       if (stmt.kind === SyntaxKind.InterfaceDeclaration || stmt.kind === SyntaxKind.TypeAliasDeclaration) {
         typeDecls++;
         for (const name of declaredNames(stmt)) typeNames.add(name);
@@ -186,14 +190,13 @@ try {
     const inside = new Set(f.uses.filter(([, at]) => at >= start && at < end).map(([n]) => n));
     const imports = f.bindings.filter((b) => inside.has(b.local));
     const locals = [...f.decls.entries()]
-      .filter(([name, [s, e]]) => inside.has(name) && !(s >= start && e <= end) && !(start >= s && end <= e))
+      .filter(([name, spans]) => inside.has(name) && !spans.some(([s, e]) => (s >= start && e <= end) || (start >= s && end <= e)))
       .map(([name]) => name);
     return { imports, locals };
   }
 
   function inSpan(file: FileHandle, name: string, at: number): boolean {
-    const span = facts(file).decls.get(name);
-    return span !== undefined && at >= span[0] && at < span[1];
+    return (facts(file).decls.get(name) ?? []).some(([s, e]) => at >= s && at < e);
   }
 
   /** Bindings in `file` used only inside the given ranges. Moving that code drops them. */
@@ -705,8 +708,8 @@ try {
       grew = false;
       for (const { target, exported } of [...symbols]) {
         const owner = byPath.get(target)!;
-        const [s0, e0] = facts(owner).decls.get(exported)!;
-        for (const l of needs(owner, s0, e0).locals) {
+        const locals = facts(owner).decls.get(exported)!.flatMap(([s0, e0]) => needs(owner, s0, e0).locals);
+        for (const l of [...new Set(locals)].sort(compareStrings)) {
           if (symbols.some((m) => m.target === target && m.exported === l)) continue;
           symbols.push({ target, exported: l });
           helpers.push(`${target}#${l}`);
@@ -723,8 +726,7 @@ try {
     let n = 0;
     for (const { target, exported } of symbols) {
       const file = byPath.get(target)!;
-      const [a, b] = facts(file).decls.get(exported)!;
-      n += file.sourceFile.text.slice(a, b).split("\n").length;
+      for (const [a, b] of facts(file).decls.get(exported)!) n += file.sourceFile.text.slice(a, b).split("\n").length;
     }
     return n;
   }
@@ -744,11 +746,10 @@ try {
     for (const h of helpers) {
       const [target, l] = h.split("#") as [string, string];
       const owner = byPath.get(target)!;
-      const [ls, le] = facts(owner).decls.get(l)!;
       const usedByStayer = facts(owner).uses.some(
         ([n, at]) =>
           n === l &&
-          !(at >= ls && at < le) &&
+          !inSpan(owner, l, at) &&
           !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
       );
       if (usedByStayer) sharedHelpers.push(h);
@@ -767,24 +768,26 @@ try {
     const code: string[] = [];
     for (const { target, exported } of symbols) {
       const owner = byPath.get(target)!;
-      const span = facts(owner).decls.get(exported)!;
+      const spans = facts(owner).decls.get(exported)!;
       for (const f of files) {
         if (facts(f).bindings.some((b) => b.target === target && b.exported === exported)) users.add(f.path);
       }
       // The owner is a user too when it still calls the symbol after the move.
       const elsewhere = facts(owner).uses.some(
-        ([n, at]) => n === exported && (at < span[0] || at >= span[1]) && !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
+        ([n, at]) => n === exported && !symbols.some((m) => m.target === target && inSpan(owner, m.exported, at)),
       );
       if (elsewhere) users.add(target);
-      const n = needs(owner, span[0], span[1]);
-      for (const b of n.imports) deps.add(b.target);
-      // A helper that stays beside the symbol means the new home imports the owner.
-      const stays = n.locals.filter((l) => !isMoved(target, l));
-      if (stays.length > 0) {
-        deps.add(target);
-        besides.push(...stays.map((l) => `${target}#${l}`));
+      for (const [a, b] of spans) {
+        const n = needs(owner, a, b);
+        for (const bind of n.imports) deps.add(bind.target);
+        // A helper that stays beside the symbol means the new home imports the owner.
+        const stays = n.locals.filter((l) => !isMoved(target, l));
+        if (stays.length > 0) {
+          deps.add(target);
+          besides.push(...stays.map((l) => `${target}#${l}`));
+        }
+        code.push(excerpt(owner, a, b));
       }
-      code.push(excerpt(owner, span[0], span[1]));
     }
     const dropped: [string, string][] = [];
     for (const u of users) {
@@ -882,7 +885,7 @@ try {
     }
     const ownerFile = byPath.get(owner)!;
     const of = facts(ownerFile);
-    const spans = symbols.map((m) => of.decls.get(m.exported)!);
+    const spans = symbols.flatMap((m) => of.decls.get(m.exported)!);
     const inMoved = (at: number) => spans.some(([a, b]) => at >= a && at < b);
     for (const [a, b] of spans) {
       for (const bind of needs(ownerFile, a, b).imports) {
