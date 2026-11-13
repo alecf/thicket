@@ -40,8 +40,17 @@ export interface ImportBinding {
  * What a file imports and declares, by name. The cut search reads this to
  * move single declarations between files.
  */
+/** A name bound from an npm package: an import that resolves to no analyzed file. */
+export interface PackageBinding {
+  local: string;
+  /** The package name, without a subpath. `@a/b` for `@a/b/c`. */
+  pkg: string;
+}
+
 export interface FileSymbols {
   bindings: readonly ImportBinding[];
+  /** Names bound from npm packages. Relative imports and Node built-ins are not here. */
+  packageBindings: readonly PackageBinding[];
   /**
    * Top-level declarations: name -> each [start, end) that declares it. A
    * name can have several spans. A `const` and an `interface` can share a

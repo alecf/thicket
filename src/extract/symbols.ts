@@ -1,7 +1,8 @@
+import { isBuiltin } from "node:module";
 import { SyntaxKind } from "typescript/ast";
 import { compareStrings } from "../order.js";
 import { forEachChildSafe, safeText, walk } from "./traverse.js";
-import type { FileHandle, FileSymbols, ImportBinding, Node } from "./types.js";
+import type { FileHandle, FileSymbols, ImportBinding, Node, PackageBinding } from "./types.js";
 
 /**
  * Bindings, declarations and identifier uses of one file.
@@ -15,6 +16,7 @@ export function fileSymbols(
   resolve: (specifier: Node) => string | undefined,
 ): FileSymbols {
   const bindings: ImportBinding[] = [];
+  const packageBindings: PackageBinding[] = [];
   const decls = new Map<string, [number, number][]>();
   const typeNames = new Set<string>();
   const uses: [string, number][] = [];
@@ -24,7 +26,7 @@ export function fileSymbols(
 
   forEachChildSafe(file.sourceFile, (stmt) => {
     if (stmt.kind === SyntaxKind.ImportDeclaration) {
-      importBindings(stmt, resolve, bindings);
+      importBindings(stmt, resolve, bindings, packageBindings);
       return;
     }
     if (stmt.kind === SyntaxKind.ExportDeclaration) {
@@ -53,6 +55,7 @@ export function fileSymbols(
 
   return {
     bindings,
+    packageBindings,
     decls,
     typeNames,
     typesOnly: typeDecls > 0 && runtimeDecls === 0,
@@ -65,6 +68,7 @@ function importBindings(
   stmt: Node,
   resolve: (specifier: Node) => string | undefined,
   out: ImportBinding[],
+  packages: PackageBinding[],
 ): void {
   let specifier: Node | undefined;
   let clause: Node | undefined;
@@ -75,7 +79,11 @@ function importBindings(
   // A side-effect import binds nothing. The module graph still counts it.
   if (specifier === undefined || clause === undefined) return;
   const target = resolve(specifier);
-  if (target === undefined) return;
+  if (target === undefined) {
+    const pkg = packageName(safeText(specifier).slice(1, -1));
+    if (pkg !== undefined) for (const local of boundNames(clause)) packages.push({ local, pkg });
+    return;
+  }
   const clauseType = isTypeOnly(stmt) || isTypeOnly(clause);
   forEachChildSafe(clause, (c) => {
     if (c.kind === SyntaxKind.Identifier) {
@@ -101,6 +109,39 @@ function importBindings(
       });
     }
   });
+}
+
+/**
+ * The npm package a bare specifier names, or undefined for a relative path,
+ * an absolute path or a Node built-in.
+ */
+function packageName(specifier: string): string | undefined {
+  if (specifier === "" || specifier.startsWith(".") || specifier.startsWith("/")) return undefined;
+  if (isBuiltin(specifier)) return undefined;
+  const parts = specifier.split("/");
+  return parts[0]!.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+}
+
+/** The local names an import clause binds. */
+function boundNames(clause: Node): string[] {
+  const out: string[] = [];
+  forEachChildSafe(clause, (c) => {
+    if (c.kind === SyntaxKind.Identifier) out.push(safeText(c));
+    else if (c.kind === SyntaxKind.NamespaceImport) {
+      const local = firstIdentifier(c);
+      if (local !== undefined) out.push(local);
+    } else if (c.kind === SyntaxKind.NamedImports) {
+      forEachChildSafe(c, (spec) => {
+        if (spec.kind !== SyntaxKind.ImportSpecifier) return;
+        const ids: string[] = [];
+        forEachChildSafe(spec, (x) => {
+          if (x.kind === SyntaxKind.Identifier) ids.push(safeText(x));
+        });
+        if (ids.length > 0) out.push(ids[ids.length - 1]!);
+      });
+    }
+  });
+  return out;
 }
 
 /** Names a top-level statement declares. Empty for anything else. */

@@ -764,6 +764,10 @@ export async function runReport(
             deps: [...keys(j.dependencies), ...keys(j.devDependencies), ...keys(j.peerDependencies)],
           };
         },
+        (p) => {
+          const handle = byRelPath.get(p);
+          return handle === undefined ? [] : project.symbolsOf(handle).packageBindings.map((b) => b.pkg);
+        },
       );
       return packages;
     };

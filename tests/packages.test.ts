@@ -52,6 +52,20 @@ describe("buildPackages", () => {
     expect(pkgs.canImport("packages/lib", "packages/app")).toBe(false);
   });
 
+  it("lets a package use an npm package it lists or its files already import", () => {
+    const pkgs = buildPackages(
+      ["app/main.ts", "lib/index.ts", "web/page.ts"],
+      () => [],
+      manifests({ app: { deps: ["zod"] }, lib: { deps: [] }, web: { deps: [] } }),
+      (p) => (p === "web/page.ts" ? ["@scope/ui"] : []),
+    );
+    expect(pkgs.canUse("app", "zod")).toBe(true);
+    expect(pkgs.canUse("lib", "zod")).toBe(false);
+    // Hoisting and aliases make imports that no package.json records.
+    expect(pkgs.canUse("web", "@scope/ui")).toBe(true);
+    expect(pkgs.canUse("app", "@scope/ui")).toBe(false);
+  });
+
   it("refuses an import between sibling packages that do not depend on each other", () => {
     const pkgs = buildPackages(
       ["extensions/css/a.ts", "extensions/html/b.ts"],

@@ -784,10 +784,32 @@ Not fixed, each seen once:
 
 - A home in a vendored file marked "DO NOT modify, COPIED from". It carries
   no generator banner, so the scan misses it.
-- A home in another package that lacks the code's external dependency.
+- A home in another package that lacks the code's external dependency. See
+  "npm packages" below. The judged case does not change.
 - Two `do not extract into:` entries rated wrong. One named a cycle the judge
   could not find. The other gave a package reason the judge read as false,
   where a workspace package already depends on the other.
+
+## npm packages
+
+The home check asked whether a home's package can import the repo files the
+moved code imports. It did not ask about npm packages. It now does.
+
+- A file records each import that names an npm package and resolves to no
+  analyzed file. Relative paths and Node built-ins are not npm packages.
+- A package can use an npm package when its package.json lists it, or when
+  one of its files already imports it. The second covers hoisted workspaces,
+  the same way `canImport` covers workspace packages.
+- A home whose package cannot use one of the moved code's npm packages is
+  unreachable.
+
+On the four repositories this changed none of 109 move homes. Run time did
+not change measurably.
+
+The judged case stays as it was. The judge wrote that the package "does not
+depend on zod". Its package.json does not list zod, but three of its files
+import it, so the package can load it. The judge's other objection was that
+the home is a stub. No structural signal says so.
 
 ## Out of scope
 
