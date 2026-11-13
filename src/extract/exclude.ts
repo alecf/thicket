@@ -39,6 +39,20 @@ export const GENERATED_DIR_SEGMENTS: readonly string[] = [
 const GENERATED = new Set(GENERATED_DIR_SEGMENTS);
 
 /**
+ * True for a file named `*.gen.ts`, or the same with another TypeScript
+ * extension.
+ *
+ * Some generators write no banner, so the banner scan cannot see their
+ * output. One public repository keeps such files beside hand-written source,
+ * and the move search picked them as homes for moved code. A filename rule
+ * is narrower than the banner, because naming conventions vary. This one is
+ * common enough to name.
+ */
+export function isGeneratedFileName(name: string): boolean {
+  return /\.gen\.[cm]?tsx?$/.test(name);
+}
+
+/**
  * True when any whole segment of `relPath` names a generated directory.
  *
  * Takes a repo-relative path on purpose. Run against an absolute path this

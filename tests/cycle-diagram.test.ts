@@ -253,6 +253,15 @@ describe("the cycle diagram", () => {
     expect(render(twoModule)).toContain("- **leaves:** nothing — this breaks the cycle completely.");
   });
 
+  it("points a stuck tangle of directories at file granularity", () => {
+    const stuck: CycleFinding = { ...twoModule, cuts: [], residual: 2 };
+    const hint = "- **at file granularity:** run with `--granularity file`";
+    expect(render({ ...stuck, movesAtFileGranularity: true })).toContain(hint);
+    // Not where the move search already ran, and not under a cut.
+    expect(render(stuck)).not.toContain(hint);
+    expect(render({ ...twoModule, movesAtFileGranularity: true })).not.toContain(hint);
+  });
+
   it("says so when no single edge breaks the cycle", () => {
     const stuck: CycleFinding = { ...twoModule, cuts: [], residual: 2 };
     const out = render(stuck);

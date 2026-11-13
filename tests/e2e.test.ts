@@ -257,10 +257,13 @@ describe("runReport", () => {
     });
     for (const cycle of json.cycles) {
       expect(cycle.residual).toBeLessThanOrEqual(cycle.modules.length);
-      // Either no cut was found and nothing changed, or a cut was found and it
-      // provably shrank the component.
-      if (cycle.cuts.length === 0) expect(cycle.residual).toBe(cycle.modules.length);
-      else expect(cycle.residual).toBeLessThan(cycle.modules.length);
+      // Either no cut or move was found and nothing changed, or one was found
+      // and it provably shrank the component.
+      if (cycle.cuts.length === 0 && cycle.move === undefined) {
+        expect(cycle.residual).toBe(cycle.modules.length);
+      } else {
+        expect(cycle.residual).toBeLessThan(cycle.modules.length);
+      }
     }
   });
 

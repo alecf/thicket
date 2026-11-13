@@ -61,17 +61,18 @@ L0 · `Block`
 
 ## Module tangle
 
-Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. The dotted arrow is the suggested cut.
+Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. A dotted arrow is an edge the suggested cut or move removes.
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
 ```mermaid
 flowchart LR
-  src/alpha.ts -. "cut · 1" .-> src/gamma.ts
+  src/alpha.ts -. "move · 1" .-> src/gamma.ts
   src/gamma.ts -->|"1"| src/alpha.ts
 ```
 
 - **file cycles:** 1 crosses these modules (largest 2 files: `src/alpha.ts` ↔ `src/gamma.ts`).
-- **suggested cut:** `src/alpha.ts` → `src/gamma.ts` — 1 symbol in `src/alpha.ts`
+- **suggested move:** `scale` out of `src/gamma.ts` — 3 lines
+- **move to:** `src/util/shared.ts`, which every user already imports
 - **leaves:** nothing — this breaks the cycle completely.
 

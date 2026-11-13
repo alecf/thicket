@@ -1,7 +1,12 @@
 import { closeSync, openSync, readSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { compareStrings } from "../order.js";
-import { GENERATED_DIR_SEGMENTS, hasGeneratedBanner, isExcludedByPattern } from "./exclude.js";
+import {
+  GENERATED_DIR_SEGMENTS,
+  hasGeneratedBanner,
+  isExcludedByPattern,
+  isGeneratedFileName,
+} from "./exclude.js";
 
 const GENERATED = new Set(GENERATED_DIR_SEGMENTS);
 const SOURCE_EXT = /\.(ts|tsx|mts|cts)$/;
@@ -133,6 +138,7 @@ export function scanSourceFiles(root: string, opts: ScanOptions = {}): string[] 
       } else if (entry.isFile() && SOURCE_EXT.test(name) && !name.endsWith(".d.ts")) {
         const rel = prefix === "" ? name : `${prefix}/${name}`;
         if (exclude.length > 0 && isExcludedByPattern(rel, exclude)) continue;
+        if (!opts.includeGenerated && isGeneratedFileName(name)) continue;
         if (
           !opts.includeGenerated &&
           opts.bannerScan !== false &&

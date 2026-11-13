@@ -403,6 +403,172 @@ For a cut, the helpers must move too, unless something else in the old file
 uses them. That is the next prototype change. Judging the move lines waits
 for it. Most cuts that cannot be placed go through a barrel `index.ts`.
 
+### Round 4: judging the move lines, preregistered
+
+This section was committed before any judge saw a packet.
+
+**Items.** Every placed file-level cut from the four repositories, after the
+prototype moved helpers: 111 cuts. Each item shows the cycle's cut edge, the
+declarations that move, the helpers that move with them, and the code.
+
+**Guidance lines.** Each item has up to three lines, in a hashed order. Each
+line names only a destination.
+
+- **computed**: the prototype's best home.
+- **importer**: the file on the `from` side of the cut. This is the plan's
+  control. It is left out when it is the same file as the computed home.
+- **vague**: "a file of your choosing that does not import" the old file.
+  This is true for every cut and names nothing.
+
+**Judges.** Sonnet, blind, with hashed labels. Eight items per packet. A second
+judge rates a fifth of the packets again.
+
+**Bar.** All three must hold.
+
+1. The computed home is rated yes or acceptable at least 70% of the time.
+2. Its yes rate beats the vague line's yes rate by at least 15 points.
+3. On items with an importer line, its yes-or-acceptable rate beats the
+   importer's by at least 15 points.
+
+If the bar is met, the report gains a `move to:` line under each cut. If it is
+missed, the report names the helpers that must move and does not name a home.
+
+### Round 4 results
+
+Sonnet judges rated all 111 items. A second judge re-rated 3 packets: 54 of
+61 ratings matched exactly, and all 61 were within one point.
+
+| Line | Rated good | Rated yes |
+|---|---|---|
+| computed | 78/111 (70%) | 33/111 (30%) |
+| vague | 97/111 (87%) | 0/111 (0%) |
+| importer | 11/70 (16%) | 1/70 (1%) |
+
+All three bars are met. Bar 1 is met by 0.3 points, which is inside the noise.
+
+Split after the fact:
+
+| Items | Computed rated good |
+|---|---|
+| No helpers move | 54/64 (84%) |
+| Helpers move too | 24/47 (51%) |
+| Home is a user of the code | 66/83 (80%) |
+| Home is a file the code depends on | 6/18 (33%) |
+| Home is a new file | 3/6 (50%) |
+| Judge says the fix is worth doing | 48/56 (86%) |
+
+Most misses share one cause. The judge names a different, smaller move that
+breaks the cycle. Examples:
+
+- Two type-only edges point at `client.ts`. Both import one logger interface.
+  No single edge breaks the cycle, so thicket cuts the runtime edge and moves
+  a 400-line class. Moving the interface removes both type edges at once.
+- A 674-line model class moves to break an edge that one `Pick<>` crosses.
+- A component moves where one constant on another edge would do.
+
+The cut search scores edges one at a time, and a tie goes to the fewest
+files. It never asks how much code a cut moves. A move can remove several
+edges into one file at once, when they all import the same declaration. So
+the unit to search is a move: a declaration and its helpers. Its cost is the
+code it moves. The same search can break the large module tangles, where no
+single edge helps (option 2).
+
+Two smaller findings:
+
+- **Dependency homes are weak.** Judges rejected a vendored file, a generic
+  utility, and a file on another layer.
+- **The placeholder name `moved.ts`** drew complaints. Name the new file after
+  the first declaration, or leave the name to the reader as extraction does.
+
+### The move search
+
+The prototype now searches moves, not edges. A candidate is one declaration
+that a tangle file imports from another, or every declaration on one edge,
+with its helpers. The second kind is what an edge cut moves. A move removes
+every edge whose imports all move. Candidates rank by the largest cycle left,
+then the largest runtime cycle left, then the lines moved. An import is
+erased when it says `import type`, or when it names an interface or a type
+alias. A re-export edge is kept unless the file only re-exports, because the
+adapter reports re-exports only for such files.
+
+| | Public 1 | Public 2 | Public 3 | Public 4 | All |
+|---|---|---|---|---|---|
+| File tangles | 40 | 40 | 40 | 40 | 160 |
+| Fixed by an edge cut | 30 | 37 | 28 | 34 | 129 |
+| Fixed by a move | 17 | 34 | 31 | 32 | 114 |
+| Only a move | 2 | 2 | 6 | 3 | 13 |
+| Only an edge cut | 15 | 5 | 3 | 5 | 28 |
+
+Where both have a placed move, they pick the same one 65 times in 95. On the
+cases round 4 judges flagged, the search picks the move the judge asked for:
+`GatewayClientLogger` (6 lines) where the edge cut moved 371, and
+`WorkflowContext` (5 lines) where it moved 40. It also refuses two cycles
+through recursive components, where judges said no move helps and the edge
+search proposed one. Most edge-only fixes cut through a barrel, which has no
+declaration to move.
+
+### Round 5: judging the move search, preregistered
+
+This section was committed before any judge saw a packet.
+
+**Pairwise.** The 30 tangles where the two searches move different code. A
+judge sees both fixes, in a hashed order, each with what moves and where.
+The judge picks the better fix, or says they are equal.
+
+**Destinations.** Every search move whose symbols differ from a round 4
+item, judged as in round 4 with the computed, vague and importer lines. The
+65 identical moves keep their round 4 ratings, because the same symbols get
+the same home.
+
+**Bar.** All must hold.
+
+1. Pairwise: judges prefer the search's fix in at least two thirds of the
+   items where they state a preference.
+2. Destinations, round 4 and round 5 ratings together: the computed home is
+   rated yes or acceptable at least 70% of the time, its yes rate beats the
+   vague line's by 15 points, and its good rate beats the importer's by 15.
+3. Refusals: on the round 4 items whose tangle the search leaves unfixed, the
+   computed home's good rate is below its rate on the rest. This checks that
+   the search refuses the weak fixes and not the strong ones.
+
+If all hold, the core's cut search becomes a move search, and the report
+gains a `move to:` line. If bar 1 misses, keep the edge search.
+
+### Round 5 results
+
+All three bars are met. Two are met by a few points.
+
+**Pairwise**, 30 tangles where the two searches move different code:
+
+| | Count |
+|---|---|
+| Judge prefers the move search | 19 |
+| Judge prefers the edge cut | 8 |
+| Equal | 3 |
+| Search preferred, of decided | 19/27 (70%), against a bar of 67% |
+| Second judge agrees on the preferred fix | 8 of 8 |
+
+Judges said the search's move breaks the cycle in 18 of 30, and the edge
+cut's in 13 of 30. Of the 10 search moves judged not to break it, 8 leave a
+2- to 6-file cycle. The search allows that under the same two-thirds rule as
+the cut search, and it reports the cycle left. The judges read "breaks the
+cycle" as breaking all of it. One was a prototype bug: a `const` and an
+`interface` shared a name, and only the `const` moved. That is fixed.
+
+**Destinations**, 114 search moves (63 rated in round 4, 51 in round 5):
+
+| Line | Rated good | Rated yes |
+|---|---|---|
+| computed | 81/114 (71%) | 32/114 (28%) |
+| vague | 114/114 (100%) | 8/114 (7%) |
+| importer | 12/76 (16%) | 2/76 (3%) |
+
+A second judge matched 41 of 44 round 5 ratings exactly.
+
+**Refusals.** On round 4 items whose tangle the search leaves unfixed, the
+computed home was rated good 7 of 16 times (44%). On the rest it was rated
+good 71 of 95 times (75%). The search refuses mostly the weak fixes.
+
 ## Phase 0: judge it on real repositories
 
 Run the prototype on the two large private samples:
@@ -499,6 +665,129 @@ Cuts (`move to:`) are not built. The four repositories gave 1 cut in total.
    every tie is broken by path. Ordering data follows `ORDERING_PROBE`.
 7. **Judge the shipped output** on the same samples, against the Phase 0
    numbers.
+
+### Moves in the core
+
+The move search and the `move to:` line now run in the core, for tangles whose
+members are files. There is no off switch. Both replace a suggestion and hide
+nothing (AGENTS.md §4b). A module tangle keeps the edge search. The edge search
+also runs when no move breaks a file tangle.
+
+- `src/extract/symbols.ts` reads each file's bindings, declaration spans and
+  identifier uses. `Project.symbolsOf` memoizes it.
+- `src/graph/moves.ts` holds the search and the home ranking.
+- Dissolves apply first. On the four repositories, 4 tangles the prototype
+  moved are fixed by a dissolve alone, or by a smaller move after it.
+- The search adds no measurable time. One repository ran in 28.9 s on main and
+  28.5 s to 28.8 s on the branch.
+
+The home ranking changed. The prototype scored a new file as part of a
+neighbour's module, so most new files looked unsafe and lost. Without that
+artifact, a new file won 40 of 45 judged moves, often in a directory high above
+the code. The core now prefers an existing file that is just as safe. That
+keeps the judged pick on 34 of 45. On the other 11, two blind judges rated the
+new pick good 6 and 7 times, and the prototype's pick good 2 times and once.
+Across all four repositories the core picked an existing file every time.
+
+Of the 101 tangles where both searches found a fix, the edge cut left a smaller
+tangle 8 times. Five of those were judged in round 5. Judges preferred the edge
+cut once, the move twice, and rated two equal. The move keeps priority.
+
+A tangle of directories with no fix now prints a line pointing at
+`--granularity file`. Next is a move search for those tangles. A move counts
+there only when the home is in another directory, so the search has to score
+homes while it searches. It needs its own judged round.
+
+### Round 6: judging the shipped output, preregistered
+
+This section was committed before any judge saw a packet. Rounds 1 to 5
+judged prototype output. This round judges the lines the core prints, copied
+verbatim from the report, on the same four public repositories.
+
+**Extraction lines.** Every production or type finding whose shipped report
+prints `do not extract into:`, `extract into:` or `across packages:`, at the
+default granularity. At most 15 per repository, picked by a hash of the
+finding id. The judge sees the copies, an excerpt and the shipped lines. The
+judge rates each `do not extract into:` entry as right or wrong to avoid,
+`extract into:` as yes, acceptable or no, and `across packages:` as true or
+false.
+
+**Move lines.** Tangles whose shipped report at file granularity prints a
+`suggested move:`. At most 10 per repository, picked the same way. The judge
+sees the tangle, the moved code and the shipped lines, plus a vague control:
+"a file of your choosing that does not import the owner". The judge rates
+whether `leaves:` is true of the move, and rates each home as yes,
+acceptable or no.
+
+Sonnet judges, about 10 items per packet. A second judge re-rates two
+packets, to check agreement.
+
+**Bar.** All must hold.
+
+1. `do not extract into:` entries are rated right at least 80% of the time.
+   The prototype's flagged homes were rated wrong 88% of the time.
+2. `extract into:` is rated yes or acceptable at least 90% of the time. The
+   prototype's was 56 of 56.
+3. `across packages:` is rated true at least 80% of the time.
+4. `move to:` is rated yes or acceptable at least 70% of the time, and its yes
+   rate beats the vague line's by 15 points. These are the round 5 bars.
+5. `leaves:` is rated true at least 80% of the time.
+
+Any bug a judge's reasoning exposes gets fixed, whether or not a bar holds.
+A missed bar means finding why before the next release, and re-judging the
+items that failed.
+
+### Round 6 results
+
+All five bars held. 100 items: 60 findings and 40 moves, in 10 packets. A
+second judge re-rated two packets and agreed on 37 of 39 ratings.
+
+| Bar | Result | Needed |
+|---|---|---|
+| `do not extract into:` entries rated right | 51 of 53, 96% | 80% |
+| `extract into:` rated yes or acceptable | 24 of 24 | 90% |
+| `across packages:` rated true | 17 of 17 | 80% |
+| `move to:` rated yes or acceptable | 36 of 40, 90% | 70% |
+| `move to:` yes rate against the vague line | 32% against 8% | 15 points |
+| `leaves:` rated true | 38 of 40, 95% | 80% |
+
+The judges' reasons exposed two bugs. Both are fixed.
+
+- **`leaves:` measured a new file, not the home.** The search scores a move
+  against a new file. The home can be an existing file that already holds what
+  the code needs, and then less is left. Both false `leaves:` lines said 2
+  files were left where nothing was. The home ranking now reports the cycle
+  left at the home it picks.
+- **Barrels were picked as homes.** Two of the four rejected homes were files
+  that only re-export. Code there makes every forwarded file a dependency. A
+  file that only forwards is no longer a candidate.
+
+Re-running the four repositories after those fixes found two more bugs in
+the new `leaves:` count, and one older limit:
+
+- **A cycle the home was already in.** One home sat in an unrelated cycle of
+  45 files, and `leaves:` counted all 45 against a 3-file tangle. Now only the
+  tangle's files and the home count.
+- **Dissolved edges.** The search drops edges the report dissolves first, and
+  the home check did not. Two tangles read 3 of 3 and 12 of 17 where the move
+  leaves nothing. The home check now drops them too.
+- **Re-exports beside code.** The search knew about re-exports only from files
+  that do nothing else. A file that re-exports from the owner and has code of
+  its own looked as if it dropped the edge, so `leaves:` could overclaim.
+  `symbolsOf` now records every file's `export … from` targets. On the four
+  repositories this changed no move; a fixture pins it.
+
+Against the output round 6 judged, 5 homes changed, 4 `leaves:` counts fell
+and none rose. No move leaves as much as the whole tangle.
+
+Not fixed, each seen once:
+
+- A home in a vendored file marked "DO NOT modify, COPIED from". It carries
+  no generator banner, so the scan misses it.
+- A home in another package that lacks the code's external dependency.
+- Two `do not extract into:` entries rated wrong. One named a cycle the judge
+  could not find. The other gave a package reason the judge read as false,
+  where a workspace package already depends on the other.
 
 ## Out of scope
 

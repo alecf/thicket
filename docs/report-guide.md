@@ -413,11 +413,9 @@ Repoint the specifier and the edge disappears — a re-export is the same bindin
 so the program is unchanged. This is a find-and-replace. Do these first.
 
 **A cut is a decision.** It means inverting a dependency, moving code, or
-agreeing a layering. thicket names the cheapest edge that dissolves the most of
-the component, and names the files carrying it, but it cannot know which
-direction is architecturally right. Treat it as a starting point, not an
-instruction — if the suggestion looks absurd (severing a component from its own
-hooks, say), it probably is, and the real fix is nearby.
+agreeing a layering. thicket names the edge that breaks the most of the
+component, but it cannot know which direction is right. Treat it as a starting
+point. If it looks absurd, the real fix is probably nearby.
 
 thicket will **not** suggest a cut for a tangle with no file-level cycle under
 it, because there is nothing to break. It will not suggest one that leaves more
@@ -429,6 +427,14 @@ a runtime edge wins any tie, because only a runtime cycle can fail at
 module-init time. If it has none, the type-only edge wins, because moving a
 props type is cheaper than moving a component. A type-only cut is labelled
 `type-only`.
+
+### `suggested move:` and `move to:`
+
+In a tangle of files, thicket names declarations to move, with their helpers,
+instead of an edge to cut. It checked that the move breaks or shrinks the
+tangle. `move to:` suggests a home that closes no new cycle. Judges rated it
+good 71% of the time, so trust the move more than the home. A new file is named
+after the first declaration; rename it if a better name fits.
 
 ### `leaves:`
 

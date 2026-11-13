@@ -15,7 +15,8 @@ import { attachNear } from "./fingerprint/near.js";
 import { buildModuleGraph, type ModuleEdge } from "./graph/build.js";
 import { fileCycles } from "./graph/file-cycles.js";
 import { propagationCost, stronglyConnected } from "./graph/metrics.js";
-import { buildPackages } from "./graph/packages.js";
+import { buildPackages, type Packages } from "./graph/packages.js";
+import { homeContext, homeFor, searchMoves, type HomeContext, type MoveInput } from "./graph/moves.js";
 import { placementGraph, placementOf, type Placement, type PlacementGraph } from "./graph/placement.js";
 import { hash, initHash } from "./hash.js";
 import { tsgoVersion } from "./extract/tsgo-path.js";
@@ -33,6 +34,7 @@ import { fieldNameDrift, variations } from "./report/variation.js";
 import {
   renderReport,
   type CycleFinding,
+  type CycleMove,
   type ReportInput,
   type Task,
 } from "./report/markdown.js";
@@ -745,6 +747,46 @@ export async function runReport(
       return handle === undefined ? [] : project.reexportsOf(handle);
     };
 
+    // Built on first use: it reads every package.json above an analyzed file,
+    // which a report with no findings and no tangles never needs.
+    let packages: Packages | undefined;
+    const packagesOf = (): Packages => {
+      packages ??= buildPackages(
+        files.map((f) => f.path),
+        importsOfPath,
+        (d) => {
+          const json = readJson(join(project.root, d, "package.json"));
+          if (typeof json !== "object" || json === null) return undefined;
+          const j = json as Record<string, unknown>;
+          const keys = (o: unknown) => (typeof o === "object" && o !== null ? Object.keys(o) : []);
+          return {
+            ...(typeof j.name === "string" ? { name: j.name } : {}),
+            deps: [...keys(j.dependencies), ...keys(j.devDependencies), ...keys(j.peerDependencies)],
+          };
+        },
+      );
+      return packages;
+    };
+
+    // The move search reads declarations, so it runs where the tangle's
+    // members are files. A module tangle keeps the edge search.
+    const moveInput: MoveInput = {
+      symbolsOf: (p) => {
+        const handle = byRelPath.get(p);
+        return handle === undefined ? undefined : project.symbolsOf(handle);
+      },
+      importsOf: importsOfPath,
+      reexportsOf: reexportsOfPath,
+      textOf: (p) => byRelPath.get(p)?.sourceFile.text,
+    };
+    let moveHomes: HomeContext | undefined;
+    const homesOf = (): HomeContext =>
+      (moveHomes ??= homeContext(
+        files.map((f) => f.path),
+        importsOfPath,
+        packagesOf(),
+      ));
+
     const components = stronglyConnected(graph.modules, graph.adjacency).filter(
       (c) => c.length > 1,
     );
@@ -761,11 +803,22 @@ export async function runReport(
         .map((f) => f.path)
         .filter((p) => members.has(graph.moduleOf[p] ?? ""));
       const cycles = fileCycles(componentFiles, importsOfPath, (p) => graph.moduleOf[p]);
-      const { dissolves, cuts, residual, bestRejectedResidual } = suggestFixes(
+      const ofFiles = modules.every((m) => graph.moduleOf[m] === m && byRelPath.has(m));
+      const { dissolves, cuts, residual, bestRejectedResidual, move } = suggestFixes(
         modules,
         inner,
         cycles.crossing.count,
         graph.moduleOf,
+        ofFiles
+          ? (startingFrom, omit) => {
+              const found = searchMoves(modules, moveInput, { startingFrom, omit });
+              if (found === undefined) return undefined;
+              const { home, residual } = homeFor(modules, found, moveInput, homesOf(), omit);
+              // The runtime figure was measured against a new file. It cannot exceed
+              // the cycle left at the home, so it is capped there.
+              return { ...found, home, residual, runtimeResidual: Math.min(found.runtimeResidual, residual) };
+            }
+          : undefined,
       );
       return {
         id: findingId("CYC", [...modules].sort(compareStrings).join(",")),
@@ -782,6 +835,8 @@ export async function runReport(
         cuts,
         residual,
         bestRejectedResidual,
+        ...(move === undefined ? {} : { move }),
+        ...(ofFiles ? {} : { movesAtFileGranularity: true }),
         fileCycles: cycles,
       };
     });
@@ -847,16 +902,7 @@ export async function runReport(
         moduleOf: (p) => graph.moduleOf[p],
         modules: graph.modules,
         moduleAdjacency: graph.adjacency,
-        packages: buildPackages(paths, importsOfPath, (d) => {
-          const json = readJson(join(project.root, d, "package.json"));
-          if (typeof json !== "object" || json === null) return undefined;
-          const j = json as Record<string, unknown>;
-          const keys = (o: unknown) => (typeof o === "object" && o !== null ? Object.keys(o) : []);
-          return {
-            ...(typeof j.name === "string" ? { name: j.name } : {}),
-            deps: [...keys(j.dependencies), ...keys(j.devDependencies), ...keys(j.peerDependencies)],
-          };
-        }),
+        packages: packagesOf(),
       });
       return homes;
     };
@@ -1195,7 +1241,14 @@ function suggestFixes(
   inner: readonly ModuleEdge[],
   crossingFileCycles: number,
   moduleOf: Record<string, string>,
-): { dissolves: ModuleEdge[]; cuts: ModuleEdge[]; residual: number; bestRejectedResidual?: number } {
+  tryMove?: (startingFrom: number, omit: ReadonlySet<string>) => CycleMove | undefined,
+): {
+  dissolves: ModuleEdge[];
+  cuts: ModuleEdge[];
+  residual: number;
+  bestRejectedResidual?: number;
+  move?: CycleMove;
+} {
   // Routing edges: nearly everything on them is forwarded, and forwarded from
   // outside the module being depended on -- a barrel re-exporting its own
   // package's internals is not routing, it is that package's API surface.
@@ -1210,10 +1263,18 @@ function suggestFixes(
         b.weight - a.weight || compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
     );
 
-  const dissolved = new Set(dissolves.map((e) => `${e.from} -> ${e.to}`));
-  const surviving = inner.filter((e) => !dissolved.has(`${e.from} -> ${e.to}`));
+  const dissolved = new Set(dissolves.map((e) => `${e.from}\u0000${e.to}`));
+  const surviving = inner.filter((e) => !dissolved.has(`${e.from}\u0000${e.to}`));
   const afterDissolve = largestScc(component, surviving);
 
+  // A move first, where the members are files. It does at least as well as
+  // an edge cut wherever the edge's symbols are declared in the file it
+  // imports. The edge search still runs when no move helps, because an edge
+  // into a barrel binds names the barrel does not declare.
+  if (tryMove !== undefined && crossingFileCycles > 0 && afterDissolve > 1) {
+    const move = tryMove(afterDissolve, dissolved);
+    if (move !== undefined) return { dissolves, cuts: [], residual: move.residual, move };
+  }
   const { cuts, residual, bestRejectedResidual } = suggestCuts(
     component,
     surviving,

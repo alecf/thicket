@@ -3,10 +3,22 @@ import {
   GENERATED_DIR_SEGMENTS,
   hasGeneratedBanner,
   isExcludedByPattern,
+  isGeneratedFileName,
   isGeneratedPath,
 } from "../src/extract/exclude.js";
 import { openProject } from "../src/extract/ts-adapter.js";
 import { generatedConfig } from "./helpers.js";
+
+describe("isGeneratedFileName", () => {
+  it("matches the `.gen` role before a TypeScript extension only", () => {
+    for (const name of ["routes.gen.ts", "a.gen.tsx", "b.gen.mts", "c.gen.cts"]) {
+      expect(isGeneratedFileName(name)).toBe(true);
+    }
+    for (const name of ["gen.ts", "oxygen.ts", "a.generated.ts", "a.gen.js", "a.gen.d.ts.map"]) {
+      expect(isGeneratedFileName(name)).toBe(false);
+    }
+  });
+});
 
 describe("isGeneratedPath", () => {
   it("excludes a top-level generated directory", () => {
@@ -115,9 +127,15 @@ describe("openProject generated filtering", () => {
       "src/handwritten.ts",
       "src/mentions.ts",
       "src/outbound.ts",
+      "src/routes.gen.ts",
       "src/table.gen.ts",
       "src/widgets/badge.ts",
     ]);
+  });
+
+  it("drops a file named `*.gen.ts` that carries no banner", async () => {
+    const paths = (await openProject(generatedConfig())).files().map((f) => f.path);
+    expect(paths).not.toContain("src/routes.gen.ts");
   });
 
   it("drops a banner-marked file that no directory or name rule would catch", async () => {
@@ -137,6 +155,6 @@ describe("openProject generated filtering", () => {
 
   it("reports what it dropped, and why", async () => {
     const project = await openProject(generatedConfig(), { exclude: ["**/distance/**"] });
-    expect(project.excluded).toEqual({ directory: 2, banner: 2, pattern: 1 });
+    expect(project.excluded).toEqual({ directory: 2, name: 1, banner: 2, pattern: 1 });
   });
 });

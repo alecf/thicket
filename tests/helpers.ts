@@ -515,3 +515,7 @@ export function filterWorkspacesRoot(): string {
 export function placementConfig(): string {
   return resolve(here, "fixtures/placement/tsconfig.json");
 }
+
+export function movesConfig(): string {
+  return resolve(here, "fixtures/moves/tsconfig.json");
+}
