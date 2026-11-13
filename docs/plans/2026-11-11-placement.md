@@ -762,6 +762,24 @@ The judges' reasons exposed two bugs. Both are fixed.
   that only re-export. Code there makes every forwarded file a dependency. A
   file that only forwards is no longer a candidate.
 
+Re-running the four repositories after those fixes found two more bugs in
+the new `leaves:` count, and one older limit:
+
+- **A cycle the home was already in.** One home sat in an unrelated cycle of
+  45 files, and `leaves:` counted all 45 against a 3-file tangle. Now only the
+  tangle's files and the home count.
+- **Dissolved edges.** The search drops edges the report dissolves first, and
+  the home check did not. Two tangles read 3 of 3 and 12 of 17 where the move
+  leaves nothing. The home check now drops them too.
+- **Re-exports beside code.** The search knew about re-exports only from files
+  that do nothing else. A file that re-exports from the owner and has code of
+  its own looked as if it dropped the edge, so `leaves:` could overclaim.
+  `symbolsOf` now records every file's `export … from` targets. On the four
+  repositories this changed no move; a fixture pins it.
+
+Against the output round 6 judged, 5 homes changed, 4 `leaves:` counts fell
+and none rose. No move leaves as much as the whole tangle.
+
 Not fixed, each seen once:
 
 - A home in a vendored file marked "DO NOT modify, COPIED from". It carries

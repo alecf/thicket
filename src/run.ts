@@ -813,7 +813,7 @@ export async function runReport(
           ? (startingFrom, omit) => {
               const found = searchMoves(modules, moveInput, { startingFrom, omit });
               if (found === undefined) return undefined;
-              const { home, residual } = homeFor(modules, found, moveInput, homesOf());
+              const { home, residual } = homeFor(modules, found, moveInput, homesOf(), omit);
               // The runtime figure was measured against a new file. It cannot exceed
               // the cycle left at the home, so it is capped there.
               return { ...found, home, residual, runtimeResidual: Math.min(found.runtimeResidual, residual) };

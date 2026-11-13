@@ -95,6 +95,24 @@ describe("move search", () => {
     expect(markdown).toContain("- **move to:** a new file, `core/tagged.ts`");
   });
 
+  it("does not count a cycle the home was already in", async () => {
+    // `consts.ts` and `names.ts` form a cycle of their own. Moving `ringKey`
+    // into `consts.ts` breaks this tangle and leaves that cycle as it was.
+    const { json } = await report();
+    const cycle = json.cycles.find((c) => c.modules.includes("src/ring/owner.ts"))!;
+    expect(cycle.move?.home).toEqual({ file: "src/ring/consts.ts", kind: "dependency" });
+    expect(cycle.residual).toBe(1);
+  });
+
+  it("keeps an edge that a file with its own code still re-exports", async () => {
+    // `user.ts` re-exports from `owner.ts` beside code of its own. Moving
+    // `ownerKey` leaves that re-export, and the cycle with it.
+    const { json } = await report();
+    const cycle = json.cycles.find((c) => c.modules.includes("src/mixed/owner.ts"))!;
+    expect(cycle.move).toBeUndefined();
+    expect(cycle.cuts).toHaveLength(1);
+  });
+
   it("falls back to an edge cut when no move breaks the cycle", async () => {
     // `ta` and `tb` each declare a type that names the other's. Moving either
     // type keeps a 2-file cycle with the file it came from, so only the cut

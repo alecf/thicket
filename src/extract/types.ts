@@ -52,6 +52,11 @@ export interface FileSymbols {
   typeNames: ReadonlySet<string>;
   /** True when every top-level declaration is an interface or a type alias. */
   typesOnly: boolean;
+  /**
+   * Files this file re-exports from with `export … from`, sorted. Unlike
+   * `Project.reexportsOf`, this includes a file that also has code of its own.
+   */
+  reexports: readonly string[];
   /** Every identifier outside import declarations, as [name, position]. */
   uses: readonly (readonly [string, number])[];
 }

@@ -1,4 +1,5 @@
 import { SyntaxKind } from "typescript/ast";
+import { compareStrings } from "../order.js";
 import { forEachChildSafe, safeText, walk } from "./traverse.js";
 import type { FileHandle, FileSymbols, ImportBinding, Node } from "./types.js";
 
@@ -17,6 +18,7 @@ export function fileSymbols(
   const decls = new Map<string, [number, number][]>();
   const typeNames = new Set<string>();
   const uses: [string, number][] = [];
+  const reexports = new Set<string>();
   let runtimeDecls = 0;
   let typeDecls = 0;
 
@@ -24,6 +26,13 @@ export function fileSymbols(
     if (stmt.kind === SyntaxKind.ImportDeclaration) {
       importBindings(stmt, resolve, bindings);
       return;
+    }
+    if (stmt.kind === SyntaxKind.ExportDeclaration) {
+      forEachChildSafe(stmt, (c) => {
+        if (c.kind !== SyntaxKind.StringLiteral) return;
+        const target = resolve(c);
+        if (target !== undefined && target !== file.path) reexports.add(target);
+      });
     }
     const names = declaredNames(stmt);
     for (const name of names) {
@@ -42,7 +51,14 @@ export function fileSymbols(
     });
   });
 
-  return { bindings, decls, typeNames, typesOnly: typeDecls > 0 && runtimeDecls === 0, uses };
+  return {
+    bindings,
+    decls,
+    typeNames,
+    typesOnly: typeDecls > 0 && runtimeDecls === 0,
+    reexports: [...reexports].sort(compareStrings),
+    uses,
+  };
 }
 
 function importBindings(

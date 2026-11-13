@@ -159,8 +159,9 @@ function afterMove(
     const stay = bs.filter((b) => !names.has(b.exported));
     g.get(x)!.set(H, go.some((b) => !erased(b, input)));
     // A re-export from the owner binds nothing, so `bs` cannot see it. The
-    // edge stays unless every import from the owner left.
-    const reexports = input.reexportsOf(x).includes(owner);
+    // edge stays unless every import from the owner left. A file with code of
+    // its own counts too, or the move would claim to drop an edge it keeps.
+    const reexports = input.symbolsOf(x)?.reexports.includes(owner) ?? false;
     if (stay.length === 0 && !reexports) {
       g.get(x)!.delete(owner);
       removes.push({ from: x, to: owner });
@@ -340,6 +341,8 @@ export function homeFor(
   move: Move,
   input: MoveInput,
   ctx: HomeContext,
+  /** Edges the report already dissolves, as `from\0to`. They are gone too. */
+  omit: ReadonlySet<string> = new Set(),
 ): { home: MoveHome; residual: number } {
   const { owner } = move;
   const s = input.symbolsOf(owner)!;
@@ -358,7 +361,8 @@ export function homeFor(
   for (const u of users) {
     if (u === owner) continue;
     const bs = (input.symbolsOf(u)?.bindings ?? []).filter((b) => b.target === owner);
-    if (bs.every((b) => moved.has(b.exported)) && !input.reexportsOf(u).includes(owner)) dropped.add(u);
+    const reexports = input.symbolsOf(u)?.reexports.includes(owner) ?? false;
+    if (bs.every((b) => moved.has(b.exported)) && !reexports) dropped.add(u);
   }
   const userList = [...users].sort(compareStrings);
   const depList = [...deps].sort(compareStrings);
@@ -380,7 +384,7 @@ export function homeFor(
   if (!ctx.files.has(fresh)) homes.push({ file: fresh, kind: "new" });
 
   const verdicts = homes.map((home) =>
-    judge(home, home.kind === "new", { tangle, owner, users: userList, deps: depList, dropped, isType }, input, ctx),
+    judge(home, home.kind === "new", { tangle, owner, users: userList, deps: depList, dropped, isType, omit }, input, ctx),
   );
   verdicts.sort(
     (a, b) =>
@@ -434,6 +438,7 @@ function judge(
     deps: readonly string[];
     dropped: ReadonlySet<string>;
     isType: boolean;
+    omit: ReadonlySet<string>;
   },
   input: MoveInput,
   ctx: HomeContext,
@@ -449,6 +454,7 @@ function judge(
   const next = (x: string): string[] => {
     const out = new Set(x === H && isNew ? [] : ctx.importsOf(x));
     if (m.dropped.has(x)) out.delete(m.owner);
+    for (const y of [...out]) if (m.omit.has(key(x, y))) out.delete(y);
     if (userSet.has(x)) out.add(H);
     if (x === H) for (const d of deps) out.add(d);
     out.delete(x);
@@ -457,6 +463,7 @@ function judge(
   const prev = (x: string): string[] => {
     const out = new Set(x === H && isNew ? [] : ctx.importersOf(x));
     if (x === m.owner) for (const u of m.dropped) out.delete(u);
+    for (const u of [...out]) if (m.omit.has(key(u, x))) out.delete(u);
     if (x === H) for (const u of users) out.add(u);
     if (depSet.has(x)) out.add(H);
     out.delete(x);
@@ -486,7 +493,10 @@ function judge(
   const restSet = new Set(rest);
   const adjacency = new Map(rest.map((x) => [x, next(x).filter((y) => restSet.has(y)).sort(compareStrings)]));
   const stillCyclic = new Set(inCycle);
-  let left = Math.max(1, inCycle.size);
+  // Only the tangle's files and the home count. The home can already sit in
+  // a cycle of its own, which the move leaves as it was.
+  const members = new Set([...m.tangle, H]);
+  let left = Math.max(1, [...inCycle].filter((x) => members.has(x)).length);
   for (const scc of stronglyConnected(rest, adjacency)) {
     if (scc.length > 1) for (const x of scc) stillCyclic.add(x);
     left = Math.max(left, scc.length);
