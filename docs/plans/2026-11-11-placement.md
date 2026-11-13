@@ -698,6 +698,45 @@ A tangle of directories with no fix now prints a line pointing at
 there only when the home is in another directory, so the search has to score
 homes while it searches. It needs its own judged round.
 
+### Round 6: judging the shipped output, preregistered
+
+This section was committed before any judge saw a packet. Rounds 1 to 5
+judged prototype output. This round judges the lines the core prints, copied
+verbatim from the report, on the same four public repositories.
+
+**Extraction lines.** Every production or type finding whose shipped report
+prints `do not extract into:`, `extract into:` or `across packages:`, at the
+default granularity. At most 15 per repository, picked by a hash of the
+finding id. The judge sees the copies, an excerpt and the shipped lines. The
+judge rates each `do not extract into:` entry as right or wrong to avoid,
+`extract into:` as yes, acceptable or no, and `across packages:` as true or
+false.
+
+**Move lines.** Tangles whose shipped report at file granularity prints a
+`suggested move:`. At most 10 per repository, picked the same way. The judge
+sees the tangle, the moved code and the shipped lines, plus a vague control:
+"a file of your choosing that does not import the owner". The judge rates
+whether `leaves:` is true of the move, and rates each home as yes,
+acceptable or no.
+
+Sonnet judges, about 10 items per packet. A second judge re-rates two
+packets, to check agreement.
+
+**Bar.** All must hold.
+
+1. `do not extract into:` entries are rated right at least 80% of the time.
+   The prototype's flagged homes were rated wrong 88% of the time.
+2. `extract into:` is rated yes or acceptable at least 90% of the time. The
+   prototype's was 56 of 56.
+3. `across packages:` is rated true at least 80% of the time.
+4. `move to:` is rated yes or acceptable at least 70% of the time, and its yes
+   rate beats the vague line's by 15 points. These are the round 5 bars.
+5. `leaves:` is rated true at least 80% of the time.
+
+Any bug a judge's reasoning exposes gets fixed, whether or not a bar holds.
+A missed bar means finding why before the next release, and re-judging the
+items that failed.
+
 ## Out of scope
 
 - **Naming the new file.** The report names a directory and a placeholder.
