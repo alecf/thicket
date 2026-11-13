@@ -301,18 +301,19 @@ L0 · `Block`
 
 ## Module tangle
 
-Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. The dotted arrow is the suggested cut.
+Arrows run importer → imported. The number is import sites — one per symbol per importing file, `export … from` re-exports included; `type` marks an edge erased at compile time and so not a runtime dependency at all. A dotted arrow is an edge the suggested cut or move removes.
 
 ### THK-CYC-aca08f5a · SCC of 2 modules
 
 ```mermaid
 flowchart LR
-  src/alpha.ts -. "cut · 1" .-> src/gamma.ts
+  src/alpha.ts -. "move · 1" .-> src/gamma.ts
   src/gamma.ts -->|"1"| src/alpha.ts
 ```
 
 - **file cycles:** 1 crosses these modules (largest 2 files: `src/alpha.ts` ↔ `src/gamma.ts`).
-- **suggested cut:** `src/alpha.ts` → `src/gamma.ts` — 1 symbol in `src/alpha.ts`
+- **suggested move:** `scale` out of `src/gamma.ts` — 3 lines
+- **move to:** `src/util/shared.ts`, which every user already imports
 - **leaves:** nothing — this breaks the cycle completely.
 
 `````
@@ -459,6 +460,10 @@ Strongly connected components of the module graph with more than one member, fou
 
 Each one comes with a **suggested cut**. Not "there is a cycle here", but "remove this edge and the cycle breaks". thicket verifies that by running Tarjan again on the graph without that edge. When no single edge is enough, the report says so instead of guessing.
 
+**A tangle of files gets a move.** When every member of a tangle is a file, thicket searches for declarations to move instead of edges to cut. A move can remove several edges at once, when several files import one declaration. It can also move one small function off an edge that carries a large class beside it. Each move takes along every helper the moved code uses. A helper left behind makes the new file import the old one, and the cycle comes back.
+
+The report names the declarations, their file and the lines they span. A `move to:` line says where they should go: a file every user already imports, a file the code already imports, a file that uses it, or a new file named after the first declaration. thicket picks the home that closes no new cycle and stays inside packages the users can import. Blind judges preferred the move to the edge cut 19 times to 8, on 30 tangles from four public repositories. They rated the suggested home good 71% of the time, and the file that imports the code good 16% of the time. When no move breaks the tangle, thicket falls back to the edge cut. A tangle of directories keeps the edge search, because moving code between two files of one directory changes no edge between directories.
+
 **Dissolve before you cut.** First thicket looks for edges that are routing rather than dependency. An import that resolves through a re-export depends on the *origin*, not on the file it names. So if nearly everything crossing an edge is forwarded from outside the module being depended on, you can **dissolve** the edge: point the import at the origin and the edge disappears. Nothing else changes, because a re-export is the same binding.
 
 That is a different job from a cut, and a much cheaper one. A cut is a design decision, so you invert a dependency, move code, or agree a layering. A dissolve is a find-and-replace. thicket lists dissolves first, and only suggests a cut for whatever survives them.
@@ -481,7 +486,7 @@ On a real 12-module tangle this found five edges: `lib → app` (72 of 81 import
 
 ### How a tangle is drawn
 
-Each tangle is a **mermaid flowchart** of the whole component. Every edge inside the SCC is drawn, labelled with the number of import sites crossing it, and the suggested cut is a dotted arrow.
+Each tangle is a **mermaid flowchart** of the whole component. Every edge inside the SCC is drawn, labelled with the number of import sites crossing it. Each edge the suggested cut or move removes is a dotted arrow.
 
 A legend above the section says what that number counts: import sites, one per symbol per importing file, re-exports included. It is neither distinct symbols nor files. An agent that assumed it was distinct symbols mismatched every edge of a 26-edge tangle and concluded the tool was broken.
 

@@ -7,6 +7,7 @@ import type { AvoidHome, Placement } from "../graph/placement.js";
 import { FEEDBACK_HEADING, guideText } from "./guide.js";
 import type { ModuleEdge } from "../graph/build.js";
 import type { FileCycles } from "../graph/file-cycles.js";
+import type { Move, MoveHome } from "../graph/moves.js";
 import { typescript } from "../lang/typescript/profile.js";
 import { isTestMajority, type Ranked } from "./rank.js";
 
@@ -75,11 +76,22 @@ export interface CycleFinding {
    */
   bestRejectedResidual?: number;
   /**
+   * Declarations to move out of one file, and where to put them. Set in place
+   * of `cuts` when the tangle's members are files and a move breaks it. See
+   * `searchMoves`.
+   */
+  move?: CycleMove;
+  /**
    * Whether anything in the component is circular at FILE level, which decides
    * whether this finding is a defect or an artifact of how files were grouped.
    * Optional so a caller assembling a finding by hand need not compute it.
    */
   fileCycles?: FileCycles;
+}
+
+/** A move, and the file the moved code should go to. */
+export interface CycleMove extends Move {
+  home: MoveHome;
 }
 
 export interface ReportInput {
@@ -311,7 +323,7 @@ const SECTION_PREAMBLE: Record<string, string> = {
  * verdict is "no single edge is worth cutting", as a promise the report then
  * fails to keep.
  */
-const CUT_LEGEND = " The dotted arrow is the suggested cut.";
+const CUT_LEGEND = " A dotted arrow is an edge the suggested cut or move removes.";
 
 function sectionHeader(section: string, extra = ""): string[] {
   const preamble = SECTION_PREAMBLE[section];
@@ -355,7 +367,7 @@ export function renderReport(input: ReportInput): { markdown: string; shown: num
   const shown = emitted.length;
 
   // Only promise the dotted arrow when a chart actually draws one.
-  const anyCut = input.cycles.some((c) => c.cuts.length > 0);
+  const anyCut = input.cycles.some((c) => c.cuts.length > 0 || (c.move?.removes.length ?? 0) > 0);
   const lines = [...headerLines(input, shown)];
   let section: string | undefined;
   for (const block of emitted) {
@@ -1086,6 +1098,16 @@ function relativize(cycle: CycleFinding, prefix: string): CycleFinding {
     edges: cycle.edges.map(edge),
     dissolves: cycle.dissolves?.map(edge),
     cuts: cycle.cuts.map(edge),
+    ...(cycle.move === undefined
+      ? {}
+      : {
+          move: {
+            ...cycle.move,
+            owner: strip(cycle.move.owner),
+            removes: cycle.move.removes.map((e) => ({ from: strip(e.from), to: strip(e.to) })),
+            home: { ...cycle.move.home, file: strip(cycle.move.home.file) },
+          },
+        }),
   };
 }
 
@@ -1200,6 +1222,7 @@ function runtimeLabel(cycle: CycleFinding): string {
 }
 
 function cutLines(cycle: CycleFinding): string[] {
+  if (cycle.move !== undefined) return moveLines(cycle, cycle.move);
   if (cycle.cuts.length === 0) {
     // Nothing is circular, so there is nothing to cut. Saying "no single edge
     // breaks this cycle" here would assert a cycle the line above just denied.
@@ -1231,6 +1254,12 @@ function cutLines(cycle: CycleFinding): string[] {
     return `- **suggested cut:** \`${cut.from}\` → \`${cut.to}\` — ${symbols}${where}`;
   });
 
+  out.push(leavesLine(cycle));
+  return out;
+}
+
+/** What is left after every fix listed, always. */
+function leavesLine(cycle: CycleFinding): string {
   // What is left, always. A cut that detaches one leaf and a cut that
   // dissolves the tangle read identically without this line.
   //
@@ -1238,12 +1267,52 @@ function cutLines(cycle: CycleFinding): string[] {
   // measured after every fix listed -- a reader would otherwise attribute the
   // whole remainder to the cut alone.
   const after = (cycle.dissolves?.length ?? 0) > 0 ? " after all of the above" : "";
-  out.push(
-    cycle.residual <= 1
-      ? `- **leaves:** nothing${after} — this breaks the cycle completely.`
-      : `- **leaves:**${after} ${cycle.residual} of ${cycle.modules.length} modules still` +
-        ` mutually dependent.`,
-  );
+  return cycle.residual <= 1
+    ? `- **leaves:** nothing${after} — this breaks the cycle completely.`
+    : `- **leaves:**${after} ${cycle.residual} of ${cycle.modules.length} modules still` +
+        ` mutually dependent.`;
+}
+
+/** Names past this many are counted, not listed. */
+const MAX_MOVE_NAMES = 4;
+
+const HOME_KIND: Record<CycleMove["home"]["kind"], string> = {
+  shared: "which every user already imports",
+  dependency: "which the moved code already imports",
+  user: "which uses it",
+  new: "a new file",
+};
+
+/**
+ * The declarations to move, where to put them, and what is left.
+ *
+ * The home line is a suggestion, and judges rated it good 71% of the time.
+ * The move itself is the stronger claim: the search checked that it breaks
+ * or shrinks the tangle.
+ */
+function moveLines(cycle: CycleFinding, move: CycleMove): string[] {
+  const list = (names: readonly string[]) =>
+    names.length <= MAX_MOVE_NAMES
+      ? names.map((n) => `\`${n}\``).join(", ")
+      : `${names.slice(0, MAX_MOVE_NAMES).map((n) => `\`${n}\``).join(", ")} and ${names.length - MAX_MOVE_NAMES} more`;
+  const helpers =
+    move.helpers.length === 0
+      ? ""
+      : ` with ${move.helpers.length === 1 ? "its helper" : "the helpers"} ${list(move.helpers)}`;
+  const lines = `${move.lines} line${move.lines === 1 ? "" : "s"}`;
+  const home =
+    move.home.kind === "new"
+      ? `${HOME_KIND.new}, \`${move.home.file}\``
+      : `\`${move.home.file}\`, ${HOME_KIND[move.home.kind]}`;
+  const out = [
+    `- **suggested move:** ${list(move.seeds)}${helpers} out of \`${move.owner}\` — ${lines}`,
+    `- **move to:** ${home}`,
+    leavesLine(cycle),
+  ];
+  const runtime = move.runtimeResidual;
+  if (cycle.residual > 1 && runtime < cycle.residual) {
+    out[2] += runtime <= 1 ? " None of them is circular at runtime." : ` ${runtime} of them stay circular at runtime.`;
+  }
   return out;
 }
 
@@ -1289,7 +1358,10 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
   // component in (AGENTS.md §1).
   const modules = [...cycle.modules].sort(compareStrings);
   const id = nodeIds(modules);
-  const cuts = new Set(cycle.cuts.map((c) => `${c.from} -> ${c.to}`));
+  const cuts = new Set(
+    [...cycle.cuts, ...(cycle.move?.removes ?? [])].map((c) => `${c.from} -> ${c.to}`),
+  );
+  const cutWord = cycle.move === undefined ? "cut" : "move";
 
   const edges = [...cycle.edges].sort(
     (a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to),
@@ -1311,7 +1383,7 @@ function mermaidCycle(cycle: CycleFinding): string[] | undefined {
       // cycle: the one thing the reader is meant to do with this picture.
       const label = edgeLabel(e);
       return cuts.has(`${e.from} -> ${e.to}`)
-        ? `  ${from} -. "${mermaidLabel(`cut · ${label}`)}" .-> ${to}`
+        ? `  ${from} -. "${mermaidLabel(`${cutWord} · ${label}`)}" .-> ${to}`
         : `  ${from} -->|"${mermaidLabel(label)}"| ${to}`;
     }),
   ];

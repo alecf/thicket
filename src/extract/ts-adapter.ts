@@ -6,8 +6,9 @@ import { hash, initHash } from "../hash.js";
 import { compareStrings, mostFrequent } from "../order.js";
 import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
 import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
+import { fileSymbols } from "./symbols.js";
 import { forEachChildSafe, safeText, walk } from "./traverse.js";
-import type { FileHandle, Node, SourceFileNode } from "./types.js";
+import type { FileHandle, FileSymbols, Node, SourceFileNode } from "./types.js";
 
 const toPosix = (p: string) => (sep === "\\" ? p.split(sep).join("/") : p);
 
@@ -100,6 +101,8 @@ export interface Project {
    * hand. Following the hop is only sound when the file really is a stand-in.
    */
   reexportsOf(file: FileHandle): string[];
+  /** Import bindings, top-level declarations and identifier uses. Memoized. */
+  symbolsOf(file: FileHandle): FileSymbols;
   close(): Promise<void>;
 }
 
@@ -748,6 +751,16 @@ export async function openProject(
     return [...targets].sort(compareStrings);
   }
 
+  const symbolsCache = new Map<string, FileSymbols>();
+  function symbolsOf(file: FileHandle): FileSymbols {
+    let out = symbolsCache.get(file.path);
+    if (out === undefined) {
+      out = fileSymbols(file, (specifier) => resolveImport(file, specifier));
+      symbolsCache.set(file.path, out);
+    }
+    return out;
+  }
+
   return {
     root,
     excluded,
@@ -756,6 +769,7 @@ export async function openProject(
     resolveImport,
     importDetailsOf,
     reexportsOf,
+    symbolsOf,
     /** Resolved import targets, deduped and sorted. Weights live in `importDetailsOf`. */
     importsOf: (file: FileHandle) => importDetailsOf(file).map((d) => d.target),
     close: () => api.close(),

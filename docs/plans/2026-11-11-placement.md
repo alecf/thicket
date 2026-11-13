@@ -666,6 +666,33 @@ Cuts (`move to:`) are not built. The four repositories gave 1 cut in total.
 7. **Judge the shipped output** on the same samples, against the Phase 0
    numbers.
 
+### Moves in the core
+
+The move search and the `move to:` line now run in the core, for tangles whose
+members are files. There is no off switch. Both replace a suggestion and hide
+nothing (AGENTS.md §4b). A module tangle keeps the edge search. The edge search
+also runs when no move breaks a file tangle.
+
+- `src/extract/symbols.ts` reads each file's bindings, declaration spans and
+  identifier uses. `Project.symbolsOf` memoizes it.
+- `src/graph/moves.ts` holds the search and the home ranking.
+- Dissolves apply first. On the four repositories, 4 tangles the prototype
+  moved are fixed by a dissolve alone, or by a smaller move after it.
+- The search adds no measurable time. One repository ran in 28.9 s on main and
+  28.5 s to 28.8 s on the branch.
+
+The home ranking changed. The prototype scored a new file as part of a
+neighbour's module, so most new files looked unsafe and lost. Without that
+artifact, a new file won 40 of 45 judged moves, often in a directory high above
+the code. The core now prefers an existing file that is just as safe. That
+keeps the judged pick on 34 of 45. On the other 11, two blind judges rated the
+new pick good 6 and 7 times, and the prototype's pick good 2 times and once.
+Across all four repositories the core picked an existing file every time.
+
+Of the 101 tangles where both searches found a fix, the edge cut left a smaller
+tangle 8 times. Five of those were judged in round 5. Judges preferred the edge
+cut once, the move twice, and rated two equal. The move keeps priority.
+
 ## Out of scope
 
 - **Naming the new file.** The report names a directory and a placeholder.

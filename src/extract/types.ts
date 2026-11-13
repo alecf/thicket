@@ -23,3 +23,35 @@ export interface FileHandle {
   contentHash: string;
   sourceFile: SourceFileNode;
 }
+
+/** One name a file imports, and where it comes from. */
+export interface ImportBinding {
+  /** The name this file uses. `B` in `import { A as B }`. */
+  local: string;
+  /** The name the target exports. `A` in `import { A as B }`; `default` or `*` for those forms. */
+  exported: string;
+  /** Repo-relative path of the imported file. */
+  target: string;
+  /** Marked `import type` or `{ type A }`. A type imported without the marker is erased too. */
+  typeOnly: boolean;
+}
+
+/**
+ * What a file imports and declares, by name. The cut search reads this to
+ * move single declarations between files.
+ */
+export interface FileSymbols {
+  bindings: readonly ImportBinding[];
+  /**
+   * Top-level declarations: name -> each [start, end) that declares it. A
+   * name can have several spans. A `const` and an `interface` can share a
+   * name, and so can the overloads of one function.
+   */
+  decls: ReadonlyMap<string, readonly (readonly [number, number])[]>;
+  /** Names declared by an interface or a type alias. */
+  typeNames: ReadonlySet<string>;
+  /** True when every top-level declaration is an interface or a type alias. */
+  typesOnly: boolean;
+  /** Every identifier outside import declarations, as [name, position]. */
+  uses: readonly (readonly [string, number])[];
+}
