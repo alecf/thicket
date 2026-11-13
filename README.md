@@ -199,7 +199,7 @@ bun run thicket diff before.json after.json
 | `--budget-tokens <n>` | Hard ceiling on the whole report. Findings drop off the bottom of the ranking, and the report always prints how many it dropped. |
 | `--max-locations <n>` | Cap the files each finding names. By default there is no cap, so an agent can reach every copy. |
 | `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
-| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and the like, which are skipped by default. Matching is on whole path segments, so `src/distance/` counts as source either way. This also stops thicket honouring a file's own `@generated` banner. |
+| `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and the like, which are skipped by default. Matching is on whole path segments, so `src/distance/` counts as source either way. This also stops thicket honouring a file's own `@generated` banner, and skipping files named `*.gen.ts`. |
 | `--no-banner-scan` | Stop reading an `@generated` or "auto-generated" banner as a sign the file is generated. The skipped directories stay skipped. Each opinion has its own off switch. |
 | `--no-near` | Stop adding near copies to a finding. By default a finding also lists fragments of nearly the same shape, and a smaller finding of nearly the same shape is folded into the larger one. |
 | `--include-call-sites` | Also report clusters that are only repeated calls to shared code. thicket leaves these out by default: when the whole fragment is one call, nothing shorter can replace it, so the extraction removes no line. |

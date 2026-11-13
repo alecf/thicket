@@ -215,6 +215,7 @@ describe("sourceFileNames agrees with openProject", () => {
       expect(probed.names.filter((p) => !analyzed.includes(p))).toEqual([
         "dist/emitted.ts",
         "packages/a/.next/validator.ts",
+        "src/routes.gen.ts",
         "src/table.gen.ts",
         "src/widgets/badge.ts",
       ]);

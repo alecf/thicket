@@ -4,7 +4,12 @@ import { SyntaxKind } from "typescript/ast";
 import { API } from "typescript/async";
 import { hash, initHash } from "../hash.js";
 import { compareStrings, mostFrequent } from "../order.js";
-import { hasGeneratedBanner, isExcludedByPattern, isGeneratedPath } from "./exclude.js";
+import {
+  hasGeneratedBanner,
+  isExcludedByPattern,
+  isGeneratedFileName,
+  isGeneratedPath,
+} from "./exclude.js";
 import { TSGO_ENV_VAR, resolveTsgo } from "./tsgo-path.js";
 import { fileSymbols } from "./symbols.js";
 import { forEachChildSafe, safeText, walk } from "./traverse.js";
@@ -421,6 +426,8 @@ export interface OpenProjectOptions {
 /** What `openProject` dropped, by the rule that dropped it. */
 export interface ExcludedCounts {
   directory: number;
+  /** Files named `*.gen.ts`. */
+  name: number;
   banner: number;
   pattern: number;
 }
@@ -501,7 +508,7 @@ export async function openProject(
   // Dedupe on absolute path; the unit of analysis is the FILE, not (project,file).
   const seen = new Set<string>();
   const excludePatterns = opts.exclude ?? [];
-  const excluded: ExcludedCounts = { directory: 0, banner: 0, pattern: 0 };
+  const excluded: ExcludedCounts = { directory: 0, name: 0, banner: 0, pattern: 0 };
   const files: FileHandle[] = [];
   const byRel = new Map<string, FileHandle>();
   // `Path` values from the checker are CASE-CANONICALIZED (lowercased) while
@@ -539,6 +546,12 @@ export async function openProject(
       // Costs nothing extra: the text is already in hand for the content hash.
       if (!opts.includeGenerated && opts.bannerScan !== false && hasGeneratedBanner(sf.text)) {
         excluded.banner += 1;
+        continue;
+      }
+      // After the banner, so a `.gen.ts` file that says what it is counts
+      // under the banner.
+      if (!opts.includeGenerated && isGeneratedFileName(relPath)) {
+        excluded.name += 1;
         continue;
       }
       const handle: FileHandle = {
