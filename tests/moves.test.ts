@@ -38,6 +38,14 @@ describe("symbolsOf", () => {
     ]);
   });
 
+  it("names the package behind each import that resolves to no file", () => {
+    // A relative import resolves to a file and is a binding. A bare one that
+    // resolves to none is a package. `fs` and `node:path` are Node's own.
+    const s = symbols("src/ext/core/owner.ts");
+    expect(s.packageBindings).toEqual([{ local: "pad", pkg: "left-pad" }]);
+    expect(s.bindings.map((b) => b.local)).toEqual(["render", "base", "fmt"]);
+  });
+
   it("marks a file of interfaces and aliases only as types-only", () => {
     expect(symbols("src/point.ts").typesOnly).toBe(false);
     expect(symbols("src/point.ts").typeNames.has("Point")).toBe(true);
@@ -111,6 +119,16 @@ describe("move search", () => {
     const cycle = json.cycles.find((c) => c.modules.includes("src/mixed/owner.ts"))!;
     expect(cycle.move).toBeUndefined();
     expect(cycle.cuts).toHaveLength(1);
+  });
+
+  it("skips a home whose package cannot load a package the code imports", async () => {
+    // `view.ts` adds no import as a home, and it wins without the check. Its
+    // package does not list `left-pad`, and none of its files import it. A
+    // judge rated such a home wrong in round 6.
+    const { json } = await report();
+    const cycle = json.cycles.find((c) => c.modules.includes("src/ext/core/owner.ts"))!;
+    expect(cycle.move?.seeds).toEqual(["stamp"]);
+    expect(cycle.move?.home).toEqual({ file: "src/ext/core/base.ts", kind: "shared" });
   });
 
   it("falls back to an edge cut when no move breaks the cycle", async () => {

@@ -321,7 +321,8 @@ interface Verdict extends MoveHome {
  * caught two `leaves:` lines that overstated the cycle this way.
  *
  * Every candidate is scored by what the move does to the file graph with the
- * code there: whether every user's package can import it, whether it closes
+ * code there: whether every user's package can import it, whether its
+ * package can load the npm packages the code imports, whether it closes
  * or grows a cycle, and how many tangle files it frees. Among equally good
  * homes an existing file wins over a new one. Then the fewest new imports
  * between existing files, then a file that every user already imports, then
@@ -356,6 +357,10 @@ export function homeFor(
   }
   if (s.uses.some(([n, at]) => moved.has(n) && !within(at, spans))) users.add(owner);
   const deps = new Set(needs(s, spans).imports.map((b) => b.target));
+  const inside = new Set(s.uses.filter(([, at]) => within(at, spans)).map(([n]) => n));
+  const npm = [...new Set(s.packageBindings.filter((b) => inside.has(b.local)).map((b) => b.pkg))].sort(
+    compareStrings,
+  );
   deps.delete(owner);
   const dropped = new Set<string>();
   for (const u of users) {
@@ -384,7 +389,7 @@ export function homeFor(
   if (!ctx.files.has(fresh)) homes.push({ file: fresh, kind: "new" });
 
   const verdicts = homes.map((home) =>
-    judge(home, home.kind === "new", { tangle, owner, users: userList, deps: depList, dropped, isType, omit }, input, ctx),
+    judge(home, home.kind === "new", { tangle, owner, users: userList, deps: depList, npm, dropped, isType, omit }, input, ctx),
   );
   verdicts.sort(
     (a, b) =>
@@ -436,6 +441,8 @@ function judge(
     owner: string;
     users: readonly string[];
     deps: readonly string[];
+    /** npm packages the moved code imports. */
+    npm: readonly string[];
     dropped: ReadonlySet<string>;
     isType: boolean;
     omit: ReadonlySet<string>;
@@ -513,7 +520,9 @@ function judge(
   return {
     ...home,
     reachable:
-      users.every((u) => p.canImport(p.of(u), homePkg)) && deps.every((d) => p.canImport(homePkg, p.of(d))),
+      users.every((u) => p.canImport(p.of(u), homePkg)) &&
+      deps.every((d) => p.canImport(homePkg, p.of(d))) &&
+      m.npm.every((n) => p.canUse(homePkg, n)),
     safe,
     misfit: !m.isType && !isNew && (input.symbolsOf(H)?.typesOnly ?? false),
     frees,

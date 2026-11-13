@@ -29,6 +29,12 @@ export interface Packages {
    * workspaces, where an import resolves with no `package.json` entry.
    */
   canImport(from: string, to: string): boolean;
+  /**
+   * Whether code in package `pkg` can import the npm package `name`. True
+   * when its package.json lists it, or when one of its files already imports
+   * it. The second covers hoisted workspaces and path aliases.
+   */
+  canUse(pkg: string, name: string): boolean;
 }
 
 const parentOf = (dir: string) => {
@@ -44,6 +50,8 @@ export function buildPackages(
   files: readonly string[],
   importsOf: (path: string) => readonly string[],
   read: (dir: string) => PackageManifest | undefined,
+  /** The npm packages a file imports by name. */
+  packageImportsOf: (path: string) => readonly string[] = () => [],
 ): Packages {
   const manifests = new Map<string, PackageManifest | undefined>();
   const manifest = (dir: string) => {
@@ -84,12 +92,26 @@ export function buildPackages(
     }
   }
 
+  // npm packages each package's files import, built per package on first use.
+  const used = new Map<string, Set<string>>();
+  const usedBy = (pkg: string) => {
+    let names = used.get(pkg);
+    if (names === undefined) {
+      names = new Set(files.filter((f) => of(f) === pkg).flatMap((f) => packageImportsOf(f)));
+      used.set(pkg, names);
+    }
+    return names;
+  };
+
   return {
     of,
     canImport(from, to) {
       if (from === to || crossed.has(`${from}\u0000${to}`)) return true;
       const name = manifest(to)?.name;
       return name !== undefined && (manifest(from)?.deps.includes(name) ?? false);
+    },
+    canUse(pkg, name) {
+      return (manifest(pkg)?.deps.includes(name) ?? false) || usedBy(pkg).has(name);
     },
   };
 }
