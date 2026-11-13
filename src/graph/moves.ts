@@ -305,13 +305,19 @@ interface Verdict extends MoveHome {
   safe: boolean;
   misfit: boolean;
   frees: number;
+  /** The largest cycle left among the tangle's files and the home. */
+  left: number;
   edgesInCycle: number;
   newDeps: number;
   added: number;
 }
 
 /**
- * Where the moved code should go.
+ * Where the moved code should go, and the largest cycle left with it there.
+ *
+ * The search measures a move against a new file. An existing home can leave
+ * less, because it may already hold what the code needs. Round 6 judges
+ * caught two `leaves:` lines that overstated the cycle this way.
  *
  * Every candidate is scored by what the move does to the file graph with the
  * code there: whether every user's package can import it, whether it closes
@@ -334,7 +340,7 @@ export function homeFor(
   move: Move,
   input: MoveInput,
   ctx: HomeContext,
-): MoveHome {
+): { home: MoveHome; residual: number } {
   const { owner } = move;
   const s = input.symbolsOf(owner)!;
   const moved = new Set([...move.seeds, ...move.helpers]);
@@ -367,7 +373,9 @@ export function homeFor(
   candidates.sort(
     (a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || compareStrings(a.file, b.file),
   );
-  const homes = candidates.slice(0, MAX_MOVE_HOMES);
+  // A file that only forwards is a barrel, not a home. Judges rejected both
+  // barrels the ranking picked in round 6.
+  const homes = candidates.filter((c) => input.reexportsOf(c.file).length === 0).slice(0, MAX_MOVE_HOMES);
   const fresh = newFile(owner, move.seeds[0]!, userList, ctx);
   if (!ctx.files.has(fresh)) homes.push({ file: fresh, kind: "new" });
 
@@ -388,7 +396,8 @@ export function homeFor(
       compareStrings(a.file, b.file),
   );
   const best = verdicts[0];
-  return best === undefined ? { file: fresh, kind: "new" } : { file: best.file, kind: best.kind };
+  if (best === undefined) return { home: { file: fresh, kind: "new" }, residual: move.residual };
+  return { home: { file: best.file, kind: best.kind }, residual: best.left };
 }
 
 /**
@@ -477,8 +486,10 @@ function judge(
   const restSet = new Set(rest);
   const adjacency = new Map(rest.map((x) => [x, next(x).filter((y) => restSet.has(y)).sort(compareStrings)]));
   const stillCyclic = new Set(inCycle);
+  let left = Math.max(1, inCycle.size);
   for (const scc of stronglyConnected(rest, adjacency)) {
     if (scc.length > 1) for (const x of scc) stillCyclic.add(x);
+    left = Math.max(left, scc.length);
   }
   const frees = m.tangle.filter((x) => !stillCyclic.has(x)).length;
 
@@ -496,6 +507,7 @@ function judge(
     safe,
     misfit: !m.isType && !isNew && (input.symbolsOf(H)?.typesOnly ?? false),
     frees,
+    left,
     edgesInCycle,
     newDeps: isNew ? 0 : added,
     added,

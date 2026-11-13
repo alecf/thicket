@@ -737,6 +737,40 @@ Any bug a judge's reasoning exposes gets fixed, whether or not a bar holds.
 A missed bar means finding why before the next release, and re-judging the
 items that failed.
 
+### Round 6 results
+
+All five bars held. 100 items: 60 findings and 40 moves, in 10 packets. A
+second judge re-rated two packets and agreed on 37 of 39 ratings.
+
+| Bar | Result | Needed |
+|---|---|---|
+| `do not extract into:` entries rated right | 51 of 53, 96% | 80% |
+| `extract into:` rated yes or acceptable | 24 of 24 | 90% |
+| `across packages:` rated true | 17 of 17 | 80% |
+| `move to:` rated yes or acceptable | 36 of 40, 90% | 70% |
+| `move to:` yes rate against the vague line | 32% against 8% | 15 points |
+| `leaves:` rated true | 38 of 40, 95% | 80% |
+
+The judges' reasons exposed two bugs. Both are fixed.
+
+- **`leaves:` measured a new file, not the home.** The search scores a move
+  against a new file. The home can be an existing file that already holds what
+  the code needs, and then less is left. Both false `leaves:` lines said 2
+  files were left where nothing was. The home ranking now reports the cycle
+  left at the home it picks.
+- **Barrels were picked as homes.** Two of the four rejected homes were files
+  that only re-export. Code there makes every forwarded file a dependency. A
+  file that only forwards is no longer a candidate.
+
+Not fixed, each seen once:
+
+- A home in a vendored file marked "DO NOT modify, COPIED from". It carries
+  no generator banner, so the scan misses it.
+- A home in another package that lacks the code's external dependency.
+- Two `do not extract into:` entries rated wrong. One named a cycle the judge
+  could not find. The other gave a package reason the judge read as false,
+  where a workspace package already depends on the other.
+
 ## Out of scope
 
 - **Naming the new file.** The report names a directory and a placeholder.
