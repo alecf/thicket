@@ -832,6 +832,7 @@ export async function runReport(
         residual,
         bestRejectedResidual,
         ...(move === undefined ? {} : { move }),
+        ...(ofFiles ? {} : { movesAtFileGranularity: true }),
         fileCycles: cycles,
       };
     });

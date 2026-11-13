@@ -693,6 +693,11 @@ Of the 101 tangles where both searches found a fix, the edge cut left a smaller
 tangle 8 times. Five of those were judged in round 5. Judges preferred the edge
 cut once, the move twice, and rated two equal. The move keeps priority.
 
+A tangle of directories with no fix now prints a line pointing at
+`--granularity file`. Next is a move search for those tangles. A move counts
+there only when the home is in another directory, so the search has to score
+homes while it searches. It needs its own judged round.
+
 ## Out of scope
 
 - **Naming the new file.** The report names a directory and a placeholder.

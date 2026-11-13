@@ -82,6 +82,12 @@ export interface CycleFinding {
    */
   move?: CycleMove;
   /**
+   * True when the members are directories, so the move search did not run.
+   * A tangle with no fix then points the reader at `--granularity file`,
+   * where the file cycles under it get the move search.
+   */
+  movesAtFileGranularity?: boolean;
+  /**
    * Whether anything in the component is circular at FILE level, which decides
    * whether this finding is a defect or an artifact of how files were grouped.
    * Optional so a caller assembling a finding by hand need not compute it.
@@ -1227,21 +1233,7 @@ function cutLines(cycle: CycleFinding): string[] {
     // Nothing is circular, so there is nothing to cut. Saying "no single edge
     // breaks this cycle" here would assert a cycle the line above just denied.
     if (cycle.fileCycles?.crossing.count === 0) return [];
-    const best = cycle.bestRejectedResidual;
-    // Two different facts, and they need different sentences. Claiming nothing
-    // helps, when one edge does shrink the tangle by a module, is the kind of
-    // overstatement a reader checks once and then stops trusting.
-    if (best !== undefined && best < cycle.modules.length) {
-      return [
-        `- **no single edge is worth cutting** — the best available removes` +
-          ` ${cycle.modules.length - best} of ${cycle.modules.length} modules and leaves` +
-          ` the other ${best} mutually dependent.`,
-      ];
-    }
-    return [
-      `- **no single edge breaks this cycle** — all ${cycle.modules.length} modules stay` +
-        ` mutually dependent whichever runtime edge you remove.`,
-    ];
+    return [...noCutLines(cycle), ...fileGranularityHint(cycle)];
   }
 
   const out = cycle.cuts.map((cut) => {
@@ -1256,6 +1248,39 @@ function cutLines(cycle: CycleFinding): string[] {
 
   out.push(leavesLine(cycle));
   return out;
+}
+
+function noCutLines(cycle: CycleFinding): string[] {
+  const best = cycle.bestRejectedResidual;
+  // Two different facts, and they need different sentences. Claiming nothing
+  // helps, when one edge does shrink the tangle by a module, is the kind of
+  // overstatement a reader checks once and then stops trusting.
+  if (best !== undefined && best < cycle.modules.length) {
+    return [
+      `- **no single edge is worth cutting** — the best available removes` +
+        ` ${cycle.modules.length - best} of ${cycle.modules.length} modules and leaves` +
+        ` the other ${best} mutually dependent.`,
+    ];
+  }
+  return [
+    `- **no single edge breaks this cycle** — all ${cycle.modules.length} modules stay` +
+      ` mutually dependent whichever runtime edge you remove.`,
+  ];
+}
+
+/**
+ * Where to look next when a tangle of directories has no fix.
+ *
+ * Tangles of directories are large on big repositories, and a single edge
+ * rarely leaves two thirds of one standing. The file cycles under them are
+ * where a move can work, and the move search runs only on files.
+ */
+function fileGranularityHint(cycle: CycleFinding): string[] {
+  if (cycle.movesAtFileGranularity !== true) return [];
+  return [
+    "- **at file granularity:** run with `--granularity file` to search the file cycles" +
+      " under this tangle for declarations to move.",
+  ];
 }
 
 /** What is left after every fix listed, always. */
