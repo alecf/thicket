@@ -291,6 +291,8 @@ Candidate granularities, coarse to fine: tsconfig project → `package.json` →
 
 This avoids the failure mode the data exposes at both ends: coarse boundaries produce a 1-node graph, file granularity produces a large DAG with no cycles at all.
 
+**Superseded for tangles.** The default is now `file`. File granularity does find cycles at scale (AGENTS.md §4). On four public repositories the default above found 11 tangles of directories, and a move or cut fixed 1 of them. At file granularity the same repositories gave 40 tangles each, and 109 of the 160 got a move. Duplication ranking still groups by this rule, because its weights were fitted on it. See `docs/plans/2026-11-11-placement.md`.
+
 ### 7.2 Graph construction
 
 - **Nodes:** files grouped per §7.1.

@@ -108,7 +108,7 @@ report N+1 to see whether your work landed.
 | field | what it means |
 |---|---|
 | `config 97d8d00b` | Hash of the settings used. Two reports with different hashes were produced differently and are **not** comparable. |
-| `granularity: dir:3 (52 modules)` | How files were grouped into "modules" for the tangle analysis — here, by the first 3 path segments. |
+| `granularity: dir:3 (52 modules)` | How files were grouped into "modules" for the tangle analysis. Here it is by the first 3 path segments. The default is `file`, where each file is a module. |
 | `analyzed` | Source files inside the TypeScript program, and what fraction of the tree that is. |
 | `duplicated mass` | Redundant AST nodes. Clusters overlap, so this **double-counts** — it is a trend number for comparing runs, not a fraction of anything. |
 | `duplicated coverage` | Share of source bytes covered by at least one redundant occurrence. This is the honest "how much of the codebase repeats" number. |

@@ -97,6 +97,13 @@ export interface RunOptions {
   minNodes?: number;
   /** Smallest fragment worth reporting, in lines. See `ExtractOptions`. */
   minLines?: number;
+  /**
+   * How files are grouped into modules for the dependency graph: the tangles,
+   * propagation cost and the header. Defaults to `file`, where a tangle is a
+   * set of files and the move search applies. Duplication ranking and
+   * placement always group by `auto`, because their weights were fitted and
+   * judged on that grouping.
+   */
   granularity?: "auto" | "file" | "dir" | number;
   budgetTokens?: number;
   /** Cap on findings emitted per section, before the token budget applies. */
@@ -566,7 +573,7 @@ export async function runReport(
   await initHash();
   const minNodes = opts.minNodes ?? DEFAULT_MIN_NODES;
   const minLines = opts.minLines ?? DEFAULT_MIN_LINES;
-  const granularity = opts.granularity ?? "auto";
+  const granularity = opts.granularity ?? "file";
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const includeGenerated = opts.includeGenerated ?? false;
   const bannerScan = opts.bannerScan ?? true;
@@ -695,8 +702,7 @@ export async function runReport(
     const wsDirs = discovery.workspaceDirs
       .map((abs) => toPosix(relative(project.root, abs)))
       .filter((d) => d !== ".." && !d.startsWith("../"));
-    const graph = buildModuleGraph(project, {
-      granularity,
+    const graphOptions = {
       types,
       ...(wsDirs.length === 0
         ? {}
@@ -708,7 +714,15 @@ export async function runReport(
               repoFileCount: scope.onDisk,
             },
           }),
-    });
+    };
+    const graph = buildModuleGraph(project, { ...graphOptions, granularity });
+    // Duplication ranking and placement group files by `auto` whatever the
+    // tangle granularity is. Their spread weights were fitted on judged
+    // findings under that grouping. At file granularity every multi-file copy
+    // would count as spanning modules, which changed 7 to 15 of 45 findings
+    // on each of four public repositories.
+    const grouping =
+      granularity === "auto" ? graph : buildModuleGraph(project, { ...graphOptions, granularity: "auto" });
     const fragments = await collectFragments(project, { minNodes, minLines, cache });
     const exact = subsume(clusterFragments(fragments));
     // After `subsume`, so a near copy is matched against what the report
@@ -717,7 +731,7 @@ export async function runReport(
       ? attachNear(exact, fragments, {
           // The score ignores near copies, so ranking the exact clusters
           // gives the order the report will print them in.
-          order: rankClusters(exact, graph.moduleOf, { fileConventions }).map((r) => r.cluster),
+          order: rankClusters(exact, grouping.moduleOf, { fileConventions }).map((r) => r.cluster),
           isTestFinding: isTestMajority,
         })
       : exact;
@@ -725,7 +739,7 @@ export async function runReport(
     // but not what the report speaks. Swap in the THK-DUP finding id for the
     // emitted copy so Markdown and the JSON sidecar name findings identically
     // (PRD §9.1); the shape hash survives as `shapeHash` in the JSON.
-    const ranked = rankClusters(clusters, graph.moduleOf, { fileConventions }).map((r) => ({
+    const ranked = rankClusters(clusters, grouping.moduleOf, { fileConventions }).map((r) => ({
       ...r,
       cluster: { ...r.cluster, id: findingId("DUP", r.cluster.id) },
       shapeHash: r.cluster.id,
@@ -903,9 +917,9 @@ export async function runReport(
       homes = placementGraph({
         files: paths,
         importsOf: importsOfPath,
-        moduleOf: (p) => graph.moduleOf[p],
-        modules: graph.modules,
-        moduleAdjacency: graph.adjacency,
+        moduleOf: (p) => grouping.moduleOf[p],
+        modules: grouping.modules,
+        moduleAdjacency: grouping.adjacency,
         packages: packagesOf(),
       });
       return homes;

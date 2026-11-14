@@ -231,10 +231,12 @@ describe("runReport over a workspace root", () => {
    * the workspace list at all, and the same repository size either way.
    */
   it("targets a module size per workspace, unchanged by a filter", async () => {
-    const wide = await runReport({ dir: filterWorkspacesRoot(), cache: false });
+    // `auto` is what sizes modules per workspace. The default is `file`.
+    const wide = await runReport({ dir: filterWorkspacesRoot(), granularity: "auto", cache: false });
     const narrow = await runReport({
       dir: filterWorkspacesRoot(),
       filter: ["@filt/alpha"],
+      granularity: "auto",
       cache: false,
     });
     expect(wide.json.granularity).toBe("workspace");
@@ -273,8 +275,8 @@ describe("runReport over a workspace root", () => {
     for (let i = 0; i < 12; i++) files[`pkg/big/src/f${i}.ts`] = `export const f${i} = ${i};\n`;
     const root = scratchTree(files);
 
-    const wide = await runReport({ dir: root, cache: false });
-    const narrow = await runReport({ dir: root, filter: ["@s/small"], cache: false });
+    const wide = await runReport({ dir: root, granularity: "auto", cache: false });
+    const narrow = await runReport({ dir: root, filter: ["@s/small"], granularity: "auto", cache: false });
     expect(wide.json.fileCount).toBe(14);
     expect(narrow.json.fileCount).toBe(2);
     // `pkg/big` and `pkg/small`, then `pkg/small` alone -- still one module.
@@ -317,7 +319,7 @@ describe("runReport over a workspace root", () => {
     const cwd = process.cwd();
     process.chdir(root);
     try {
-      const { json } = await runReport({ cache: false });
+      const { json } = await runReport({ granularity: "auto", cache: false });
       expect(json.fileCount).toBe(2);
       expect(json.granularity).toBe("dir:1");
     } finally {
