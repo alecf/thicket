@@ -694,9 +694,8 @@ tangle 8 times. Five of those were judged in round 5. Judges preferred the edge
 cut once, the move twice, and rated two equal. The move keeps priority.
 
 A tangle of directories with no fix now prints a line pointing at
-`--granularity file`. Next is a move search for those tangles. A move counts
-there only when the home is in another directory, so the search has to score
-homes while it searches. It needs its own judged round.
+`--granularity file`. A move search for those tangles was planned next. It
+was measured first and dropped. See "Moves for tangles of directories" below.
 
 ### Round 6: judging the shipped output, preregistered
 
@@ -811,6 +810,32 @@ depend on zod". Its package.json does not list zod, but three of its files
 import it, so the package can load it. The judge's other objection was that
 the home is a stub. No structural signal says so.
 
+## Moves for tangles of directories
+
+This search was not built. An upper bound shows it has nothing to find on the
+four repositories.
+
+The bound removes every edge from another module into one file, for each file
+in the tangle in turn. No single move removes more, even before its home adds
+edges back. A move must leave at most two thirds of the tangle, or break it.
+
+The default granularity found 11 tangles of directories.
+
+| Repository | Modules per tangle | Best the bound leaves |
+|---|---|---|
+| Public 1 | 2, 8, 88 | 2, 6, 87 |
+| Public 2 | 31, 2 | 30, 1 |
+| Public 3 | 3, 71, 2, 9, 11 | 1, 56, 2, 8, 10 |
+| Public 4 | 12 | 11 |
+
+- 9 of 11 fail the bound. A real search can only do worse.
+- The 2 that pass have no file cycle under them. The report calls those a
+  product of grouping and proposes no fix, on purpose.
+- The tangles are dense. The 31-module tangle has 19,829 file edges across
+  its modules, and the 88-module tangle has 8,060.
+
+At file granularity the same repositories get 109 moves. That result led to
+the next change: file granularity is now the default.
 ## The default granularity is now file
 
 The default was `auto`, which groups files by directory. On the four
