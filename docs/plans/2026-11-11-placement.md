@@ -811,6 +811,43 @@ depend on zod". Its package.json does not list zod, but three of its files
 import it, so the package can load it. The judge's other objection was that
 the home is a stub. No structural signal says so.
 
+## The default granularity is now file
+
+The default was `auto`, which groups files by directory. On the four
+repositories it found 11 tangles of directories, and a cut fixed 1 of them.
+At `file`, each repository reaches the 40-tangle cap, and 109 of those 160
+tangles get a move.
+
+Granularity also set the grouping for duplication ranking. A copy that spans
+modules weighs 2.5, and one spread over files of one module weighs 1.4. At
+`file`, every multi-file copy spans modules, which changed 7 to 15 of 45
+duplication findings per repository. So the two uses are now separate.
+`--granularity` sets the dependency graph, which covers the tangles,
+propagation cost and the header. Duplication ranking and placement always
+group by `auto`. Their output is byte-identical to the old default on all
+four repositories.
+
+Blind judges compared the two tangle sections, one judge per order on each
+repository. The brief asked which section to hand an agent that must reduce
+the cycles.
+
+| Measure | `auto` | `file` |
+|---|---|---|
+| Picked as better | 0 of 8 | 8 of 8 |
+| Mean usefulness, 0 to 3 | 0.9 | 3.0 |
+
+What judges said only the `auto` section had:
+
+- A directory view of how large areas depend on each other.
+- A verdict that a directory tangle is a product of grouping.
+- On two repositories, one cross-directory dissolve.
+
+None of the judges thought these outweighed the file-level fixes.
+
+An edge with weight 0 appears often at `file`: 134 times on one repository.
+It is a dynamic `import()` or a side-effect import, which binds no name. This
+predates the change. It is more visible now, and it is left for its own fix.
+
 ## Out of scope
 
 - **Naming the new file.** The report names a directory and a placeholder.

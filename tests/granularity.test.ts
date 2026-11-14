@@ -5,7 +5,8 @@ import {
   workspaceGroups,
   type Granularity,
 } from "../src/graph/granularity.js";
-import { ORDERING_PROBE } from "./helpers.js";
+import { runReport } from "../src/run.js";
+import { callsiteConfig, ORDERING_PROBE } from "./helpers.js";
 
 describe("selectGranularity", () => {
   it("targets sqrt(file count) modules", () => {
@@ -230,5 +231,18 @@ describe("workspaceGroups", () => {
       { dir: "pkg/a", paths: ["pkg/a/src/a.ts"] },
       { dir: "", paths: ["scripts/root.ts"] },
     ]);
+  });
+});
+
+describe("the default granularity", () => {
+  it("builds tangles from files and ranks duplication by the auto grouping", async () => {
+    // `auto` groups this fixture by directory, so its copies share a module.
+    // Grouped by file, they would span modules and score higher.
+    const byDefault = await runReport({ config: callsiteConfig(), cache: false });
+    const auto = await runReport({ config: callsiteConfig(), granularity: "auto", cache: false });
+    expect(byDefault.json.granularity).toBe("file");
+    expect(auto.json.granularity).toBe("dir:1");
+    expect(byDefault.json.duplication.length).toBeGreaterThan(0);
+    expect(byDefault.json.duplication.map((d) => d.score)).toEqual(auto.json.duplication.map((d) => d.score));
   });
 });

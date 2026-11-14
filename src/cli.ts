@@ -45,7 +45,7 @@ Usage: thicket [dir] [options]
   --min-lines <n>        override the depth preset's minimum fragment size, in lines
   --budget-tokens <n>    hard ceiling on report size; truncation is always stated
   --max-locations <n>    cap the files each finding names (default: name them all)
-  --granularity <g>      auto | dir | file | <depth> (default auto)
+  --granularity <g>      file | auto | dir | <depth> (default file)
                          dir = every directory is a module, at its own depth
   --include-generated    also analyze generated dirs and banner-marked files
   --exclude <glob>       skip files matching this glob; repeatable
@@ -373,8 +373,8 @@ function parseNumber(raw: string | undefined, flag: string): number | undefined 
 function parseGranularity(
   raw: string | undefined,
 ): "auto" | "file" | "dir" | number | undefined {
-  if (raw === undefined || raw === "auto") return "auto";
-  if (raw === "file") return "file";
+  if (raw === "auto") return "auto";
+  if (raw === undefined || raw === "file") return "file";
   if (raw === "dir") return "dir";
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : undefined;

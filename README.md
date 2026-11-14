@@ -198,7 +198,7 @@ bun run thicket diff before.json after.json
 | `--min-lines <n>` | Set the smallest fragment size in lines, overriding `--depth`. The node count does not control this, because 15 AST nodes can fit on one line. Extracting a one-line shape always costs more than it saves. |
 | `--budget-tokens <n>` | Hard ceiling on the whole report. Findings drop off the bottom of the ranking, and the report always prints how many it dropped. |
 | `--max-locations <n>` | Cap the files each finding names. By default there is no cap, so an agent can reach every copy. |
-| `--granularity <g>` | How files are grouped into modules for the graph: `auto` (default), `file`, or a directory depth like `2`. |
+| `--granularity <g>` | How files are grouped into modules for the dependency graph: `file` (default), `auto`, `dir`, or a directory depth like `2`. At `file`, a tangle is a set of files, and thicket can suggest which declarations to move. `auto` groups by directory, sized to the repo. Duplication ranking always groups by `auto`. |
 | `--include-generated` | Also analyze `dist/`, `build/`, `.next/` and the like, which are skipped by default. Matching is on whole path segments, so `src/distance/` counts as source either way. This also stops thicket honouring a file's own `@generated` banner, and skipping files named `*.gen.ts`. |
 | `--no-banner-scan` | Stop reading an `@generated` or "auto-generated" banner as a sign the file is generated. The skipped directories stay skipped. Each opinion has its own off switch. |
 | `--no-near` | Stop adding near copies to a finding. By default a finding also lists fragments of nearly the same shape, and a smaller finding of nearly the same shape is folded into the larger one. |
@@ -240,7 +240,7 @@ Pointed at this repository's own test fixture, `bun run thicket --config tests/f
 `````markdown
 # thicket report
 
-thicket 0.1.0 · config 7434eb66 · 4 files / 56 LOC · granularity: file (4 modules)
+thicket 0.1.0 · config d5560076 · 4 files / 56 LOC · granularity: file (4 modules)
 
 **How to read this report:** https://alecf.github.io/thicket/report-guide.md
 
@@ -516,7 +516,7 @@ The **excerpt scales with the size of one copy**: 60% of its lines, never fewer 
 
 **Duplication.** Every AST node above a size threshold becomes a fragment, so the granularities nest on their own. A function is a fragment, the loop inside it is a fragment, and the conditional inside that is a fragment. thicket fingerprints each fragment at two levels: **L0** matches exactly, and **L1** α-renames identifiers so that renamed variables still match. Fragments with identical hashes are clustered with union-find.
 
-**Module tangle.** thicket resolves imports through the type checker, groups files into modules at a granularity it picks for the repo, then looks for cycles and propagation cost in the resulting graph.
+**Module tangle.** thicket resolves imports through the type checker, builds the graph of files, then looks for cycles and propagation cost in it. With `--granularity auto` it groups files into directories first, at a size it picks for the repo.
 
 The interesting result is the **join** between the two. *Modules A, B and C form a cycle and share 4 duplicated clusters. Extract the shared logic into a leaf module and the cycle dissolves on its own.* Neither analysis finds that alone.
 
