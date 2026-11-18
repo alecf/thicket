@@ -5,4 +5,4 @@
  * Kept in source rather than read from package.json so `dist/` needs no
  * runtime file lookup relative to itself.
  */
-export const VERSION = "0.2.0"; // x-release-please-version
+export const VERSION = "0.3.0"; // x-release-please-version

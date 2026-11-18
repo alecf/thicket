@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/alecf/thicket/compare/v0.2.0...v0.3.0) (2026-11-14)
+
+
+### Features
+
+* build tangles from files by default ([#44](https://github.com/alecf/thicket/issues/44)) ([d0d10fa](https://github.com/alecf/thicket/commit/d0d10fa0458f04df8815a01f582aa01ea64f6501))
+* move to the TypeScript 7.1 beta API ([#35](https://github.com/alecf/thicket/issues/35)) ([1cfda3d](https://github.com/alecf/thicket/commit/1cfda3dd706fdbdb5f4f421e65972fb287865b45))
+* say where a finding's shared version should and should not go ([#40](https://github.com/alecf/thicket/issues/40)) ([5975f05](https://github.com/alecf/thicket/commit/5975f0558b122d8ffc3987f9b0d7a1bda64f975d))
+* suggest a move, and where it goes, for a tangle of files ([#41](https://github.com/alecf/thicket/issues/41)) ([edc7297](https://github.com/alecf/thicket/commit/edc7297343524682d87bed2b85fd30376926cdef))
+
+
+### Bug Fixes
+
+* skip a move home whose package cannot load the code's npm packages ([#42](https://github.com/alecf/thicket/issues/42)) ([f57f51a](https://github.com/alecf/thicket/commit/f57f51a21dfedc33b760c0f4182fc5c08be69f74))
+
 ## [0.2.0](https://github.com/alecf/thicket/compare/v0.1.0...v0.2.0) (2026-11-04)
 
 
